@@ -15,8 +15,12 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Text.FliPpr
-  build-depends:       base >= 4.7 && < 5
+  exposed-modules:     Text.FliPpr, 
+                       Text.FliPpr.Type, 
+                       Text.FliPpr.Internal.Type, 
+                       Text.FliPpr.Internal.PrettyPrinting
+  build-depends:       base >= 4.7 && < 5, 
+                       transformers >= 0.5 && < 0.6
   default-language:    Haskell2010
 
 source-repository head
