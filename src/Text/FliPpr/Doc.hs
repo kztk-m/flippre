@@ -1,7 +1,18 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Text.FliPpr.Doc where
+module Text.FliPpr.Doc (
+  Precedence, Pretty(..), DocLike(..), Renderable(..), 
+  pretty, Doc,
 
-import Control.Arrow (second) 
+  hang,
+  hcat, vcat, cat,
+  hsep, vsep, sep, 
+  (<$$>), ($$), (</>), (//),
+  punctuate, 
+  ) where
+
+import Control.Arrow (first, second) 
+import Data.Monoid (Monoid(..))
+import Data.Coerce
 
 type Precedence = Rational 
 
@@ -60,8 +71,8 @@ hang n x y = group (nest n (x $$ y))
 ($$) :: DocLike d => d -> d -> d 
 x $$ y = align (x <> linebreak <> y)
 
-(<$>) :: DocLike d => d -> d -> d
-x <$> y = x <> linebreak <> y 
+(<$$>) :: DocLike d => d -> d -> d
+x <$$> y = x <> linebreak <> y 
 
 (</>) :: DocLike d => d -> d -> d
 x </> y = x <> line <> y 
@@ -69,7 +80,7 @@ x </> y = x <> line <> y
 (//) :: DocLike d => d -> d -> d
 x // y = align (x <> line <> y)
 
-infixr 5 <$> 
+infixr 5 <$$> 
 infixr 5 $$  
 infixr 5 </> 
 infixr 5 //  
@@ -104,10 +115,10 @@ pretty :: Renderable d => d -> String
 pretty = render 80
 
 type Width     = Int
-type Indent    = Int -- Indent level 
+newtype Indent = Indent Int deriving (Show,Num) -- Indent level 
 type Pos       = Int -- Current position 
 type Remaining = Int 
-
+newtype Col    = Col Int deriving (Show,Num) -- Actual Column
 data Mode = Horizontal | Vertical 
 
 {-
@@ -117,40 +128,48 @@ taken from Section 2 of
  Linear, bounded, functional pretty-printing, JFP 19 (1), 2009.
 -}
 newtype WSpec =
-  WSpec { unWSpec :: Mode -> Width -> Pos -> Indent -> Remaining -> (ShowS, Pos, Remaining) }
+  WSpec { unWSpec :: Mode -> Width -> Pos -> Indent -> Remaining -> Col -> (ShowS, Pos, Remaining, Col) }
 
 instance DocLike WSpec where
-  empty  = WSpec $ \m w p i r -> (showString "", p , r)
-  text s = WSpec $ \m w p i r -> (showString s, p + length s, r - length s)
-  (WSpec d1) <> (WSpec d2) = WSpec $ \m w  p i r ->
-    let (l1, p1, r1) = d1 m w p  i r
-        (l2, p2, r2) = d2 m w p1 i r1 
-    in (l1 . l2, p2, r2)
-  group (WSpec d) = WSpec $ \m w p i r ->
-    let v@(_, pd, _) = d (if pd - p <= r then Horizontal else Vertical) w p i r in v
-
-  nest n (WSpec d) = WSpec $ \m w p i -> d m w p (i+n)
-  align (WSpec d) = WSpec $ \m w p i -> d m w p p 
-  line = WSpec $ \m w p i r ->
-                   let (l, r') = makeLine m w i r 
-                   in (l, p+1, r)
+  empty  = WSpec $ \m w p i r c -> (showString "", p , r, c )
+  text s = WSpec $ \m w p i r c -> (showString s,  p + len, r - len , c + coerce len)
     where
-      makeLine Horizontal _  i r = (showString " ", r - 1)
-      makeLine Vertical   w  i r = (showString ('\n':replicate i ' '), w - i)
+      len = length s 
+  (WSpec d1) <> (WSpec d2) = WSpec $ \m w p i r c ->
+    let (l1, p1, r1, c1) = d1 m w p  i r c 
+        (l2, p2, r2, c2) = d2 m w p1 i r1 c1
+    in (l1 . l2, p2, r2, c2)
+  group (WSpec d) = WSpec $ \m w p i r c ->
+    let v@(_, pd, _, _) = d (if pd - p <= r then Horizontal else Vertical) w p i r c in v
 
-  linebreak = WSpec $ \m w p i  r ->
-                    let (l, r') = makeBreak m w i r
-                    in (l, p, r)
+  nest n (WSpec d) = WSpec $ \m w p i -> d m w p (i+coerce n)
+  align (WSpec d) = WSpec $ \m w p i r c -> d m w p (coerce c) r c
+  line = WSpec $ \m w p i r c ->
+                   let (l, r', c') = makeLine m w i r c
+                   in (l, p+1, r', c')
     where
-      makeBreak Horizontal _ i r = (showString "", r)
-      makeBreak Vertical   w i _ = (showString ('\n':replicate i ' '), w - i)
+      makeLine :: Mode -> Width -> Indent -> Remaining -> Col -> (ShowS, Remaining, Col)
+      makeLine Horizontal _  i r c = (showString " ", r - 1, c + 1)
+      makeLine Vertical   w  i r c = (showString ('\n':replicate i' ' '), w - i', coerce i)
+        where i' = coerce i
+          
+
+  linebreak = WSpec $ \m w p i r c ->
+                    let (l, r', c') = makeBreak m w i r c
+                    in (l, p, r', c')
+    where
+      makeBreak :: Mode -> Width -> Indent -> Remaining -> Col -> (ShowS, Remaining, Col) 
+      makeBreak Horizontal _ i r c = (showString "", r, c)
+      makeBreak Vertical   w i _ _ = (showString ('\n':replicate i' ' '), w - i', coerce i)
+        where i' = coerce i 
       
 
 instance Renderable WSpec where
   render w (WSpec d) =
-    let (l,_,_) = d Vertical w 0 0 w
+    let (l,_,_,_) = d Vertical w 0 0 w 0
     in l ""
 
+-- FIXME: Norm does not normalize after @align@
 newtype Norm d = Norm { unNorm :: d -> (d,d) }
 
 instance DocLike d => DocLike (Norm d) where
@@ -164,7 +183,8 @@ instance DocLike d => DocLike (Norm d) where
     in (td1 , sd1 <> sd2)
   group d = Norm $ \dd -> second group (unNorm d dd)
   nest n d = Norm $ \dd -> second (nest n) (unNorm d dd)
-  align d = Norm $ \dd -> second (align) (unNorm d dd) -- right? 
+  align d = Norm $ \dd -> let (d1, d2) = unNorm d dd
+                          in (empty, align (d1 <> d2))
 
 instance Renderable d => Renderable (Norm d) where
   render w (Norm f) = let (td, sd) = f empty
@@ -172,3 +192,7 @@ instance Renderable d => Renderable (Norm d) where
 
 newtype Doc = Doc (Norm WSpec) deriving (DocLike, Renderable) 
 instance Show Doc where show = pretty 
+
+instance Monoid Doc where
+  mempty  = empty
+  mappend = (<>) 

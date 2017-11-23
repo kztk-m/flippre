@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -18,20 +19,23 @@ import Control.Monad ((>=>), ap)
 import Control.Monad.Fix (MonadFix(..))
 
 import Data.Functor.Identity 
+import Data.Typeable
 
 import Text.FliPpr.Doc as D 
 
 data FType = D | Type :~> FType 
 
-data Branch arg exp a (t :: FType) =
-  forall b. Branch (a <-> b) (arg b -> exp t)
+
+type In a = (Typeable a, Eq a)
 
 data a <-> b = PInv (a -> Maybe b) (b -> Maybe a) 
 
+data Branch arg exp a (t :: FType) =
+  forall b. In b => Branch (a <-> b) (arg b -> exp t)
 
 class FliPprE (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
-  app   :: exp (a :~> t) -> arg a -> exp t
-  arg   :: (arg a -> exp t) -> exp (a :~> t)
+  app   :: In a => exp (a :~> t) -> arg a -> exp t
+  arg   :: In a => (arg a -> exp t) -> exp (a :~> t)
 
   -- Using ffix to define a recursion would not be a good idea.
   -- The information is used to define a grammar generation that is
@@ -44,10 +48,33 @@ class FliPprE (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
   -- If such a "marking" approach would suffice for some other grammar manipulations such 
   -- as left recursion elimination or injectivity analysis, first character extraction and so on.
   -- Then, we will use "marking" approach instead of "ffix".
+  --
+  -- By 2017-11-18 kztk: 
+  -- It turns out that "marking" approach is not useful to define local definitions.
+  -- The local defintions are specially important for FliPpr, as we can
+  -- define ``inlinable'' functions. A typical example is @manyParens@, a
+  -- function to annotate a position to which arbitrary number of parens can be
+  -- placed around. By @ffix@, such a function is easy to define. 
+  --
+  -- @
+  -- manyParens :: FliPpr arg exp => exp D -> exp D
+  -- manyParens d = ffix (\x -> d <|> parens x)
+  -- @
+  --
+  -- However, this is hard to achieve by using the "marking" approach, as
+  -- it can only define global definitions.
+  --
+  -- Thus, we many need both or use "marking" as a compromised alternative syntax.
+  -- It seems to me that we cannot directly converted it to @ffix@ with using
+  -- some compromising (Data.Dynamic, for example).
+  --
+  -- Anyway, @ffix@ is more general, and due to free variables, we cannot convert
+  -- it to "marking" in general. Let's have both at this level.
+  
   ffix  :: (exp t -> exp t) -> exp t
 
-  case_  :: arg a -> [Branch arg exp a t] -> exp t 
-  unpair :: arg (a,b) -> (arg a -> arg b -> exp t) -> exp t
+  case_  :: In a => arg a -> [Branch arg exp a t] -> exp t 
+  unpair :: (In a, In b) => arg (a,b) -> (arg a -> arg b -> exp t) -> exp t
 
   (<?)   :: exp D -> exp D -> exp D
 
@@ -99,19 +126,19 @@ instance (Fix a, Fix b) => Fix (a,b) where
     (fix (\z -> fst (f (z, fix (\w -> snd (f (z,w)))))),
      fix (\z -> snd (f (fix (\w -> fst (f (w,z))), z))))
 
-instance (Fix a, Fix b) => Fix (a :> b) where
-  fix f =
-    (fix (\z -> fst (f (z :> fix (\w -> snd (f (z :> w)))))))
-    :>
-    (fix (\z -> snd (f (fix (\w -> fst (f (w :> z))) :> z))))
-    where
-      fst (a :> _) = a
-      snd (_ :> b) = b 
+-- instance (Fix a, Fix b) => Fix (a :> b) where
+--   fix f =
+--     (fix (\z -> fst (f (z :> fix (\w -> snd (f (z :> w)))))))
+--     :>
+--     (fix (\z -> snd (f (fix (\w -> fst (f (w :> z))) :> z))))
+--     where
+--       fst (a :> _) = a
+--       snd (_ :> b) = b 
 
-data E = E 
-data a :> b = a :> b
+-- data E = E 
+-- data a :> b = a :> b
 
-infixr 1 :>
+-- infixr 1 :>
 
 type Prec = Rational 
 type NameSource = Int 
