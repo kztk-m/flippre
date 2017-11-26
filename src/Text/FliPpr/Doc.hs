@@ -7,10 +7,12 @@ module Text.FliPpr.Doc (
   hcat, vcat, cat,
   hsep, vsep, sep, 
   (<$$>), ($$), (</>), (//),
-  punctuate, 
+  punctuate,
+
+  parens, braces, brackets, parensIf
   ) where
 
-import Control.Arrow (first, second) 
+import Control.Arrow (second) 
 import Data.Monoid (Monoid(..))
 import Data.Coerce
 
@@ -95,13 +97,31 @@ cat :: DocLike d => [d] -> d
 cat = group . vcat 
 
 vsep :: DocLike d => [d] -> d
-vsep = foldr (</>) empty
+vsep []     = empty 
+vsep [x]    = x
+vsep (x:xs) = x </> vsep xs 
 
 hsep :: DocLike d => [d] -> d
-hsep = foldr (<+>) empty 
+hsep []     = empty
+hsep [x  ]  = x 
+hsep (x:xs) = x <+> hsep xs 
 
 sep :: DocLike d => [d] -> d
 sep = group . vsep
+
+parens :: DocLike d => d -> d
+parens d = text "(" <> d <> text ")"
+
+brackets :: DocLike d => d -> d
+brackets d = text "[" <> d <> text "]"
+
+braces :: DocLike d => d -> d
+braces d = text "{" <> d <> text "}"
+
+
+parensIf :: DocLike d => Bool -> d -> d
+parensIf True  = parens
+parensIf False = id 
 
 punctuate :: DocLike d => d -> [d] -> d
 punctuate sep []  = empty
@@ -109,10 +129,16 @@ punctuate sep [d] = d
 punctuate sep (d:ds) = d <> sep <> punctuate sep ds 
 
 class DocLike d => Renderable d where
-  render :: Width -> d -> String
+  render  :: Width -> d -> String
+  render w d = renders w d ""
+  
+  renders :: Width -> d -> ShowS 
 
 pretty :: Renderable d => d -> String
 pretty = render 80
+
+prettys :: Renderable d => d -> ShowS
+prettys = renders 80 
 
 type Width     = Int
 newtype Indent = Indent Int deriving (Show,Num) -- Indent level 
@@ -165,9 +191,9 @@ instance DocLike WSpec where
       
 
 instance Renderable WSpec where
-  render w (WSpec d) =
+  renders w (WSpec d) =
     let (l,_,_,_) = d Vertical w 0 0 w 0
-    in l ""
+    in l 
 
 -- FIXME: Norm does not normalize after @align@
 newtype Norm d = Norm { unNorm :: d -> (d,d) }
@@ -187,11 +213,12 @@ instance DocLike d => DocLike (Norm d) where
                           in (empty, align (d1 <> d2))
 
 instance Renderable d => Renderable (Norm d) where
-  render w (Norm f) = let (td, sd) = f empty
-                      in render w (td <> sd)
+  renders w (Norm f) = let (td, sd) = f empty
+                       in renders w (td <> sd)
 
 newtype Doc = Doc (Norm WSpec) deriving (DocLike, Renderable) 
-instance Show Doc where show = pretty 
+instance Show Doc where
+  showsPrec _ = prettys 
 
 instance Monoid Doc where
   mempty  = empty

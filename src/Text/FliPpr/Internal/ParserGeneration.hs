@@ -19,12 +19,10 @@ import Data.Kind
 
 import Text.FliPpr.Internal.Type
 import Text.FliPpr.Internal.Parsing 
-import Data.STRef 
 import Control.Applicative (Alternative, (<|>), liftA2)
 
 import qualified Text.FliPpr.Doc as D 
 
-import Unsafe.Coerce 
 
 data Dynamic = forall a. (Typeable a, Eq a) => Dynamic a
 
@@ -126,68 +124,70 @@ insertEnv k = go k
 --   RF :: Int -> Result env r -> Maybe a -> Result env (a :~> r)
 
 
-choice :: Alternative p => PExp p r -> PExp p r -> PExp p r 
-choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv 
+choice :: (Alternative p) => PExp p r -> PExp p r -> PExp p r 
+choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
       
-fromP :: Functor p => p a -> PExp p D
+fromP :: (Functor p) => p a -> PExp p D
 fromP x = PExp $ \_ -> (return $ RD EnvUndet) <$ x 
 
-instance ParserLike p => FliPprE PArg (PExp p) where
-  app :: forall a t. In a => PExp p (a :~> t) -> PArg a -> PExp p t 
-  app (PExp f) (PArg n) =
-    PExp $ \tenv -> fmap (>>= (\k -> appSem k (n tenv))) (f tenv) 
+instance ParserLike p => FliPprC PArg (PExp p) where
+  fapp :: forall a t. In a => PExp p (a :~> t) -> PArg a -> PExp p t 
+  fapp (PExp f) (PArg n) =
+    PExp $ \tenv -> 
+             fmap (>>= (\k -> appSem k (n tenv))) (f tenv)
     where
       appSem :: In a => Result r (a :~> t) -> Int -> Err (Result r t) 
       appSem (RF m) k =
         mapEnv (\(EnvExt d env) -> insertEnv k (fromDynamic =<< d :: Maybe a) env) m
 
 
-  arg :: forall a t. In a => (PArg a -> PExp p t) -> PExp p (a :~> t)
-  arg f = PExp $ \tenv ->
+  farg :: forall a t. In a => (PArg a -> PExp p t) -> PExp p (a :~> t)
+  farg f = PExp $ \tenv -> 
                    let tenva = extend tenv (Proxy :: Proxy a)
-                       aa    = PArg $ \tenv' -> rlen tenv' - rlen tenva 
+                       aa    = PArg $ \tenv' -> rlen tenv' - rlen tenva
                    in fmap RF <$> unPExp (f aa) tenva
 
-  ffix :: (PExp p t -> PExp p t) -> PExp p t
-  ffix f = PExp $ \tenv ->
-                    pfix (\p -> let p' = PExp $ \tenv' -> fmap (>>= mapEnv (return . embed tenv tenv')) p 
-                                in unPExp (f p') tenv)
-    where
-      embed :: Rep env -> Rep env' -> Env env -> Env env'
-      embed tenv tenv' = go (rlen tenv' - rlen tenv)
-        where
-          go 0 r = r
-          go n r = EnvExt Nothing r 
+  -- ffix :: (PExp p t -> PExp p t) -> PExp p t
+  -- ffix f = PExp $ \tenv ->
+  --                   pfix (\p -> let p' = PExp $ \tenv' -> fmap (>>= mapEnv (return . embed tenv tenv')) p 
+  --                               in unPExp (f p') tenv)
+  --   where
+  --     embed :: Rep env -> Rep env' -> Env env -> Env env'
+  --     embed tenv tenv' = go (rlen tenv' - rlen tenv)
+  --       where
+  --         go 0 r = r
+  --         go n r = EnvExt Nothing r 
 
 
-  unpair :: forall a b r.
+  funpair :: forall a b r.
             (In a, In b) => PArg (a,b) -> (PArg a -> PArg b -> PExp p r) -> PExp p r
-  unpair inp f = PExp $ \tenv ->
-                          let tenva = extend tenv  (Proxy :: Proxy a) 
-                              tenvb = extend tenva (Proxy :: Proxy b)
-                              ia    = PArg $ \tenv' -> rlen tenv' - rlen tenva
-                              ib    = PArg $ \tenv' -> rlen tenv' - rlen tenvb
-                          in fmap (>>= mapEnv (\(EnvExt bv (EnvExt av e)) ->
-                                                 let ab = liftA2 (,) (fromDynamic =<< av :: Maybe a)
-                                                                     (fromDynamic =<< bv :: Maybe b)
-                                                     k  = unPArg inp tenv 
-                                                 in insertEnv k ab e)) $ unPExp (f ia ib) tenvb
+  funpair inp f = PExp $ \tenv -> 
+    let tenva = extend tenv  (Proxy :: Proxy a) 
+        tenvb = extend tenva (Proxy :: Proxy b)
+        ia    = PArg $ \tenv' -> rlen tenv' - rlen tenva
+        ib    = PArg $ \tenv' -> rlen tenv' - rlen tenvb
+    in fmap (>>= mapEnv (\(EnvExt bv (EnvExt av e)) ->
+                         let ab = liftA2 (,) (fromDynamic =<< av :: Maybe a)
+                                  (fromDynamic =<< bv :: Maybe b)
+                             k  = unPArg inp tenv 
+                         in insertEnv k ab e))
+       $ unPExp (f ia ib) tenvb
 
-  case_ inp [] = PExp $ \_ -> pfail ""
-  case_ inp (Branch (PInv f finv) k : bs) =
-    (branch inp (PInv f finv) k)
+  fcase inp [] = PExp $ \_ -> (pfail "")
+  fcase inp (Branch (PInv s f finv) k : bs) =
+    (branch inp (PInv s f finv) k)
     `choice`
-    (case_ inp bs)
+    (fcase inp bs)
     where
       branch :: (In a, In b) => PArg a -> (a <-> b) -> (PArg b -> PExp p r) -> PExp p r 
-      branch inp (PInv f finv) k =
-            (PExp $ \tenv ->
-              let tenvb = extend tenv (Proxy :: Proxy b)
-                  ib    = PArg $ \tenv' -> rlen tenv' - rlen tenvb
-              in fmap (>>= mapEnv (\(EnvExt bv e) ->
-                                      let av = refine (fromDynamic =<< bv) >>= finv
-                                          k  = unPArg inp tenv
-                                      in insertEnv k av e)) $ unPExp (k ib) tenvb)
+      branch inp (PInv _ f finv) k =
+        PExp $ \tenv -> 
+        let tenvb = extend tenv (Proxy :: Proxy b)
+            ib    = PArg $ \tenv' -> rlen tenv' - rlen tenvb
+        in  (>>= mapEnv (\(EnvExt bv e) ->
+                            let av = refine (fromDynamic =<< bv) >>= finv
+                                k  = unPArg inp tenv
+                            in insertEnv k av e)) <$> unPExp (k ib) tenvb
 
       refine :: forall b. Typeable b => Maybe b -> Maybe b
       refine x =
@@ -198,7 +198,10 @@ instance ParserLike p => FliPprE PArg (PExp p) where
 
   ftext s = fromP $ ptext ""
   
-  fcat f g = PExp $ \tenv -> (\x y -> liftA2 k x y >>= id) <$> unPExp f tenv <*> unPExp g tenv
+  fcat f g = PExp $ \tenv -> 
+    let p = unPExp f tenv
+        q = unPExp g tenv 
+    in (\x y -> liftA2 k x y >>= id) <$> p <*> q 
     where
       k :: Result env D -> Result env D -> Err (Result env D)
       k (RD env) (RD env') = RD <$> merge env env'
@@ -223,19 +226,32 @@ instance ParserLike p => FliPprE PArg (PExp p) where
       
         
   
-  d1 <? d2 = choice d1 d2
+  fbchoice d1 d2 = choice d1 d2
   
   fempty = fromP $ ptext ""
 
+  fspace     = fromP pspace 
   fspaces    = fromP pspaces
+  
   fline      = fspaces
   flinebreak = fspaces
 
   falign     = id
   fgroup     = id
   fnest n    = id 
-  
+
+                       
+parsingMode :: (In a, ParserFix p) => FliPpr (a :~> D) -> p (Err a)
+parsingMode (FliPpr e) = 
+  k <$> unPExp e (RepE 0)
+    where
+      k :: In a => Err (Result '[] (a :~> D)) -> Err a
+      k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s
+      k (Ok  a)  =
+        case a of
+          RF (RD (EnvExt c EnvEmp)) ->
+            case c of
+              Just a  -> maybe undefined return $ fromDynamic a
+              Nothing -> err $ D.text "Input is unused in evaluation." 
     
-                                     
-  
-  
+
