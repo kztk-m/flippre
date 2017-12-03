@@ -25,7 +25,8 @@ import Control.Monad.Cont
 import Control.Applicative (Const(..))
 
 import Data.Typeable
-
+import Data.Monoid (Endo(..))
+import Data.Functor.Identity (Identity(..))
 import Text.FliPpr.Doc as D 
 
 import Debug.Trace
@@ -51,12 +52,12 @@ class TypeList (t :: [k]) where
   appsInit   :: Proxy t -> b -> (forall t. b -> (f t, b)) -> Apps f t
   appsShape  :: Proxy t -> Apps (Const ()) t
 
-  mapApps       :: (forall t. f t -> g t) -> Apps f t -> Apps g t
-  concatMapApps :: (forall t. f t -> a) -> a -> (a -> a -> a) -> Apps f t -> a 
   appendApps :: Apps f t -> Apps f s -> Apps f (Append t s)
   splitApps  :: Apps f (Append t s) -> (Apps f t, Apps f s)
 
   zipWithApps :: (forall t. f t -> g t -> h t) -> Apps f t -> Apps g t -> Apps h t
+
+  traverseApps :: Applicative m => (forall a. f a -> m (g a)) -> Apps f t -> m (Apps g t)
 
 instance TypeList '[] where
   data Apps f '[] = End 
@@ -66,12 +67,12 @@ instance TypeList '[] where
 
   appsShape _      = End 
 
-  mapApps f End = End
-  concatMapApps f e c End = e 
   appendApps End ys = ys
   splitApps  xs     = (End, xs)
 
-  zipWithApps f End End = End 
+  zipWithApps f End End = End
+
+  traverseApps f End = pure End 
   
 instance TypeList ts => TypeList (a ': ts) where
   data Apps f (a ': ts) = f a :> Apps f ts 
@@ -81,8 +82,6 @@ instance TypeList ts => TypeList (a ': ts) where
                      in a :> appsInit (Proxy) s' f 
   appsShape _ = Const () :> appsShape (Proxy :: Proxy ts)
 
-  mapApps f (a :> r) = f a :> mapApps f r
-  concatMapApps f e c (a :> r) = f a `c` concatMapApps f e c r 
   appendApps (a :> r) ys = a :> appendApps r ys
 
   splitApps  (a :> r) =
@@ -90,7 +89,19 @@ instance TypeList ts => TypeList (a ': ts) where
     in (a :> s, t ) 
 
   zipWithApps f (a :> r) (b :> t) = f a b :> zipWithApps f r t 
-  
+  traverseApps f (a :> r) =
+    (:>) <$> f a <*> traverseApps f r 
+
+
+foldApps :: (TypeList ts, Monoid m) => (forall t. f t -> m) -> Apps f ts -> m
+foldApps f = getConst . traverseApps (\a -> Const (f a))
+
+foldrApps :: TypeList ts => (forall t. f t -> b -> b) -> b -> Apps f ts -> b
+foldrApps f = flip $ appEndo . foldApps (\a -> Endo (f a))
+
+mapApps :: TypeList ts => (forall t. f t -> g t) -> Apps f ts -> Apps g ts
+mapApps f = runIdentity . traverseApps (Identity . f) 
+
 infixr 5 :> 
 
 -- mapApps :: TypeList ts => (forall t. exp t -> exp' t) -> Apps exp ts -> Apps exp' ts
@@ -597,9 +608,12 @@ instance FliPprC (Printing D.Doc) (Printing D.Doc) where
        parens (D.text "\\" D.<> parens (makeCons fn vn vars) D.<+> D.text "->" D.<+> rest)
     where
       makeCons :: TypeList ks => FCount -> VCount -> Apps (Printing D.Doc) ks -> D.Doc
-      makeCons fn vn = concatMapApps (\a -> unPrinting a fn vn 5)
-                         (D.text "End")
-                         (\d1 d2 -> d1 D.<+> D.text ":>" D.<+> d2)
+      makeCons fn vn =
+        foldrApps (\a r -> unPrinting a fn vn 5 D.<+> D.text ":>" D.<+> r)
+                  (D.text "End")
+        -- concatMapApps (\a -> unPrinting a fn vn 5)
+        --                  (D.text "End")
+        --                  (\d1 d2 -> d1 D.<+> D.text ":>" D.<+> d2)
 
 
       

@@ -18,7 +18,7 @@ import Control.Category
 import Control.Applicative (Const(..))
 
 import Data.Maybe (fromJust)
-import Data.Typeable (Proxy(..))
+import Data.Typeable ((:~:)(..), Proxy(..))
 import Data.Monoid (Endo(..))
 import Data.Kind 
 import Data.IntMap (IntMap)
@@ -42,6 +42,18 @@ instance Shiftable d (Var d) where
   shift = runVarT 
 
 
+class DeBruijnIndex v where
+  vz :: v (a : env) a
+  vs :: v env a -> v (b : env) a
+
+instance DeBruijnIndex (Var U) where
+  vz = VarU 0
+  vs (VarU i) = VarU (i+1)
+
+instance DeBruijnIndex (Var S) where
+  vz = VZ
+  vs = VS 
+
 instance Category (VarT d) where
   id = VarT id
   VarT f . VarT g = VarT (f . g) 
@@ -50,9 +62,6 @@ class EnvImpl i where
   data Var i :: [Type] -> Type -> Type 
   data Env i :: ([Type] -> Type -> Type) -> [Type] -> [Type] -> Type 
   data Rep i :: [Type] -> Type 
-
-  vz :: Var i (a : env) a
-  vs :: Var i env a -> Var i (b : env) a 
 
   showVar :: Var i env a -> String
 
@@ -97,9 +106,6 @@ instance EnvImpl U where
     -- ith var corresponds to (k-i)th index.
   newtype Rep U env        = RepU Int
 
-  vz = VarU 0
-  vs (VarU i) = VarU (i+1)
-
   showVar (VarU n) = show n 
 
   lookupEnv (VarU n) (EnvU k m) = unsafeCast (fromJust $ IM.lookup (k-n) m)
@@ -142,9 +148,6 @@ instance EnvImpl S where
       go VZ     = 0
       go (VS n) = 1 + go n 
       
-  vz = VZ
-  vs = VS 
-    
   lookupEnv VZ     (EExtend _ v) = v
   lookupEnv (VS n) (EExtend e _) = lookupEnv n e 
 
@@ -172,10 +175,26 @@ instance EnvImpl S where
   repOf EEnd          = REnd
   repOf (EExtend e _) = RExtend (repOf e) Proxy
 
-  embedVar (RExtend REnd _) (RExtend REnd _) VZ     = unsafeCoerce VZ 
-  embedVar (RExtend REnd v) (RExtend e _)    VZ     = VS (embedVar (RExtend REnd v) e VZ)
-  embedVar (RExtend e _)    (RExtend e' _)   (VS k) = VS (embedVar e e' k)
-  embedVar _                _                _      = error "Error: embedVar: violated assumption."
+  -- embedVar (RExtend REnd _) (RExtend REnd _) VZ     = unsafeCoerce VZ 
+  -- embedVar (RExtend REnd v) (RExtend e _)    VZ     = VS (embedVar (RExtend REnd v) e VZ)
+  -- embedVar (RExtend e _)    (RExtend e' _)   (VS k) = VS (embedVar e e' k)
+  embedVar r1 r2 n =
+    case requal r1 r2 of
+      Just Refl -> n
+      _         ->
+        case r2 of
+          REnd -> error "Error: embedVar: violated assumption."
+          RExtend r2' _ -> VS (embedVar r1 r2' n)
+--   embedVar _                _                _      = error "Error: embedVar: violated assumption."
+    where
+      requal :: Rep S env -> Rep S env' -> Maybe (env :~: env')
+      requal REnd REnd = Just Refl
+      requal (RExtend e v) (RExtend e' v') =
+        case requal e e' of
+          Just Refl -> Just (unsafeCoerce Refl)
+          Nothing   -> Nothing
+      requal _ _ = Nothing 
+
 
 
 instance Eq (Var U env a) where
