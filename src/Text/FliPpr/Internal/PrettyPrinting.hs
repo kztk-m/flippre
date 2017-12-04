@@ -54,28 +54,10 @@ instance DocLike d => FliPprC I (Ppr d) where
   fspace  = PD (text " ")
   fspaces = PD empty 
 
--- instance DocLike d => FliPprR Identity I (Ppr d) where
---   frecursive = Identity
---   flocal     = runIdentity 
-  
-
--- pprModeE :: DocLike d => E I (Ppr d) (a :~> D) -> a -> d
--- pprModeE (E (PF h)) a = case h a of
-   --                       PD d -> d
-
-pprModeE :: (Ppr Doc (a :~> D)) -> a -> Doc
-pprModeE (PF h) a = case h a of
+pprModeMono :: (Ppr Doc (a :~> D)) -> a -> Doc
+pprModeMono (PF h) a = case h a of
                       PD d -> d 
                           
 pprMode :: FliPpr (a :~> D) -> a -> Doc
 pprMode (FliPpr e) = pprModeE e 
-
--- toPprMono :: MonadFix m => DocLike d => m (Ppr d (a :~> D)) -> a -> m d
--- toPprMono m x = do
---   PF h <- m 
---   case h x of
---     PD d -> return d
-
--- toPpr :: (DocLike d, MonadFix m) => (forall arg exp r. FliPpr arg exp r => r (exp (a :~> D))) -> a -> m d
--- toPpr = toPprMono
 

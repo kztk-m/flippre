@@ -1,3 +1,4 @@
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -18,12 +19,12 @@ import Text.FliPpr.Internal.Env as E
 import Text.FliPpr.Doc as D 
 import Data.Kind
 
-import Text.FliPpr.Internal.Type (Apps(..), TypeList(..))
+import Text.FliPpr.Internal.Type as T
 import Data.Typeable (Proxy(..))
 
 import Prelude hiding ((.), id)
 import Control.Category ((.), id) 
-import Control.Applicative (Const, Alternative(..)) 
+import Control.Applicative (Alternative(..)) 
 
 type EnvRep = U 
 
@@ -336,24 +337,27 @@ instance Alternative GrammarUC where
   --               env3 = E.modifyEnv r2 (\(RHS ps2) -> RHS (ps2 ++ ps1)) env2
   --           in GR r2 env3 (vt2 . vt1)
 
+gempty :: GrammarUC a
+gempty = Control.Applicative.empty 
+
 liftProdLiteral :: (forall env. ProdUC env a) -> GrammarUC a
 liftProdLiteral p = GB $ \env -> GR (RSingle p) env id
 
 liftSymbLiteral :: (forall env. Symb env a) -> GrammarUC a
 liftSymbLiteral s = liftProdLiteral (PSymb s)
 
-gbchar :: Char -> GrammarUC Char
-gbchar c = liftSymbLiteral (TermC c)
+gchar :: Char -> GrammarUC Char
+gchar c = liftSymbLiteral (TermC c)
                   -- let (env1, r1, vt) = E.extendEnv env (Unions [ PCons (TermC c) $ PNil id ] )
                   -- in GR r1 (E.mapEnv (shift vt) env1) vt 
 
-gbsatisfy :: (Char -> Bool) -> GrammarUC Char
-gbsatisfy p = liftSymbLiteral (TermP p) 
+gsatisfy :: (Char -> Bool) -> GrammarUC Char
+gsatisfy p = liftSymbLiteral (TermP p) 
                   -- let (env1, r1, vt) = E.extendEnv env (Unions [ PCons (TermP p) $ PNil id ] )
                   -- in GR r1 (E.mapEnv (shift vt) env1) vt
 
-gbtext :: String -> GrammarUC String
-gbtext s = liftProdLiteral (fromText s)
+gtext :: String -> GrammarUC String
+gtext s = liftProdLiteral (fromText s)
                   -- let (env1, r1, vt) = E.extendEnv env (Unions [ fromText s ])
                   -- in GR r1 (E.mapEnv (shift vt) env1) vt
   where
@@ -366,15 +370,20 @@ gbtext s = liftProdLiteral (fromText s)
         -- go k ""     = PNil  (k "")
         -- go k (c:cs) = PCons (TermC c) (go (\s c -> k (c:s)) cs)
 
-gbfix :: (GrammarUC a -> GrammarUC a) -> GrammarUC a
-gbfix f = GB $ \env ->
-  let (env1, r1, vt) = E.extendEnv' env (RUnInit)
-      res = f (GB $ \env' -> GR (RSingle $ PSymb (NT (E.embedVar (repOf env1) (repOf env') r1))) env' id)
-  in case runGB res env1 of
-       GR ps2 env2 vt2 ->
-         let r1'   = shift vt2 r1
-             env2' = E.updateEnv r1' ps2 env2
-         in GR (RSingle $ PSymb (NT r1')) env2' (vt2 . vt)
+gfix :: (GrammarUC a -> GrammarUC a) -> GrammarUC a
+gfix f = gfixn (to . f . from) from
+  where
+    from :: Apps GrammarUC '[a] -> GrammarUC a 
+    from (a :> End) = a
+    to a = a :> End 
+-- gfix f = GB $ \env ->
+--   let (env1, r1, vt) = E.extendEnv' env (RUnInit)
+--       res = f (GB $ \env' -> GR (RSingle $ PSymb (NT (E.embedVar (repOf env1) (repOf env') r1))) env' id)
+--   in case runGB res env1 of
+--        GR ps2 env2 vt2 ->
+--          let r1'   = shift vt2 r1
+--              env2' = E.updateEnv r1' ps2 env2
+--          in GR (RSingle $ PSymb (NT r1')) env2' (vt2 . vt)
 
 
 -- -- still not ok 
@@ -400,7 +409,7 @@ data TravR env ts = forall env'. TravR (E' RHSUC env') (Apps GBT ts) (Apps Gramm
 
 data MkG a = MkG { runMkG :: forall env. E' RHSUC env -> MkGR env a }
 data MkGR env a = forall env'. MkGR (E' RHSUC env') a (VT env env')
-data (f :*: g) a = f a :*: g a
+data ((f :: k -> Type) :*: (g :: k -> Type)) a = f a :*: g a
 
 instance Functor MkG where
   fmap f (MkG k) = MkG $ \e -> case k e of
@@ -432,11 +441,11 @@ prepareGlue _ = MkG $ \e ->
     convV  r env env' = E.embedVar (repOf env) (repOf env') r 
     
 
-gbfixn :: forall ts r.
+gfixn :: forall ts r.
           TypeList ts =>
           (Apps GrammarUC ts -> Apps GrammarUC ts) ->
           (Apps GrammarUC ts -> GrammarUC r) -> GrammarUC r
-gbfixn f k = GB $ \env -> case runMkG glue env of
+gfixn f k = GB $ \env -> case runMkG glue env of
   MkGR envI ciI vtI ->
     let captureI = mapApps (\(f :*: _) -> f) ciI
         initI    = mapApps (\(_ :*: g) -> g) ciI
@@ -449,13 +458,52 @@ gbfixn f k = GB $ \env -> case runMkG glue env of
     shape = appsShape  (Proxy :: Proxy ts)
 
     glue = traverseApps prepareGlue shape
-                          
 
-gbspace :: GrammarUC ()
-gbspace = liftSymbLiteral Space
 
-gbspaces :: GrammarUC ()
-gbspaces = liftSymbLiteral Spaces 
+newtype GBTp p a =
+  GBTp { runGBTp :: (GrammarUC :.: p) a -> (GrammarUC :.: p) a }
+
+prepareGlueP :: f a -> MkG ((GBTp p  :*: (GrammarUC :.: p)) a)
+prepareGlueP _ = MkG $ \e ->
+  let (env1, r1, vt1) = E.extendEnv' e RUnInit 
+      capture (GB k) = GB $ \e ->
+              case E.lookupEnv (convV r1 env1 e) e of
+                RUnInit -> 
+                  case k e of
+                    GR ps ev vt -> GR (RSingle $ makeNT r1 env1 ev)
+                                   (E.updateEnv (convV r1 env1 ev) ps ev) vt
+                _ ->
+                  GR (RSingle (PSymb (NT (convV r1 env1 e)))) e id
+      entry = GB $ \e -> GR (RSingle $ makeNT r1 env1 e) e id
+  in MkGR env1 (GBTp (Comp . capture . getComp) :*: Comp entry) vt1
+  where
+    makeNT r env env' = PSymb (NT (E.embedVar (repOf env) (repOf env') r)) 
+    convV  r env env' = E.embedVar (repOf env) (repOf env') r 
+
+
+gfixnp :: forall ts p r.
+          TypeList (ts :: [k]) =>
+          (Apps (GrammarUC :.: p) ts -> Apps (GrammarUC :.: p) ts) ->
+          (Apps (GrammarUC :.: p) ts -> (GrammarUC :.: p) r) -> (GrammarUC :.: p) r
+gfixnp f k = Comp $ GB $ \env -> case runMkG glue env of
+  MkGR envI ciI vtI ->
+    let captureI = mapApps (\(f :*: _) -> f) ciI
+        initI    = mapApps (\(_ :*: g) -> g) ciI
+        capture xs = zipWithApps (\(GBTp f) -> f) captureI xs
+    in case runGB (getComp $ k (iterate (capture . f) initI !! nts)) envI of
+         GR psR envR vtR ->
+           GR psR envR (vtR . vtI)
+  where    
+    nts   = appsLength (Proxy :: Proxy ts) 
+    shape = appsShape  (Proxy :: Proxy ts)
+
+    glue = traverseApps prepareGlueP shape
+
+gspace :: GrammarUC ()
+gspace = liftSymbLiteral Space
+
+gspaces :: GrammarUC ()
+gspaces = liftSymbLiteral Spaces 
 
 finalize :: GrammarUC a -> Grammar a
 finalize (GB k) =
@@ -463,6 +511,68 @@ finalize (GB k) =
     GR ps env vt ->
       let (env1, r1, vt1) = E.extendEnv' env ps
       in Grammar r1 (mapEnv finalizeRHS env1)
+
+{-
+Inline NTs that does not contain any "|" 
+-}
+
+-- newtype VAny a = VAny (forall env t. E' t env -> V env a)
+-- newtype Visited env a = Visited (Maybe (VAny v))
+-- type Reduce env a = ReaderT (E' RHS env) (State (E' Visisted env)) a 
+
+
+
+-- inlineSL :: Grammar a -> GrammarUC a
+-- inlineSL (Grammar v a) = undefined
+--   where
+--     go :: RHS env a -> Reduce env (GrammarUC a)
+--     go (RHS [])     = gempty 
+--     go (RHS [s])    = goProd s 
+--     go (RHS (s:ss)) =
+--       liftM2 (<|>) (goProd s) (go (RHS ss))
+
+--     checkVisited :: V env a -> VAny a -> (VAny a -> Reduce env r) -> Reduce env r -> Reduce env r
+--     checkVisited v va m1 m2 = do
+--       tb <- get
+--       (case (E.lookupEnv v tb) of
+--          Just vany -> m1 vany 
+--          Nothing -> do 
+--            put $ E.updateEnv v (Just va) tb
+--            m2) 
+         
+
+--     goProd :: Prod env a -> Reduce env (GrammarUC a)
+--     goProd (PNil f) = pure f
+--     goProd (PCons (NT x) p) = do
+--       oldRules <- ask 
+--       case E.lookupEnv x oldRules of
+--         RHS []  -> gempty
+--         RHS [s] -> fmap (\a k -> k a) (goProd s oldRules) <*> goProd p oldRules
+--         RHS ss  ->
+--           checkVisited x (
+--           tb <- get
+          
+--           GB $ \env ->
+--           case runGB (go (RHS ss) oldRules) env of
+--             GR ps1 env1 vt1 -> 
+--               case runGB (goProd p oldRules) env1 of
+--                 GR ps2 env2 vt2 ->
+--                   let (env3, r3, vt3) = E.extendEnv' env2 (shift vt2 ps1)
+--                   in 
+        
+
+--     goProd (PCons Space p) = 
+--       (fmap (\a k -> k a) gspace <*>) <$> (goProd p oldRules)
+
+--     goProd (PCons Spaces p) = 
+--       (fmap (\a k -> k a) gspaces <*>) <$> goProd p oldRules
+--     goProd (PCons (TermC c) p) = 
+--       (fmap (\a k -> k a) (gchar c) <*>) <$> 
+--         goProd p oldRules 
+--     goProd (PCons (TermP q) p) = 
+--       (fmap (\a k -> k a) (gsatisfy q) <*>) <$>
+--         goProd p oldRules 
+
 
 
 instance Pretty (Symb env a) where
@@ -513,23 +623,23 @@ instance Show (Grammar a) where
   show = show . ppr 
 
 example1 :: Grammar ()
-example1 = finalize $ gbfix $ \p ->
-  () <$ gbtext "(" <* p <* gbtext ")" <* p
+example1 = finalize $ gfix $ \p ->
+  () <$ gtext "(" <* p <* gtext ")" <* p
   <|> pure () 
   
                                
 example2 :: Grammar ()
 example2 = finalize $
   let f (a,b) =
-        (() <$ alphas <* gbspaces <* gbtext "[" <* b <* gbtext "]",
-         () <$ a <* gbspaces <* gbtext "," <* gbspaces <* b 
+        (() <$ alphas <* gspaces <* gtext "[" <* b <* gtext "]",
+         () <$ a <* gspaces <* gtext "," <* gspaces <* b 
          <|> () <$ a
          <|> pure ())
-  in gbfix $ \x -> fst (f (x, gbfix $ \y -> snd (f (x,y))))
+  in gfix $ \x -> fst (f (x, gfix $ \y -> snd (f (x,y))))
   where
-    alpha = gbfix $ \p ->
-      foldr1 (<|>) $ map gbchar ['a'..'z']                               
-    alphas = gbfix $ \p ->
+    alpha = gfix $ \p ->
+      foldr1 (<|>) $ map gchar ['a'..'z']                               
+    alphas = gfix $ \p ->
       (:) <$> alpha <*> p <|> pure []
 
 {-
@@ -538,58 +648,62 @@ Implementing mutual recursions by Bekic's lemma causes grammar-size blow-up.
 example3 :: Grammar ()
 example3 = finalize $
   let f (a,b) =
-        (() <$ alphas <* gbspaces <* gbtext "[" <* b <* gbtext "]",
-         () <$ a <* gbspaces <* gbtext "," <* gbspaces <* b 
+        (() <$ alphas <* gspaces <* gtext "[" <* b <* gtext "]",
+         () <$ a <* gspaces <* gtext "," <* gspaces <* b 
          <|> () <$ a
          <|> pure ())
-      p1 = gbfix $ \x -> fst (f (x, gbfix $ \y -> snd (f (x,y))))
-      p2 = gbfix $ \y -> snd (f (gbfix $ \x -> fst (f (x,y)), y))
+      p1 = gfix $ \x -> fst (f (x, gfix $ \y -> snd (f (x,y))))
+      p2 = gfix $ \y -> snd (f (gfix $ \x -> fst (f (x,y)), y))
   in p1 <|> p2 
   where
-    alpha = gbfix $ \p ->
-      foldr1 (<|>) $ map gbchar ['a'..'z']                               
-    alphas = gbfix $ \p ->
+    alpha = gfix $ \p ->
+      foldr1 (<|>) $ map gchar ['a'..'z']                               
+    alphas = gfix $ \p ->
       (:) <$> alpha <*> p <|> pure []
 
 -- sample4 :: Grammar ()
 -- sample4 = finalize $
 --   let f (a,b) =
---         (() <$ alphas <* gbspaces <* gbtext "[" <* b <* gbtext "]",
---          () <$ a <* gbspaces <* gbtext "," <* gbspaces <* b 
+--         (() <$ alphas <* gspaces <* gtext "[" <* b <* gtext "]",
+--          () <$ a <* gspaces <* gtext "," <* gspaces <* b 
 --          <|> () <$ a
 --          <|> pure ())
---   in gbfix2 f (\(p1,p2) -> p1 <|> p2)
+--   in gfix2 f (\(p1,p2) -> p1 <|> p2)
 --   where
---     alpha = gbfix $ \p ->
---       foldr1 (<|>) $ map gbchar ['a'..'z']                               
---     alphas = gbfix $ \p ->
+--     alpha = gfix $ \p ->
+--       foldr1 (<|>) $ map gchar ['a'..'z']                               
+--     alphas = gfix $ \p ->
 --       (:) <$> alpha <*> p <|> pure []
 
 example5 :: Grammar ()
 example5 = finalize $
   let f (a,b) =
-        (() <$ alphas <* gbspaces <* gbtext "[" <* b <* gbtext "]",
-         () <$ a <* gbspaces <* gbtext "," <* gbspaces <* b 
+        (() <$ alphas <* gspaces <* gtext "[" <* b <* gtext "]",
+         () <$ a <* gspaces <* gtext "," <* gspaces <* b 
          <|> () <$ a
          <|> pure ())
-  in gbfixn (\(a :> b :> End) -> let (a',b') = f (a,b)
-                                 in a' :> b' :> End)
-            (\(p1 :> p2 :> End) -> p1 <|> p2)
+  in gfixn
+      ((\(a :> b :> End) -> let (a',b') = f (a,b)
+                            in a' :> b' :> End)
+       :: Apps GrammarUC [(), ()] -> Apps GrammarUC [(), ()])
+      (\(p1 :> p2 :> End) -> p1 <|> p2)
   where
-    alpha = gbfix $ \p ->
-      foldr1 (<|>) $ map gbchar ['a'..'z']                               
-    alphas = gbfix $ \p ->
+    alpha = gfix $ \p ->
+      foldr1 (<|>) $ map gchar ['a'..'z']                               
+    alphas = gfix $ \p ->
       (:) <$> alpha <*> p <|> pure []
 
--- similar, but alls are defined via gbfixn 
+-- similar, but alls are defined via gfixn 
 example6 :: Grammar ()
 example6 = finalize $
-  gbfixn (\(alpha :> alphas :> tree :> forest :> End) ->
-             (foldr1 (<|>) $ map gbchar ['a'..'z']) :>
+  gfixn ((\(alpha :> alphas :> tree :> forest :> End) ->
+             (foldr1 (<|>) $ map gchar ['a'..'z']) :>
              ( (:) <$> alpha <*> alphas <|> pure [] ) :>
-             ( () <$ alphas <* gbspaces <* gbtext "[" <* forest <* gbtext "]") :>
-             ( () <$ tree <* gbspaces <* gbtext "," <* gbspaces <* forest
+             ( () <$ alphas <* gspaces <* gtext "[" <* forest <* gtext "]") :>
+             ( () <$ tree <* gspaces <* gtext "," <* gspaces <* forest
                <|> () <$ tree <|> pure () ) :> End)
+          :: Apps GrammarUC [Char, String, (), ()]
+             -> Apps GrammarUC [Char, String, (), ()])
          (\(_ :> _ :> tree :> forest :> End) -> tree <|> forest)
 
         

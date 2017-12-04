@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -41,72 +42,110 @@ data a <-> b = PInv String (a -> Maybe b) (b -> Maybe a)
 data Branch arg exp a (t :: FType) =
   forall b. In b => Branch (a <-> b) (arg b -> exp t)
 
--- data Apps (exp :: k -> Type) (t :: [k]) where
---   End  :: Apps exp '[]
---   (:>) :: TypeList r => exp a -> Apps exp r -> Apps exp (a ': r) 
+newtype ((f :: k' -> Type) :.: (g :: k -> k')) a = Comp { getComp :: (f (g a)) }
+
+infixl 5 :.:
+
+data Apps (f :: k -> Type) (t :: [k]) where
+  End  :: Apps f '[]
+  (:>) :: f a -> Apps f r -> Apps f (a : r)
+
+data TLWit (t :: [k]) where
+  WNil  :: TLWit '[]
+  WCons :: Proxy a -> TLWit r -> TLWit (a : r)
+  
+-- type family Map (f :: k -> k) (t :: [k]) = (r :: [k]) | r -> t where
+--   Map f '[]     = '[]
+--   Map f (a : t) = f a : Map f t 
+
+-- type family MapF (f :: FType -> k) (t :: [FType]) = (r :: [k]) | r -> t where
+--   MapF f '[]     = '[]
+--   MapF f (a : t) = f a : Map f t 
+
+
+tlLength :: TLWit t -> Int
+tlLength WNil = 0
+tlLength (WCons _ r) = 1 + tlLength r
+
+genFromTL :: TLWit t -> b -> (forall t. b -> (f t, b)) -> Apps f t
+genFromTL WNil        b gen = End 
+genFromTL (WCons _ r) b gen =
+  let (a, b') = gen b
+  in a :> genFromTL r b' gen  
+
+fromTL :: TLWit t -> Apps (Const ()) t
+fromTL WNil = End
+fromTL (WCons _ r) = Const () :> fromTL r 
+
+traverseApps :: Applicative m => (forall a. f a -> m (g a)) -> Apps f t -> m (Apps g t)
+traverseApps f End = pure End
+traverseApps f (a :> r) = (:>) <$> f a <*> traverseApps f r 
+
+
+appsLength :: forall t. TypeList t => Proxy t -> Int
+appsLength _ = tlLength (wit :: TLWit t)
+
+appsInit :: forall t f b. TypeList t =>
+            Proxy t -> b -> (forall t. b -> (f t, b)) -> Apps f t
+appsInit _ = genFromTL (wit :: TLWit t)
+
+appsShape :: forall t. TypeList t =>
+             Proxy t -> Apps (Const ()) t
+appsShape _ = fromTL (wit :: TLWit t)              
+
+zipWithApps :: (forall t. f t -> g t -> h t) -> Apps f t -> Apps g t -> Apps h t
+zipWithApps f End End = End
+zipWithApps f (a :> r) (b :> t) = f a b :> zipWithApps f r t
 
 class TypeList (t :: [k]) where
-  data Apps (f :: k -> Type) t :: * 
+--  data Apps (f :: k -> Type) t :: * 
+  wit :: TLWit t 
   
-  appsLength :: Proxy t -> Int
-  appsInit   :: Proxy t -> b -> (forall t. b -> (f t, b)) -> Apps f t
-  appsShape  :: Proxy t -> Apps (Const ()) t
-
-  appendApps :: Apps f t -> Apps f s -> Apps f (Append t s)
-  splitApps  :: Apps f (Append t s) -> (Apps f t, Apps f s)
-
-  zipWithApps :: (forall t. f t -> g t -> h t) -> Apps f t -> Apps g t -> Apps h t
-
-  traverseApps :: Applicative m => (forall a. f a -> m (g a)) -> Apps f t -> m (Apps g t)
+  -- appsLength :: Proxy t -> Int
+  -- appsInit   :: Proxy t -> b -> (forall t. b -> (f t, b)) -> Apps f t
+  -- appsShape  :: Proxy t -> Apps (Const ()) t
+  
+  -- composeApps :: Apps f (Map g t) -> Apps (f :.: g) t 
+  -- decomposeApps :: Apps (f :.: g) t -> Apps f (Map g t)
 
 instance TypeList '[] where
-  data Apps f '[] = End 
+--  data Apps f '[] = End 
+  wit = WNil 
   
-  appsLength _     = 0
-  appsInit   _ _ f = End
+  -- appsLength _     = 0
+  -- appsInit   _ _ f = End
 
-  appsShape _      = End 
+  -- appsShape _      = End 
 
-  appendApps End ys = ys
-  splitApps  xs     = (End, xs)
 
-  zipWithApps f End End = End
-
-  traverseApps f End = pure End 
+  -- composeApps End = End 
+  -- decomposeApps End = End 
   
 instance TypeList ts => TypeList (a ': ts) where
-  data Apps f (a ': ts) = f a :> Apps f ts 
+--  data Apps f (a ': ts) = f a :> Apps f ts 
+  wit = WCons Proxy wit 
   
-  appsLength _ = 1 + appsLength (Proxy :: Proxy ts)
-  appsInit   _ s f = let (a,s') = f s
-                     in a :> appsInit (Proxy) s' f 
-  appsShape _ = Const () :> appsShape (Proxy :: Proxy ts)
-
-  appendApps (a :> r) ys = a :> appendApps r ys
-
-  splitApps  (a :> r) =
-    let (s, t) = splitApps r
-    in (a :> s, t ) 
-
-  zipWithApps f (a :> r) (b :> t) = f a b :> zipWithApps f r t 
-  traverseApps f (a :> r) =
-    (:>) <$> f a <*> traverseApps f r 
+  -- appsLength _ = 1 + appsLength (Proxy :: Proxy ts)
+  -- appsInit   _ s f = let (a,s') = f s
+  --                    in a :> appsInit (Proxy) s' f 
+  -- appsShape _ = Const () :> appsShape (Proxy :: Proxy ts)
 
 
-foldApps :: (TypeList ts, Monoid m) => (forall t. f t -> m) -> Apps f ts -> m
+  -- composeApps (a :> r) = Comp a :> composeApps r 
+  -- decomposeApps (Comp a :> r) = a :> decomposeApps r 
+
+  
+
+foldApps :: (Monoid m) => (forall t. f t -> m) -> Apps f ts -> m
 foldApps f = getConst . traverseApps (\a -> Const (f a))
 
-foldrApps :: TypeList ts => (forall t. f t -> b -> b) -> b -> Apps f ts -> b
+foldrApps :: (forall t. f t -> b -> b) -> b -> Apps f ts -> b
 foldrApps f = flip $ appEndo . foldApps (\a -> Endo (f a))
 
-mapApps :: TypeList ts => (forall t. f t -> g t) -> Apps f ts -> Apps g ts
+mapApps :: (forall t. f t -> g t) -> Apps f ts -> Apps g ts
 mapApps f = runIdentity . traverseApps (Identity . f) 
 
 infixr 5 :> 
-
--- mapApps :: TypeList ts => (forall t. exp t -> exp' t) -> Apps exp ts -> Apps exp' ts
--- mapApps f End = End
--- mapApps f (e :> r) = f e :> mapApps f r 
 
 class TypeList ts => FromList a exp ts where 
   appsFromList :: [ exp a ] -> Maybe (Apps exp ts)
@@ -133,57 +172,9 @@ instance (Typeable a, Typeable b, FromList a exp r) => FromList a exp (b ': r) w
       Just Refl -> return $ a : r
       Nothing   -> Nothing
 
-type family Append (xs :: [k]) (ys :: [k]) :: [k]
-type instance Append '[] ys       = ys
-type instance Append (x ': xs) ys = x ': Append xs ys 
-
--- appendApps :: (TypeList ts, TypeList ts') => Apps f ts -> Apps f ts' -> Apps f (Append ts ts')
--- appendApps End ys      = ys
--- appendApps (x :> r) ys = x :> appendApps r ys 
-
--- splitApps :: forall ts ts' f.
---              TypeList ts => Apps f (Append ts ts') -> (Apps f ts, Apps f ts')
--- splitApps = go (appsShape (Proxy :: Proxy ts))
---   where
---     go :: Apps (Const ()) ss -> Apps f (Append ss ss') -> (Apps f ss, Apps f ss')
---     go End       ys      = (End, ys)
---     go (_ :> sh) (a :> x) =
---       let (s, t) = go sh x 
---       in  (a :> s, t) 
-    
-    
-
-
--- class HEq a b r | a b -> r 
--- instance HEq a a 'True
--- instance r ~ 'False => HEq a b r 
-
--- class FromList' (teq :: Bool) a exp b ts where
---   appsFromList' :: Proxy teq -> [ exp a ] -> Maybe (Apps exp (b ': ts))
---   appsToList'   :: Proxy teq -> Apps exp (b ': ts) -> Maybe [ exp a ] 
-
--- instance FromList a exp ts => FromList' 'True a exp a ts where
---   appsFromList' _ []    = Nothing
---   appsFromList' _ (a:x) = case appsFromList x of
---                             Just r  -> Just (a :> r)
---                             Nothing -> Nothing 
-
---   appsToList' _ (a :> r) = appsToList r >>= (return . (a:))
-  
--- instance FromList' 'False a exp b ts where
---   appsFromList' _ _ = Nothing
---   appsToList' _ _   = Nothing 
-
--- instance FromList a exp '[] where
---   appsFromList [] = Just End
---   appsFromList _  = Nothing
-
---   appsToList End = Just []
-  
-  
--- instance (HEq a b teq, FromList' teq a exp b ts) => FromList a exp (b : ts) where
---   appsFromList = appsFromList' (Proxy :: Proxy teq)
---   appsToList   = appsToList'   (Proxy :: Proxy teq)
+-- type family Append (xs :: [k]) (ys :: [k]) :: [k]
+-- type instance Append '[] ys       = ys
+-- type instance Append (x ': xs) ys = x ': Append xs ys 
 
 class FliPprC (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
   fapp   :: In a => exp (a :~> t) -> arg a -> exp t
@@ -245,7 +236,7 @@ class FliPprC (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
   -- I find that using @rule@ has a problem on pretty-printing interpretation.
   -- Thus, I revisited usual ffix. We cannot avoid considering general mutual
   -- recursions as below. 
-  
+  -- 
   -- ffix  :: (exp t -> exp t) -> exp t
 
   ffix :: TypeList fs => (Apps exp fs -> Apps exp fs) -> (Apps exp fs -> exp t) -> exp t 
@@ -270,9 +261,6 @@ class FliPprC (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
   falign :: exp D -> exp D
   fgroup :: exp D -> exp D
   fnest  :: Int -> exp D -> exp D
-
--- newtype E arg exp a = E { unE :: FliPprC arg exp => exp a }
--- newtype A arg exp a = A { unA :: FliPprC arg exp => arg a }
 
 newtype A arg a = A { unA :: arg a }
 
@@ -300,44 +288,6 @@ data E arg exp (t :: FType) where
   EVar       :: exp t -> E arg exp t 
   EMRec      :: TypeList ts => (Apps exp ts -> Apps (E arg exp) ts) -> (Apps exp ts -> E arg exp r) -> E arg exp r
 
---   ELocal     :: R arg exp (E arg exp t) -> E arg exp t 
-
--- data R arg exp a where
---   ERec    :: E arg exp t -> R arg exp (exp t)
---   EReturn :: a -> R arg exp a
---   EBind   :: R arg exp a -> (a -> R arg exp b) -> R arg exp b
---   EFix    :: (a -> R arg exp a) -> R arg exp a 
-
--- instance Functor (R arg exp) where
---   fmap f x = x >>= (return . f)
-
--- instance Applicative (R arg exp) where
---   pure = return
---   x <*> y = do
---     f <- x
---     a <- y
---     return $ f a
-
--- instance Monad (R arg exp) where
---   return = EReturn
---   (>>=)  = EBind
-
--- instance MonadFix (R arg exp) where
---   mfix = EFix 
-
--- local :: R arg exp (E arg exp t) -> E arg exp t
--- local (EReturn e) = e 
--- local r = ELocal r 
-  
--- rec_ :: E arg exp t -> R arg exp (E arg exp t)
--- rec_ e = do 
---   v <- ERec e
---   return $ EVar v
-  
-
--- class (FliPprC arg exp, MonadFix m) => FliPprR m arg exp | exp -> m, exp -> arg where
---   frecursive :: exp t -> m (exp t)
---   flocal     :: m (exp t) -> exp t
 
 compile :: E arg exp t -> FliPprC arg exp => exp t 
 compile (EApp e (A a))   = fapp (compile e) a
@@ -364,41 +314,10 @@ compile (EVar e)    = e
 compile (EMRec f k)  =
   ffix (mapApps compile . f) (compile . k)
 
--- compile (ELocal  r) = flocal (compileR $ fmap compile r)
--- 
--- compileR :: FliPprR m arg exp => R arg exp a -> m a
--- compileR (ERec e)    = frecursive (compile e)
--- compileR (EReturn a) = return a 
--- compileR (EBind x f) = do
---   x' <- compileR x
---   compileR (f x')
--- compileR (EFix f) =
---   mfix (compileR . f)
--- compileR 
-
 data FliPpr t = FliPpr (forall arg exp. FliPprC arg exp => exp t)
 
 flippr :: (forall arg exp. E arg exp t) -> FliPpr t
 flippr x = FliPpr (compile x) -- (compileR (fmap ERec x >>= id))
-
-
-
--- data E arg exp a where
---   E :: (FliPprC arg exp => exp a) -> E arg exp a
-
--- unE :: E arg exp a -> FliPprC arg exp => exp a
--- unE (E a) = a 
-
--- data A arg exp a where
---   A :: (FliPprC arg exp => arg a) -> A arg exp a 
-
--- class (FliPprC arg exp, MonadFix m)
--- => FRec m arg exp | exp -> m, exp -> arg  where
--- frecursive :: exp t -> m (exp t)
-
--- class (FliPprC arg exp, MonadFix m)
--- => FUnRec m arg exp | exp -> m , exp -> arg where
--- flocal     :: m (exp t) -> exp t 
 
 spaces :: E arg exp D
 spaces = ESpaces
@@ -477,14 +396,14 @@ fixs _ f = fmap (fromJust . appsToList) $ mrec (fromJust . appsFromList . f . ap
 
     appsToList' a = fromJust (appsToList (a :: Apps exp ts ))
 
-fixfix :: (TypeList ts, TypeList ts', TypeList (Append ts ts')) => 
-          (Apps exp ts -> Apps exp ts' -> Apps (E arg exp) ts) -> 
-          (Apps exp ts -> Apps exp ts' -> Apps (E arg exp) ts') ->
-          C arg exp r (Apps (E arg exp) ts,  Apps (E arg exp) ts')
-fixfix f1 f2 =
-  fmap splitApps $   
-  mrec (\z -> let (a,b) = splitApps z
-              in appendApps (f1 a b) (f2 a b))
+-- fixfix :: (TypeList ts, TypeList ts', TypeList (Append ts ts')) => 
+--           (Apps exp ts -> Apps exp ts' -> Apps (E arg exp) ts) -> 
+--           (Apps exp ts -> Apps exp ts' -> Apps (E arg exp) ts') ->
+--           C arg exp r (Apps (E arg exp) ts,  Apps (E arg exp) ts')
+-- fixfix f1 f2 =
+--   fmap splitApps $   
+--   mrec (\z -> let (a,b) = splitApps z
+--               in appendApps (f1 a b) (f2 a b))
 
   
 hardcat :: E arg exp D -> E arg exp D -> E arg exp D
@@ -640,162 +559,6 @@ instance D.Pretty (FliPpr t) where
 instance Show (FliPpr t) where
   show = show . ppr 
 
--- prefixPrinter :: D.DocLike d => Assoc -> [(d, Prec -> d)] -> Maybe d -> Prec -> d
--- prefixPrinter a ds trailing k =
---   parensIf (k > 0) $
---     case trailing of
---       Just t  -> go t 0 ds
---       Nothing -> go D.empty (case a of { AssocR -> 0; _ -> 1 }) ds
---   where
---     go t n []      = t
---     go t n [(d,f)] = d D.<> f n D.<> t
---     go t n ((d,f):ds) =
---       d D.<> f 0 D.<> go t n ds 
- 
-
--- type FName = Int
--- type VName = Int 
--- type FCount = Int
--- type Level = Int
-
--- data M a = Marked (Level, FName) (M a)
---          | Direct a 
-
--- type PMonad a = State ((Level,FCount), M.Map Level (M.Map FName D.Doc)) a 
-
--- pprFName :: (Level, FName) -> D.Doc
--- pprFName (0,n) = D.text ("ppr" ++ show n)
--- pprFName (1,n) = D.text ("pprAux" ++ show n)
--- pprFName (l,n) = D.text ("ppr_" ++ show l ++ "_" ++ show n)
-
--- pprVName :: VName -> D.Doc
--- pprVName n | n < length fancyNames = D.text [fancyNames !! n]
---            | otherwise             = D.text ("x" ++ show n)
---   where
---     fancyNames = "xyzwsturabcdeijklmnpqv"
-
--- var :: Int -> Printing D.Doc (t :: k)
--- var n = Printing $ \_ _ -> pprVName n 
-
--- runM :: M (Int -> Prec -> PMonad D.Doc) -> Int -> Prec -> PMonad D.Doc 
--- runM (Marked (l,i) f) n k = do
---   (_, table) <- get
---   runM' table 
---   where
---     modifyT :: (M.Map Level (M.Map FName D.Doc) -> M.Map Level (M.Map FName D.Doc)) -> PMonad () 
---     modifyT f = do
---       (n, t) <- get
---       put (n, f t) 
-
---     init l i t =
---       if l `M.member` t then
---         M.adjust (M.insert i D.empty) l t
---       else
---         M.insert l (M.singleton i D.empty) t 
-    
---     runM' table | Just t <- M.lookup l table,
---                   i `M.member` t = return $ pprFName (l,i)
---                 | otherwise          = do
---                     modifyT (init l i)
---                     d <- runM f n 0
---                     modifyT (M.adjust (M.insert i d) l)
---                     return $ pprFName (l,i) 
--- runM (Direct f) n k = f n k 
-
--- newtype PP a = PP { unPP :: M (Int -> Prec -> PMonad D.Doc) }
-
--- instance FliPprC (Printing D.Doc) PP where
---   fapp (PP f) x = PP $ Direct $ \n k -> do
---     d1 <- runM f n 9
---     let d2 = unPrinting x n 10 
---     return $ D.parensIf (k > 9) $ D.group $ d1 D.<+> D.text "`app`" D.<+> d2
-
---   farg f = PP $ Direct $ \n k -> do
---     let n' = n + 1 
---     d <- runM (unPP (f (var n'))) n' 1
---     return $ parensIf (k > 1) $
---       D.text "arg" D.<+> D.text "$" D.<+> D.text "\\" D.<> (pprVName n' D.<+> D.text "->" D.<+> d)
-
-
---   fcase x bs = PP $ Direct $ \n k -> do
---     ds <- mapM (pprBranch n) bs
---     return $ parensIf (k > 9) $
---       D.text "case_" D.<+>
---       (unPrinting x n 10) D.</>
---       D.nest 2 (D.group (D.text "[" D.<> D.align (D.punctuate (D.text "," D.<> D.line) ds D.<> D.text "]")))
---       where
---         pprBranch n (Branch (PInv s _ _) f) = do
---           d <- runM (unPP (f (var (n+1)))) (n+1) 0
---           return $ D.text s D.<+>
---                    D.text "`Branch`" D.<+> D.align (D.text "\\" D.<> pprVName (n+1) D.<+> D.text "->" D.<+> d)
-
---   funpair x f = PP $ Direct $ \n k -> do
---     d <- runM (unPP (f (var (n+1)) (var (n+2)))) (n+2) 1
---     return $ parensIf (k > 1) $
---       D.text "unpair" D.<+> (unPrinting x n 10) D.<+> 
---       D.text "$" D.<+> D.text "\\" D.<> pprVName (n+1) D.<+> pprVName (n+2) D.<+> D.text "->" D.<>
---       D.nest 2 (D.line D.<> d)
-     
---   ftext s = PP $ Direct $ \n k -> return $ 
---     parensIf (k > 9) $
---     D.text "text" D.<+> D.ppr s
-
---   fcat x y = PP $ Direct $ \n k -> do
---     d1 <- runM (unPP x) n 9
---     d2 <- runM (unPP y) n 9
---     return $ parensIf (k > 9) $
---       d1 D.<+> D.text "`hardcat`" D.<+> d2
-
---   fbchoice x y = PP $ Direct $ \n k -> do
---     d1 <- runM (unPP x) n 4
---     d2 <- runM (unPP y) n 4
---     return $ parensIf (k > 4) $
---       D.align d1 D.<> D.line D.<> D.text "<?" D.<+> d2 
-
---   fempty = PP $ Direct $ \_ _ -> return (D.text "empty")
---   fline  = PP $ Direct $ \_ _ -> return (D.text "line")
---   flinebreak = PP $  Direct $ \_ _ -> return (D.text "linebreak")
-
---   fspace  = PP $ Direct $ \_ _ -> return (D.text "space")
---   fspaces = PP $ Direct $ \_ _ -> return (D.text "spaces")
-
---   falign e = PP $ Direct $ \n k -> do
---     d <- runM (unPP e) n 10
---     return $ parensIf (k > 9) $ D.text "align" D.<+> D.align d 
-
---   fgroup e = PP $ Direct $ \n k -> do
---     d <- runM (unPP e) n 10
---     return $ parensIf (k > 9) $ D.align (D.text "group" D.<> D.line D.<> D.nest 2 d)
-
---   fnest i e = PP $ Direct $ \n k -> do
---     d <- runM (unPP e) n 10
---     return $ parensIf (k > 9) $ D.text "nest" D.<+> D.ppr i D.<+> d 
-
--- instance FliPprR (State (Int, Int)) (Printing D.Doc) PP where
---   frecursive r = do
---     (level, fn) <- get
---     put (level, fn+1)
---     return $ PP $ Marked (level, fn) (unPP r)
-
---   flocal r = PP $ Direct $ \n k -> do
---     ((lv,start), _) <- get
---     let (res, (_,end)) = runState r (lv+1,start)
---     modify (first (const (lv,end)))
---     d <- runM (unPP res) n 10
---     (kk, table) <- get
---     let defs = maybe [] M.toList (M.lookup (lv+1) table)
---     return $
---       if null defs then
---         d 
---       else 
---         parensIf (k > 1) $ D.text "local $" D.</> D.text "do {" D.<> 
---           D.align (D.text " " D.<> D.punctuate (D.linebreak <> D.text "; ") (map (pprF (lv+1)) $ defs) <>
---                    D.linebreak <> D.text ";" D.<+> D.text "return" D.<+> d D.<+> D.text "}")
---       where
---         pprF lv' (i,d) =
---           D.text "rec" D.<+> pprFName (lv',i) D.<+> D.text "<-" D.<+> D.text "rec_ $" D.<+>
---           D.nest 2 (D.align d)
-
 
 example1 = flippr $ unC $ do
   let manyParens d = fix1 (\m -> d <? parens (call m))
@@ -833,63 +596,3 @@ example1 = flippr $ unC $ do
         g (a,x) = Just (a:x) 
   
     
-              
-              
-              
-             
-    
-
--- example1 = flippr $
---   do let manyParens d = local $ do
---            rec m <- rec_ $ d <? parens m
---            return m 
---      rec pprTF <- rec_ $ arg $ \i -> manyParens $ case_ i
---            [ unTrue `Branch` \_ -> text "T",
---              unFalse `Branch` \_ -> text "F" ]
---      rec f <- rec_ $ arg $ \i -> manyParens $ case_ i
---            [ unNil  `Branch` \_ -> text "[" <> text "]",
---              unCons `Branch` \z -> unpair z $ \a x -> brackets (g `app` a `app` x) ]
---          g <- rec_ $ arg $ \a -> arg $ \x -> case_ x 
---            [ unNil `Branch`  \_ -> pprTF `app` a
---            , unCons `Branch` \z -> unpair z $ \b x -> 
---                pprTF `app` a <> text "," <> g `app` b `app` x ]
---      return f
---        where
---          unTrue  = PInv "unTrue" (\x -> if x then Just () else Nothing) (const (Just True))
---          unFalse = PInv "unFalse" (\x -> if x then Nothing else Just ()) (const (Just False))
-
---          unNil = PInv "unNil" f g
---            where
---              f [] = Just ()
---              f _  = Nothing
---              g () = Just []
---          unCons = PInv "unCons" f g
---            where
---              f [] = Nothing
---              f (a:x) = Just (a,x)
---              g (a,x) = Just (a:x) 
-  
-
--- pprPrecR :: Prec -> State (Level, FCount) (PP t) -> D.Doc
--- pprPrecR k r =
---   let (d, (_,ts)) = runState (runM (unPP $ evalState r (0,0)) 0 k) ((0,0), M.empty)
---   in D.text "do" D.<+> nest 3 (D.punctuate D.line (map pprR $ flatten ts) D.<>
---                                D.line D.<> D.text "return" D.<+> d)
-                
---   where
---     flatten t = [ ((l,i),d) | (l,tl) <- M.toList t, (i,d) <- M.toList tl ]
-
---     pprR ((l,i),d) =
---       D.text "rec" D.<+>
---         D.align (pprFName (l,i) D.<+> D.text "<-" D.<+> D.text "rec_ $" D.<+>
---                  D.nest 2 d)
-         
-    
-                             
-
--- instance D.Pretty (FliPpr t) where
---   pprPrec k (FliPpr e) = pprPrecR k e
-
--- instance Show (FliPpr t) where
---   show = show . ppr 
-
