@@ -1,3 +1,4 @@
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -20,11 +21,14 @@ import Text.FliPpr.Doc as D
 import Data.Kind
 
 import Text.FliPpr.Internal.Type as T
-import Data.Typeable (Proxy(..))
+import Data.Typeable ((:~:)(Refl), Proxy(..))
 
 import Prelude hiding ((.), id)
 import Control.Category ((.), id) 
 import Control.Applicative (Alternative(..)) 
+
+import Control.Monad.Reader
+import Control.Monad.State 
 
 type EnvRep = U 
 
@@ -512,67 +516,164 @@ finalize (GB k) =
       let (env1, r1, vt1) = E.extendEnv' env ps
       in Grammar r1 (mapEnv finalizeRHS env1)
 
+toGrammar :: Tr m RHSUC RHSUC a -> m '[] -> Grammar a
+toGrammar (Tr k) m0 =
+  case k m0 E.emptyEnv of
+    TrR ps _ env _ ->
+      let (env1, r1, _) = E.extendEnv' env (unFree ps)
+      in Grammar r1 (mapEnv finalizeRHS env1) 
+
 {-
-Inline NTs that does not contain any "|" 
+Reduce a grammar, with a simple inlining 
 -}
 
--- newtype VAny a = VAny (forall env t. E' t env -> V env a)
--- newtype Visited env a = Visited (Maybe (VAny v))
--- type Reduce env a = ReaderT (E' RHS env) (State (E' Visisted env)) a 
 
 
+data RedMap env new =
+  RedMap { runRedMap :: forall a. V env a -> Maybe (V new a) }
 
--- inlineSL :: Grammar a -> GrammarUC a
--- inlineSL (Grammar v a) = undefined
---   where
---     go :: RHS env a -> Reduce env (GrammarUC a)
---     go (RHS [])     = gempty 
---     go (RHS [s])    = goProd s 
---     go (RHS (s:ss)) =
---       liftM2 (<|>) (goProd s) (go (RHS ss))
+newtype Tr m rhs res a =
+  Tr { runTr :: forall old.
+                m old -> E' rhs old -> TrR m rhs res old a }
 
---     checkVisited :: V env a -> VAny a -> (VAny a -> Reduce env r) -> Reduce env r -> Reduce env r
---     checkVisited v va m1 m2 = do
---       tb <- get
---       (case (E.lookupEnv v tb) of
---          Just vany -> m1 vany 
---          Nothing -> do 
---            put $ E.updateEnv v (Just va) tb
---            m2) 
-         
+data TrR m rhs res old a =
+  forall new. TrR (FreeA res new a) (m new) (E' rhs new)  (VT old new)
 
---     goProd :: Prod env a -> Reduce env (GrammarUC a)
---     goProd (PNil f) = pure f
---     goProd (PCons (NT x) p) = do
---       oldRules <- ask 
---       case E.lookupEnv x oldRules of
---         RHS []  -> gempty
---         RHS [s] -> fmap (\a k -> k a) (goProd s oldRules) <*> goProd p oldRules
---         RHS ss  ->
---           checkVisited x (
---           tb <- get
+
+data FreeA f n a where
+  FPure :: a -> FreeA f n a
+  FMult :: FreeA f n (a -> b) -> FreeA f n a -> FreeA f n b
+  FRaw  :: f n a -> FreeA f n a 
+    
+instance Functor (FreeA f n) where
+  fmap f x = pure f <*> x 
+
+instance Applicative (FreeA f n) where
+  pure  = FPure
+  (<*>) = FMult
+
+unFree :: Applicative (f n) => FreeA f n a -> f n a
+unFree (FPure a)   = pure a
+unFree (FMult f a) = unFree f <*> unFree a 
+unFree (FRaw  x)   = x 
+
+instance Shiftable d f => Shiftable d (FreeA f) where
+  shift vt (FPure a)   = FPure a
+  shift vt (FMult f a) = FMult (shift vt f) (shift vt a)
+  shift vt (FRaw x)    = FRaw (shift vt x) 
+  
+instance Functor (Tr m rules res) where
+  fmap f (Tr k) = Tr $ \m env -> case k m env of
+    TrR res m' env' vt' -> TrR (fmap f res) m' env' vt'
+
+instance Shiftable EnvRep res => Applicative (Tr m rules res) where
+  pure a = Tr $ \m env -> TrR (pure a) m env id
+  Tr f <*> Tr a = Tr $ \m env ->
+    case f m env of
+      TrR res1 m1 env1 vt1 ->
+        case a m1 env1 of
+          TrR res2 m2 env2 vt2 ->
+            TrR (shift vt2 res1 <*> res2) m2 env2 (vt2 . vt1)
+
+type TrG m a = Tr m RHSUC RHSUC a 
+  
+prodOpt :: (forall env env'. VT env env' -> m env -> m env') ->
+           TrG m (a -> b) -> TrG m a -> TrG m b 
+prodOpt shifter (Tr f) (Tr a) = Tr $ \m env ->
+  case f m env of
+    TrR res1 m1 env1 vt1 ->
+      case a m1 env1 of
+        TrR res2 m2 env2 vt2 ->
+          case refine (shift vt2 res1) env2 of
+            GR res1' env3 vt3 ->
+              case refine (shift vt3 res2) env3 of
+                GR res2' env4 vt4 ->
+                  TrR (FRaw (shift vt4 res1' <*> res2'))
+                      (shifter (vt4 . vt3) m2)
+                      env4
+                      (vt4 . vt3 . vt2 . vt1)
+  where
+    refine :: FreeA RHSUC env a -> E' RHSUC env -> GR env a
+    refine (unFree -> ps) env
+      | atmostSingle ps = GR ps env id
+      | otherwise       = let (env', r', vt') = E.extendEnv' env ps
+                          in  GR (RSingle (PSymb (NT r'))) env' vt' 
+
+-- data RedR new a = forall upd. RedR (RHSUC upd a) (E' RHSUC upd) (VT new upd)
+
+makeAlt :: TrG m a -> TrG m a -> TrG m a
+makeAlt (Tr a) (Tr b) = Tr $ \m env ->
+  case a m env of
+    TrR res1 m1 env1 vt1 ->
+      case b m1 env1 of
+        TrR res2 m2 env2 vt2 -> 
+          TrR (FRaw $ unFree (shift vt2 res1) `RUnion` unFree res2) m2 env2 (vt2 . vt1)
+
+reduce :: Grammar a -> Grammar a
+reduce (Grammar v oldEnv) =
+  toGrammar (work (E.lookupEnv v oldEnv) oldEnv) (RedMap $ const Nothing) 
+  where
+    -- TODO: The current implementation is a bit too conservative
+    -- in inlining. It would generate a grammar with the rules of the form
+    -- of Pk = Pj.
+
+    work :: RHS env a -> E' RHS env -> Tr (RedMap env) RHSUC RHSUC a
+    work (RHS [])     oldRules = Tr $ \m e -> TrR (FRaw REmpty) m e id
+    work (RHS [s])    oldRules = workProd s oldRules 
+    work (RHS (s:ss)) oldRules =
+      makeAlt (workProd s oldRules) (work (RHS ss) oldRules) 
+
+    workProd :: Prod env a -> E' RHS env -> Tr (RedMap env) RHSUC RHSUC a
+    workProd (PNil a) oldRules = pure a
+    workProd (PCons a f) oldRules =
+      makeProd (fmap (\a k -> k a) (workSymb a oldRules)) (workProd f oldRules)
+
+    makeProd = prodOpt shifter
+      where
+        shifter vt m = RedMap $ fmap (shift vt) . runRedMap m 
+
+    workSymb :: Symb env a -> E' RHS env -> Tr (RedMap env) RHSUC RHSUC a
+    workSymb (NT x) oldRules = Tr $ \m e ->
+      case runRedMap m x of
+        Just v -> TrR (FRaw $ RSingle (PSymb (NT v))) m e id
+        Nothing ->
+          let ps = E.lookupEnv x oldRules
+          in if inlinable ps then
+               runTr (work ps oldRules) m e
+             else 
+               let (env1, r1, vt1) = E.extendEnv' e RUnInit 
+                   m' = RedMap $ \v ->
+                     case E.eqVar v x of
+                       Just Refl ->  Just r1
+                       Nothing   ->  fmap (shift vt1) (runRedMap m v)
+               in case runTr (work ps oldRules) m' env1 of
+                    TrR fps2 m2 env2 vt2 ->
+                      let ps2   = unFree fps2
+                          env2' = E.updateEnv (shift vt2 r1) ps2 env2
+                      in TrR (FRaw $ RSingle $ PSymb $ NT $ shift vt2 r1) m2 env2' (vt2 . vt1)
+
+    workSymb (TermC c) oldRules =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermC c))) m e id 
+    workSymb (TermP c) oldRules =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermP c))) m e id 
+    workSymb (Space) oldRules =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (Space))) m e id 
+    workSymb (Spaces) oldRules =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (Spaces))) m e id 
+
+    inlinable :: RHS env a -> Bool
+    inlinable (RHS [])  = True
+    inlinable (RHS [s]) = isConstant s
+    inlinable _         = False
+
+    isConstant :: Prod env a -> Bool
+    isConstant (PNil _) = True
+    isConstant (PCons s r) =
+      nonNT s && isConstant r
+      where
+        nonNT (NT _) = False
+        nonNT _      = True 
           
---           GB $ \env ->
---           case runGB (go (RHS ss) oldRules) env of
---             GR ps1 env1 vt1 -> 
---               case runGB (goProd p oldRules) env1 of
---                 GR ps2 env2 vt2 ->
---                   let (env3, r3, vt3) = E.extendEnv' env2 (shift vt2 ps1)
---                   in 
-        
-
---     goProd (PCons Space p) = 
---       (fmap (\a k -> k a) gspace <*>) <$> (goProd p oldRules)
-
---     goProd (PCons Spaces p) = 
---       (fmap (\a k -> k a) gspaces <*>) <$> goProd p oldRules
---     goProd (PCons (TermC c) p) = 
---       (fmap (\a k -> k a) (gchar c) <*>) <$> 
---         goProd p oldRules 
---     goProd (PCons (TermP q) p) = 
---       (fmap (\a k -> k a) (gsatisfy q) <*>) <$>
---         goProd p oldRules 
-
 
 
 instance Pretty (Symb env a) where
@@ -583,12 +684,24 @@ instance Pretty (Symb env a) where
   ppr (Spaces)  = text "<spaces>"
 
 instance Pretty (Prod env a) where
-  ppr (PNil _)    = text (show "")
-  ppr (PCons p r) = go (ppr p) r 
+  ppr (PNil _) = text (show "")
+  ppr p        = ppr' p 
     where      
-      go :: Doc -> Prod env b -> Doc 
-      go d (PNil _)    = d 
-      go d (PCons s r) = d <+> go (ppr s) r 
+      pprRest :: Doc -> Prod env b -> Doc 
+      pprRest d (PNil _) = d 
+      pprRest d r        = d D.<+> ppr' r 
+
+      ppr' :: Prod env c -> Doc
+      ppr' = go ""
+        where
+          go :: String -> Prod env c -> Doc 
+          go s (PNil _)            = pprS s D.empty
+          go s (PCons (TermC c) r) = go (c:s) r
+          go s (PCons t r)         = pprS s $ pprRest (ppr t) r
+
+          pprS "" d = d
+          pprS s  d = D.text (show $ reverse s) D.<+> d 
+      
 
 instance Pretty (RHS env a) where
   ppr (RHS []) = text "<empty>"

@@ -64,6 +64,7 @@ class EnvImpl i where
   data Rep i :: [Type] -> Type 
 
   showVar :: Var i env a -> String
+  eqVar :: Var i env a -> Var i env b -> Maybe (a :~: b) 
 
   lookupEnv :: Var i def a -> Env i t use def -> t use a
 
@@ -107,6 +108,12 @@ instance EnvImpl U where
   newtype Rep U env        = RepU Int
 
   showVar (VarU n) = show n 
+  eqVar (VarU n) (VarU m) =
+    if n == m then
+      unsafeCoerce (Just Refl)
+    else
+      Nothing 
+      
 
   lookupEnv (VarU n) (EnvU k m) = unsafeCast (fromJust $ IM.lookup (k-n) m)
   modifyEnv (VarU n) f (EnvU k m) = EnvU k (IM.adjust (Untype . f . unsafeCast) (k-n) m)
@@ -141,6 +148,10 @@ instance EnvImpl S where
   data Rep S env where
     REnd    :: Rep S '[]
     RExtend :: Rep S env -> Proxy a -> Rep S (a : env) 
+
+  eqVar VZ VZ         = Just Refl
+  eqVar (VS n) (VS m) = eqVar n m
+  eqVar _      _      = Nothing 
 
   showVar = show . go
     where
