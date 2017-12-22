@@ -1,3 +1,35 @@
-module Text.FliPpr where
+{-# LANGUAGE ExplicitNamespaces #-}
 
-import Text.FliPpr.Type 
+module Text.FliPpr (
+  -- * Types
+  A, E, C, FliPprC(), 
+  Branch(..), Rec(..), type (<->)(..), In, 
+  
+  -- * Syntax
+  -- ** Lambda 
+  app, arg, (@@),
+
+  -- ** Biased choice
+  (<?),
+
+  -- ** Case
+  case_, unpair,
+
+  -- ** Fixpoints
+  fix1, fix2, fixn, 
+
+  -- ** Raw Pretty-Printing Combinators
+  hardcat, spaces, space, 
+
+  -- ** Monad-related Operation
+  unC,  share, 
+
+  -- * Evaluator
+  pprMode, parsingMode 
+  ) where
+
+import Text.FliPpr.Internal.Type
+import Text.FliPpr.Internal.PrettyPrinting 
+import Text.FliPpr.Internal.ParserGeneration 
+
+

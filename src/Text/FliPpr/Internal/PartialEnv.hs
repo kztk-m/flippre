@@ -1,14 +1,14 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
+
 {- |
 Partial environment. Unlike @Env@, this module is for non-recursive environment
 of which entry can be missing.
 -}
-
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeFamilies #-}
 
 module Text.FliPpr.Internal.PartialEnv where
 
@@ -21,7 +21,7 @@ import Unsafe.Coerce
 newtype VarT i env env' = VarT { runVarT :: forall a. Var i env a -> Var i env' a}
 
 instance Category (VarT i) where
-  id = VarT (\x -> x)
+  id = VarT Prelude.id
   VarT f . VarT g = VarT (f Prelude.. g) 
 
 
@@ -79,7 +79,7 @@ instance PartialEnvImpl U where
 
   newtype Rep U env = RepU Int
 
-  lookupEnv (VarU i) (EnvU es) = unsafeCast <$> (go i es)
+  lookupEnv (VarU i) (EnvU es) = unsafeCast <$> go i es
     where
       go :: Int -> EnvImpl -> Maybe Untype
       go 0 (EExt v _) = v
@@ -91,7 +91,7 @@ instance PartialEnvImpl U where
       go 0 v (EExt Nothing e) = Just (EExt (Just (Untype v)) e)
       go 0 v (EExt (Just v') e)
         | Just r <- mg v (unsafeCast v') = Just (EExt (Just (Untype r)) e)
-      go n v (EExt v' e) = EExt v' <$> (go (n-1) v e)
+      go n v (EExt v' e) = EExt v' <$> go (n-1) v e
       go _ _ _           = Nothing
 
   mergeEnv mg (EnvU es) (EnvU es') = EnvU <$> go es es' 
@@ -114,11 +114,11 @@ instance PartialEnvImpl U where
   
   extendEnv (EnvU env) v = (EnvU (EExt (Untype <$> v) env),
                             VarU 0,
-                            VarT (\(VarU i) -> (VarU (i+1))))
+                            VarT (\(VarU i) -> VarU (i+1)))
 
-  emptyRep = (RepU 0)
+  emptyRep = RepU 0
   extendRep (RepU k) _ =
-    (RepU (k+1), VarU 0, VarT (\(VarU i) -> (VarU (i+1))))
+    (RepU (k+1), VarU 0, VarT (\(VarU i) -> VarU (i+1)))
      
 
   popEnv (EnvU env) = let (v,e) = go env

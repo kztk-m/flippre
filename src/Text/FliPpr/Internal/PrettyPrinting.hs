@@ -29,8 +29,8 @@ instance DocLike d => FliPprCPre Identity (Ppr d) where
 
   fcase a = go (coerce a)
     where
-      go a [] = error "Pattern matching failure"
-      go a (Branch (PInv _ f g) h : bs) =
+      go _ [] = error "Pattern matching failure"
+      go a (Branch (PInv _ f _) h : bs) =
         case f a of
           Nothing -> go a bs
           Just b  -> h (Identity b) 
@@ -61,7 +61,7 @@ instance DocLike d => FliPprC Identity (Ppr d) where
     let x = fmap2 (\k -> runRec k x) defs
     in k x 
 
-pprModeMono :: (Ppr Doc (a :~> D)) -> a -> Doc
+pprModeMono :: Ppr Doc (a :~> D) -> a -> Doc
 pprModeMono (PF h) a = case h a of
                       PD d -> d 
                           

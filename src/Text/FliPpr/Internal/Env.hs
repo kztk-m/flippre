@@ -17,7 +17,7 @@ import Prelude hiding (id, (.))
 import Control.Category
 import Control.Applicative (Const(..))
 
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Typeable ((:~:)(..), Proxy(..))
 import Data.Monoid (Endo(..))
 import Data.Kind 
@@ -86,7 +86,7 @@ class EnvImpl i where
               Env i t use def -> Env i t' use' def -> f (Env i t'' use'' def)
 
   emptyEnv  :: Env i t use '[]
-  extendEnv :: Env i t use def -> t use a -> (Env i t use (a : def), Var i (a : def) a, (VarT i def (a : def)))
+  extendEnv :: Env i t use def -> t use a -> (Env i t use (a : def), Var i (a : def) a, VarT i def (a : def))
 
   repOf :: Env i t use env -> Rep i env 
 
@@ -128,7 +128,7 @@ instance EnvImpl U where
     where
       f (VarU n) = VarU (n+1) 
   
-  repOf (EnvU k m) = RepU k
+  repOf (EnvU k _) = RepU k
 
   embedVar (RepU k) (RepU k') (VarU i) = VarU (i + (k' - k))
 
@@ -165,7 +165,7 @@ instance EnvImpl S where
   modifyEnv VZ     f (EExtend e v) = EExtend e (f v)
   modifyEnv (VS n) f (EExtend e v) = EExtend (modifyEnv n f e) v 
 
-  traverseEnvWithVar f EEnd          = pure EEnd
+  traverseEnvWithVar _ EEnd          = pure EEnd
   traverseEnvWithVar f (EExtend e v) = go f e v (VarT id)
     where
       go :: Applicative f =>
@@ -175,7 +175,7 @@ instance EnvImpl S where
       go f (EExtend e t') t sh =
         EExtend <$> go f e t' (sh . VarT VS) <*> f (runVarT sh VZ) t 
       
-  zipWithA f EEnd EEnd = pure EEnd
+  zipWithA _ EEnd EEnd = pure EEnd
   zipWithA f (EExtend e v) (EExtend e' v') =
     EExtend <$> zipWithA f e e' <*> f v v' 
 
@@ -200,7 +200,7 @@ instance EnvImpl S where
     where
       requal :: Rep S env -> Rep S env' -> Maybe (env :~: env')
       requal REnd REnd = Just Refl
-      requal (RExtend e v) (RExtend e' v') =
+      requal (RExtend e _) (RExtend e' _) =
         case requal e e' of
           Just Refl -> Just (unsafeCoerce Refl)
           Nothing   -> Nothing
@@ -247,7 +247,7 @@ foldrEnvWithVar :: (EnvImpl rep) =>
 foldrEnvWithVar f = flip $ appEndo . foldEnvWithVar (\k x -> Endo (f k x))                   
 
 pprEnv :: (EnvImpl rep, DocLike d) => (forall a. d -> t use a -> d) -> d -> Env rep t use def -> d
-pprEnv pprBody prefix = maybe empty id .
+pprEnv pprBody prefix = fromMaybe empty .
   foldrEnvWithVar (\v body r ->                     
                      let rd = prefix <> text (showVar v) <+> text "=" <+> align (pprBody prefix body)
                      in Just $ case r of

@@ -21,10 +21,10 @@ length2 :: Container2 t => t f -> Int
 length2 = foldr2 (const (+1)) 0 
 
 foldr2 :: Container2 t => (forall a. f a -> r -> r) -> r -> t f -> r
-foldr2 f b = flip appEndo b . getConst . traverse2 (\a -> Const (Endo (f a))) 
+foldr2 f b = flip appEndo b . getConst . traverse2 (Const . Endo . f) 
 
 fold2 :: (Container2 t, Monoid m) => (forall a. f a -> m) -> t f -> m
-fold2 f = getConst . traverse2 (\a -> Const (f a))
+fold2 f = getConst . traverse2 (Const . f)
 
 zipWith2 :: Container2 t => (forall a. f a -> g a -> h a) ->
                             t f -> t g -> t h
@@ -36,8 +36,8 @@ data (a :< b) f = f a :< b f
 infixr 0 :< 
 
 instance Container2 End where
-  traverse2 f End = pure End
-  zipWithA2 f End End = pure End 
+  traverse2 _f End = pure End
+  zipWithA2 _f End End = pure End 
 
 instance Container2 r => Container2 (a :< r) where
   traverse2 f (a :< r) =

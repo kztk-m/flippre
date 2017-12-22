@@ -71,15 +71,15 @@ instance Shiftable EnvRep RHS where
   shift vt (RHS ps) = RHS (map (shift vt) ps)
 
 shiftProd :: VT env env' -> Prod env a -> Prod env' a
-shiftProd vt (PNil a)    = PNil a
+shiftProd _  (PNil a)    = PNil a
 shiftProd vt (PCons s r) = PCons (shift vt s) (shiftProd vt r) 
 
 instance Shiftable EnvRep Symb where
-  shift vt (TermC c) = TermC c
-  shift vt (TermP p) = TermP p
+  shift _  (TermC c) = TermC c
+  shift _  (TermP p) = TermP p
   shift vt (NT v)    = NT (runVarT vt v) 
-  shift vt Space     = Space
-  shift vt Spaces    = Spaces 
+  shift _  Space     = Space
+  shift _  Spaces    = Spaces 
 
 -- UC: Under Construction
 newtype GrammarUC a =
@@ -95,9 +95,9 @@ data RHSUC env a = RUnion  (RHSUC env a) (RHSUC env a)
 
 instance Shiftable EnvRep RHSUC where
   shift vt (RUnion r1 r2) = RUnion (shift vt r1) (shift vt r2)
-  shift vt REmpty         = REmpty
+  shift _  REmpty         = REmpty
   shift vt (RSingle p)    = RSingle (shift vt p)
-  shift vt RUnInit        = RUnInit 
+  shift _  RUnInit        = RUnInit 
 
 finalizeRHS :: RHSUC env a -> RHS env a
 finalizeRHS x = RHS (go x [])
@@ -107,7 +107,7 @@ finalizeRHS x = RHS (go x [])
     go _            r = r
 
 finalizeProd :: ProdUC env a -> Prod env a 
-finalizeProd x = fnaive id x -- go id x PNil 
+finalizeProd = fnaive id -- go id x PNil 
   where
     -- naive :: ProdUC env a -> Prod env a
     -- naive (PPure f)   = PNil f
@@ -115,7 +115,7 @@ finalizeProd x = fnaive id x -- go id x PNil
     -- naive (PMult p q) = naiveF id p (naive q)  
 
     -- fnaive = fmap f . naive 
-    fnaive ::(a -> b) -> ProdUC env a -> Prod env b
+    fnaive :: (a -> b) -> ProdUC env a -> Prod env b
     fnaive f (PPure a)   = PNil (f a)
     fnaive f (PSymb s)   = PCons s (PNil f)
     fnaive f (PMult p q) = go (f.) p (\g -> fnaive g q)
@@ -135,7 +135,7 @@ finalizeProd x = fnaive id x -- go id x PNil
 
     go :: (x -> (a -> b)) -> ProdUC env x -> (forall r. (a -> r) -> Prod env r) -> Prod env b
     go f (PPure a) r = r (f a)
-    go f (PSymb s) r = PCons s $ r (\a c -> f c a)
+    go f (PSymb s) r = PCons s $ r (flip f)
     go f (PMult p q) r =
       go (flip ($) . (f.)) p (\k -> go (\a b -> k (\f -> f a b)) q r)
 
@@ -148,7 +148,7 @@ data ProdUC env a where
 instance Shiftable EnvRep ProdUC where
   shift vt (PSymb a)   = PSymb (shift vt a)
   shift vt (PMult p q) = PMult (shift vt p) (shift vt q)
-  shift vt (PPure a)   = PPure a 
+  shift _  (PPure a)   = PPure a 
 
 instance Functor (ProdUC env) where
   fmap f (PSymb s) = PPure f `PMult` PSymb s
@@ -161,9 +161,9 @@ instance Applicative (ProdUC env) where
 
 instance Functor (RHSUC env) where
   fmap f (RUnion a b) = RUnion (fmap f a) (fmap f b)
-  fmap f (REmpty)     = REmpty
+  fmap _ REmpty       = REmpty
   fmap f (RSingle p)  = RSingle (fmap f p) 
-  fmap f RUnInit      = RUnInit 
+  fmap _ RUnInit      = RUnInit 
 
 instance  Applicative (RHSUC env) where
   pure a = RSingle (pure a)
@@ -171,7 +171,7 @@ instance  Applicative (RHSUC env) where
   (RUnion f g) <*> a = RUnion (f <*> a) (g <*> a)
   REmpty <*> _       = REmpty
   RSingle f <*> RUnion a b = RUnion (RSingle f <*> a) (RSingle f <*> b)
-  RSingle f <*> REmpty     = REmpty
+  RSingle _ <*> REmpty     = REmpty
   RSingle f <*> RSingle a  = RSingle (f <*> a)
   _ <*> _                  = error "Shouldn't happen."  
   
@@ -206,16 +206,14 @@ instance Functor GrammarUC where
 atmostSingle :: RHSUC env a -> Bool
 atmostSingle = (>0) . go 2
   where
-    go lim _ | lim <= 0  = 0
-    go lim REmpty        = lim
-    go lim RUnInit       = 0
-    go lim (RSingle _  ) = lim - 1
-    go lim (RUnion x y)  = go (go lim x) y 
+    go :: Int -> RHSUC env a -> Int 
+    go lim  _ | lim <= 0  = 0
+    go lim  REmpty        = lim
+    go _lim RUnInit       = 0
+    go lim  (RSingle _  ) = lim - 1
+    go lim  (RUnion x y)  = go (go lim x) y 
 
 instance Applicative GrammarUC where
-  -- pure a = GB $ \env -> let (env1, r1, vt) = E.extendEnv env (Unions [ PNil a ])
-  --                       in GR r1 (E.mapEnv (shift vt) env1) vt 
-
   pure a = GB $ \env -> GR (RSingle (pure a)) env id 
 
   GB k1 <*> GB k2 = GB $ \env ->
@@ -231,26 +229,11 @@ instance Applicative GrammarUC where
               in GR (RSingle (makeMultS (NT (shift vt4 r3)) (NT r4))) env4 (vt4 . vt3 . vt2 . vt1)
     where
       makeMultS :: Symb env (a -> b) -> Symb env a -> ProdUC env b
-      makeMultS s1 s2 = (PSymb s1) <*> (PSymb s2)
+      makeMultS s1 s2 = PSymb s1 <*> PSymb s2
   
-  -- GB k1 <*> GB k2 = GB $ \env ->
-  --   case k1 env of
-  --     GR r1 env1 vt1 ->
-  --       case k2 env1 of
-  --         GR r2 env2 vt2 ->
-  --           let Unions ps = E.lookupEnv (runVarT vt2 r1) env2
-  --               (env3', r3, vt3) =
-  --                 E.extendEnv env2 (Unions [ PCons (NT (runVarT vt2 r1)) $
-  --                                            PCons (NT r2) $
-  --                                            PNil  (flip ($)) ])
-  --               env3 = E.mapEnv (shift vt3) env3'
-  --           in GR r3 env3 (vt3 . vt2 . vt1)
   
 instance Alternative GrammarUC where
-  -- empty = GB $ \env ->
-  --                let (env1, r1, vt) = E.extendEnv env (RHS [])
-  --                in GR r1 (E.mapEnv (shift vt) env1) vt
-  empty = GB $ \env -> GR (REmpty) env id 
+  empty = GB $ \env -> GR REmpty env id 
 
   GB k1 <|> GB k2 = GB $ \env ->
     case k1 env of
@@ -259,14 +242,6 @@ instance Alternative GrammarUC where
           GR ps2 env2 vt2 ->
             GR (RUnion ps2 (shift vt2 ps1)) env2 (vt2 . vt1) 
   
-  -- GB k1 <|> GB k2 = GB $ \env ->
-  --   case k1 env of
-  --     GR r1 env1 vt1 ->
-  --       case k2 env1 of
-  --         GR r2 env2 vt2 ->
-  --           let RHS ps1 = E.lookupEnv (runVarT vt2 r1) env2
-  --               env3 = E.modifyEnv r2 (\(RHS ps2) -> RHS (ps2 ++ ps1)) env2
-  --           in GR r2 env3 (vt2 . vt1)
 
 gempty :: GrammarUC a
 gempty = Control.Applicative.empty 
@@ -309,38 +284,10 @@ gfix f = runCPS (gfixn (Single $ Rec $ f . from)) from
     -- from :: Apps GrammarUC '[a] -> GrammarUC a 
     -- from (a :> End) = a
     -- to a = a :> End 
--- gfix f = GB $ \env ->
---   let (env1, r1, vt) = E.extendEnv' env (RUnInit)
---       res = f (GB $ \env' -> GR (RSingle $ PSymb (NT (E.embedVar (repOf env1) (repOf env') r1))) env' id)
---   in case runGB res env1 of
---        GR ps2 env2 vt2 ->
---          let r1'   = shift vt2 r1
---              env2' = E.updateEnv r1' ps2 env2
---          in GR (RSingle $ PSymb (NT r1')) env2' (vt2 . vt)
-
-
--- -- still not ok 
--- gbfix2 :: ((GrammarUC a, GrammarUC b) -> (GrammarUC a, GrammarUC b)) ->
---           ((GrammarUC a, GrammarUC b) -> GrammarUC r) ->
---           GrammarUC r
--- gbfix2 f k = GB $ \env ->
---   let (env1, r1, vt1)   = E.extendEnv' env (RUnInit)
---       (env2, r2, vt2)   = E.extendEnv' env1 (RUnInit)
---       makeNT r env env' = PSymb (NT (E.embedVar (repOf env) (repOf env') r)) 
---       captureR r oenv (GB k) = GB $ \env1' ->
---         case k env1' of
---           GR ps1' env1' vt1' -> GR (RSingle $ makeNT r oenv env1')
---                                 (E.updateEnv (E.embedVar (repOf oenv) (repOf env1') r) ps1' env1') vt1'
---       g1 = GB $ \env -> GR (RSingle $ makeNT r1 env1 env) env id
---       g2 = GB $ \env -> GR (RSingle $ makeNT r2 env2 env) env id 
---       k' (x,y) = k (captureR r1 env1 x, captureR r2 env2 y)
---   in case runGB (k' (f (g1, g2))) env2 of
---        GR psR envR vtR -> GR psR envR (vtR . vt2 . vt1) 
        
 newtype GBT   a = GBT { runGBT :: GrammarUC a -> GrammarUC a }
--- data TravR env ts = forall env'. TravR (E' RHSUC env') (Apps GBT ts) (Apps GrammarUC ts) (VT env env')
 
-data MkG a = MkG { runMkG :: forall env. E' RHSUC env -> MkGR env a }
+newtype MkG a = MkG { runMkG :: forall env. E' RHSUC env -> MkGR env a }
 data MkGR env a = forall env'. MkGR (E' RHSUC env') a (VT env env')
 data ((f :: k -> Type) :*: (g :: k -> Type)) a = f a :*: g a
 
@@ -428,7 +375,7 @@ gfixGen defs = cps $ \k -> Comp $ GB $ \env -> case runMkG glue env of
       GR psR envR vtR ->
         GR psR envR (vtR . vtI) 
   where
-    comp 0 is st f = is
+    comp 0 is _  _ = is
     comp n is st f =
       let x = comp (n-1) is st f
       in st (fmap2 (\r -> runRec r x) f)
@@ -439,7 +386,7 @@ gfixGen defs = cps $ \k -> Comp $ GB $ \env -> case runMkG glue env of
 
 gfixn ::
   Container2 k =>
-  k (Rec k GrammarUC) -> C GrammarUC (k (GrammarUC))
+  k (Rec k GrammarUC) -> C GrammarUC (k GrammarUC)
 gfixn defs = fmap (fmap2 elimI) $ 
   adjustCont2 elimI introI $
     gfixGen (fmap2 (T.adjustRec2 introI elimI) defs)
@@ -451,14 +398,19 @@ gfixn defs = fmap (fmap2 elimI) $
     elimI :: (GrammarUC :.: Identity) a -> GrammarUC a
     elimI (Comp g) = fmap runIdentity g 
 
--- TODO: implement this 
--- gshare :: GrammarUC a -> C GrammarUC (GrammarUC a)
--- gshare def = cps $ \k -> GB $ \env ->
---   case runGB def env of
---     GR ps1 env1 vt1 ->
---       let (env2, r2, vt2) = E.extendEnv' env1 ps1
---       in k (GR (RSingle $ PSymb (NT r2)) env2 (vt2 . vt1))
-  
+gshare :: GrammarUC a -> C GrammarUC (GrammarUC a)
+gshare def = cps $ \k -> GB $ \env ->
+  case runGB def env of
+    GR ps1 env1 vt1 ->
+      let (env2, r2, vt2) = E.extendEnv' env1 ps1
+      in case runGB (k (GB $ \env' ->
+                           GR (RSingle $ ntWithLift env2 env' r2)
+                         env' id)) env2 of
+           GR psN envN vtN ->
+             GR psN envN (vtN . vt2 . vt1)
+  where
+    ntWithLift :: E' RHSUC env -> E' RHSUC env' -> V env a -> ProdUC env' a
+    ntWithLift e e' r = PSymb $ NT $ E.embedVar (repOf e) (repOf e') r
 
 -- gfixnp :: forall ts p r.
 --           TypeList (ts :: [k]) =>
@@ -487,8 +439,8 @@ gspaces = liftSymbLiteral Spaces
 finalize :: GrammarUC a -> Grammar a
 finalize (GB k) =
   case k E.emptyEnv of
-    GR ps env vt ->
-      let (env1, r1, vt1) = E.extendEnv' env ps
+    GR ps env _vt ->
+      let (env1, r1, _vt1) = E.extendEnv' env ps
       in Grammar r1 (mapEnv finalizeRHS env1)
 
 toGrammar :: Tr m RHSUC RHSUC a -> m '[] -> Grammar a
@@ -504,7 +456,7 @@ Reduce a grammar, with a simple inlining
 
 
 
-data RedMap env new =
+newtype RedMap env new =
   RedMap { runRedMap :: forall a. V env a -> Maybe (V new a) }
 
 newtype Tr m rhs res a =
@@ -533,7 +485,7 @@ unFree (FMult f a) = unFree f <*> unFree a
 unFree (FRaw  x)   = x 
 
 instance Shiftable d f => Shiftable d (FreeA f) where
-  shift vt (FPure a)   = FPure a
+  shift _  (FPure a)   = FPure a
   shift vt (FMult f a) = FMult (shift vt f) (shift vt a)
   shift vt (FRaw x)    = FRaw (shift vt x) 
   
@@ -593,14 +545,14 @@ reduce (Grammar v oldEnv) =
     -- of Pk = Pj.
 
     work :: RHS env a -> E' RHS env -> Tr (RedMap env) RHSUC RHSUC a
-    work (RHS [])     oldRules = Tr $ \m e -> TrR (FRaw REmpty) m e id
-    work (RHS [s])    oldRules = workProd s oldRules 
-    work (RHS (s:ss)) oldRules =
+    work (RHS [])     _oldRules = Tr $ \m e -> TrR (FRaw REmpty) m e id
+    work (RHS [s])     oldRules = workProd s oldRules 
+    work (RHS (s:ss))  oldRules =
       makeAlt (workProd s oldRules) (work (RHS ss) oldRules) 
 
     workProd :: Prod env a -> E' RHS env -> Tr (RedMap env) RHSUC RHSUC a
-    workProd (PNil a) oldRules = pure a
-    workProd (PCons a f) oldRules =
+    workProd (PNil a)    _oldRules = pure a
+    workProd (PCons a f)  oldRules =
       makeProd (fmap (\a k -> k a) (workSymb a oldRules)) (workProd f oldRules)
 
     makeProd = prodOpt shifter
@@ -627,14 +579,14 @@ reduce (Grammar v oldEnv) =
                           env2' = E.updateEnv (shift vt2 r1) ps2 env2
                       in TrR (FRaw $ RSingle $ PSymb $ NT $ shift vt2 r1) m2 env2' (vt2 . vt1)
 
-    workSymb (TermC c) oldRules =
+    workSymb (TermC c) _oldRules =
       Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermC c))) m e id 
-    workSymb (TermP c) oldRules =
+    workSymb (TermP c) _oldRules =
       Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermP c))) m e id 
-    workSymb (Space) oldRules =
-      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (Space))) m e id 
-    workSymb (Spaces) oldRules =
-      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (Spaces))) m e id 
+    workSymb Space _oldRules =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb Space)) m e id 
+    workSymb Spaces _oldRules =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb Spaces)) m e id 
 
     inlinable :: RHS env a -> Bool
     inlinable (RHS [])  = True
@@ -655,8 +607,8 @@ instance Pretty (Symb env a) where
   ppr (TermC c) = text (show c)
   ppr (TermP _) = text "<abstract>"
   ppr (NT    x) = text ("P" ++ showVar x)
-  ppr (Space)   = text "_"
-  ppr (Spaces)  = text "<spaces>"
+  ppr Space     = text "_"
+  ppr Spaces    = text "<spaces>"
 
 instance Pretty (Prod env a) where
   ppr (PNil _) = text (show "")
@@ -725,7 +677,7 @@ example2 = finalize $
          <|> pure ())
   in gfix $ \x -> fst (f (x, gfix $ \y -> snd (f (x,y))))
   where
-    alpha = gfix $ \p ->
+    alpha = gfix $ \_ ->
       foldr1 (<|>) $ map gchar ['a'..'z']                               
     alphas = gfix $ \p ->
       (:) <$> alpha <*> p <|> pure []
@@ -744,7 +696,7 @@ example3 = finalize $
       p2 = gfix $ \y -> snd (f (gfix $ \x -> fst (f (x,y)), y))
   in p1 <|> p2 
   where
-    alpha = gfix $ \p ->
+    alpha = gfix $ \_ ->
       foldr1 (<|>) $ map gchar ['a'..'z']                               
     alphas = gfix $ \p ->
       (:) <$> alpha <*> p <|> pure []
@@ -782,7 +734,7 @@ example5 = finalize $ unCPS $ do
       --  :: Apps GrammarUC [(), ()] -> Apps GrammarUC [(), ()])
       -- (\(p1 :> p2 :> End) -> p1 <|> p2)
   where
-    alpha = gfix $ \p ->
+    alpha = gfix $ \_ ->
       foldr1 (<|>) $ map gchar ['a'..'z']                               
     alphas = gfix $ \p ->
       (:) <$> alpha <*> p <|> pure []
@@ -796,10 +748,10 @@ example6 = finalize $ unCPS $ do
     (Rec $ \(alpha :< alphas :< _) ->
         (:) <$> alpha <*> alphas <|> pure [])
     :<
-    (Rec $ \(alpha :< alphas :< tree :< forest :< _) ->
+    (Rec $ \(_ :< alphas :< _ :< forest :< _) ->
         () <$ alphas <* gspaces <* gtext "[" <* forest <* gtext "]")
     :<
-    (Rec $ \(alpha :< alphas :< tree :< forest :< _) ->
+    (Rec $ \(_ :< _ :< tree :< forest :< _) ->
          () <$ tree <* gspaces <* gtext "," <* gspaces <* forest
          <|> () <$ tree <|> pure () )
     :< End
