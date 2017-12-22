@@ -12,3 +12,4 @@ where
 
 import Text.FliPpr.Internal.Type
 import Text.FliPpr.Internal.PrettyPrinting 
+import Text.FliPpr.Internal.ParserGeneration 

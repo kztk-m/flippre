@@ -19,6 +19,9 @@ import Data.Typeable
 import Data.Functor.Identity 
 
 import Text.FliPpr.Internal.Type
+import Text.FliPpr.Container2
+import Text.FliPpr.Internal.CPS
+
 import qualified Text.FliPpr.Internal.Grammar as G 
 import Control.Applicative ((<|>), liftA2)
 
@@ -186,16 +189,10 @@ choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
 fromP :: GU a -> PExp D
 fromP x = PExp $ \_ -> (return $ RD PE.undeterminedEnv) <$ x 
 
-instance FliPprC PArg PExp where
+instance FliPprCPre PArg PExp where
   fapp :: forall a t. In a => PExp (a :~> t) -> PArg a -> PExp t 
   fapp (PExp f) (PArg n) = 
     PExp $ \tenv -> applySem (f tenv) (n tenv)
-    --          fmap (>>= (\k -> appSem k (n tenv))) (f tenv)
-    -- where
-    --   appSem :: In a => Result r (a :~> t) -> Int -> Err (Result r t) 
-    --   appSem (RF m) k =
-    --     mapEnv (\(EnvExt d env) -> insertEnv k (fromDynamic =<< d :: Maybe a) env) m
-
 
   farg :: forall a t. In a => (PArg a -> PExp t) -> PExp (a :~> t)
   farg f = PExp $ \tenv ->
@@ -204,44 +201,6 @@ instance FliPprC PArg PExp where
         let arg = PArg $ \tenv' -> PE.embedVar tenva tenv' va
         in fmap RF <$> unPExp (f arg) tenva 
              
-    
-                   -- let tenva = extend tenv (Proxy :: Proxy a)
-                   --     aa    = PArg $ \tenv' -> rlen tenv' - rlen tenva
-                   -- in fmap RF <$> unPExp (f aa) tenva
-
-  ffix :: TypeList ts =>
-          (Apps PExp ts -> Apps PExp ts) ->
-          (Apps PExp ts -> PExp r) -> PExp r
-  ffix f k = PExp $ \tenv ->
-    unlift $ G.gfixnp (\gs -> mapApps (run tenv) $ f $ mapApps (makeArg tenv) gs)
-                      (\gs -> run tenv $ k $ mapApps (makeArg tenv) gs)
-    where     
-      run :: Rep env -> PExp a -> (GU :.: (Err :.: Result env)) a
-      run tenv p = lift (unPExp p tenv)
-
-      makeArg :: Rep env -> (GU :.: (Err :.: Result env)) a -> PExp a
-      makeArg tenv g' =
-        let g = unlift g'
-        in PExp $ \tenv' -> (fmap $ mapToEnv (PE.embedEnv tenv tenv')) <$> g
-
-      lift :: forall f g h (a :: k). Functor f => f (g (h a)) -> (f :.: (g :.: h)) a
-      lift x = Comp (fmap Comp x)
-
-      unlift :: forall f g h (a :: k). Functor f => (f :.: (g :.: h)) a -> f (g (h a))
-      unlift x = fmap getComp (getComp x)
-
-  -- ffix :: (PExp p t -> PExp p t) -> PExp p t
-  -- ffix f = PExp $ \tenv ->
-  --                   pfix (\p -> let p' = PExp $ \tenv' -> fmap (>>= mapEnv (return . embed tenv tenv')) p 
-  --                               in unPExp (f p') tenv)
-  --   where
-  --     embed :: Rep env -> Rep env' -> Env env -> Env env'
-  --     embed tenv tenv' = go (rlen tenv' - rlen tenv)
-  --       where
-  --         go 0 r = r
-  --         go n r = EnvExt Nothing r 
-
-
   funpair :: forall a b r.
             (In a, In b) => PArg (a,b) -> (PArg a -> PArg b -> PExp r) -> PExp r
   funpair inp f = PExp $ \tenv ->
@@ -320,25 +279,6 @@ instance FliPprC PArg PExp where
                      Just env -> return env 
 
 
-      -- Check :: Maybe Dynamic -> Maybe Dynamic -> Err (Maybe Dynamic)
-      -- check Nothing b = return b
-      -- check a Nothing = return a
-      -- check (Just a) (Just b) =
-      --   if a == b then return (Just a) else err $ D.text "Merge failed: update is consistent."
-
-
-      -- merge :: Env t -> Env t -> Err (Env t)
-      -- merge EnvUndet     b            = return b
-      -- merge EnvEmp       EnvEmp       = return EnvEmp
-      -- merge EnvEmp       EnvUndet     = return EnvEmp
-      -- merge (EnvExt a r) (EnvExt b s) = do
-      --   c <- check a b
-      --   t <- merge r s
-      --   return $ EnvExt c t
-      -- merge (EnvExt a r) EnvUndet     = return (EnvExt a r)
-      -- merge _            _            = error "Cannot happen."
-      
-        
   
   fbchoice d1 d2 = choice d1 d2
   
@@ -355,9 +295,64 @@ instance FliPprC PArg PExp where
   fnest n    = id 
 
 
+instance FliPprC PArg PExp where
+  ffix :: Container2 k =>
+          k (Rec k PExp) -> C PExp (k PExp)
+  ffix defs =
+    CPS $ \k -> PExp $ \(tenv :: Rep env) ->
+     let toPExp :: forall a. (GU :.: (Err :.: Result env)) a -> PExp a 
+         toPExp   = makeArg tenv
+         fromPExp :: forall a. PExp a -> (GU :.: (Err :.: Result env)) a 
+         fromPExp = run tenv 
+     in unlift $
+         runCPS (G.gfixGen (fmap2 (adjustRec2 fromPExp toPExp) defs))
+                (fromPExp . k . fmap2 toPExp) 
+    
+    -- unlift $ runCPS
+    --  (G.gfixGen
+    --    (fmap2 (\r -> Rec $ \x -> run tenv $ runRec r (fmap2 (makeArg tenv) x)) defs))
+    --  (\xs -> run tenv $ k (fmap2 (makeArg tenv) xs))
+    where
+      run :: Rep env -> PExp a -> (GU :.: (Err :.: Result env)) a
+      run tenv p = lift (unPExp p tenv)
+
+      makeArg :: Rep env -> (GU :.: (Err :.: Result env)) a -> PExp a
+      makeArg tenv g' =
+        let g = unlift g'
+        in PExp $ \tenv' -> (fmap $ mapToEnv (PE.embedEnv tenv tenv')) <$> g
+    
+      lift :: forall f g h (a :: k). Functor f => f (g (h a)) -> (f :.: (g :.: h)) a
+      lift x = Comp (fmap Comp x)
+
+      unlift :: forall f g h (a :: k). Functor f => (f :.: (g :.: h)) a -> f (g (h a))
+      unlift x = fmap getComp (getComp x)
+
+{-  
+  ffix :: TypeList ts =>
+          (Apps PExp ts -> Apps PExp ts) ->
+          (Apps PExp ts -> PExp r) -> PExp r
+  ffix f k = PExp $ \tenv ->
+    unlift $ G.gfixnp (\gs -> mapApps (run tenv) $ f $ mapApps (makeArg tenv) gs)
+                      (\gs -> run tenv $ k $ mapApps (makeArg tenv) gs)
+    where     
+      run :: Rep env -> PExp a -> (GU :.: (Err :.: Result env)) a
+      run tenv p = lift (unPExp p tenv)
+
+      makeArg :: Rep env -> (GU :.: (Err :.: Result env)) a -> PExp a
+      makeArg tenv g' =
+        let g = unlift g'
+        in PExp $ \tenv' -> (fmap $ mapToEnv (PE.embedEnv tenv tenv')) <$> g
+
+      lift :: forall f g h (a :: k). Functor f => f (g (h a)) -> (f :.: (g :.: h)) a
+      lift x = Comp (fmap Comp x)
+
+      unlift :: forall f g h (a :: k). Functor f => (f :.: (g :.: h)) a -> f (g (h a))
+      unlift x = fmap getComp (getComp x)
+-}
+
 parsingModeMono :: In a => PExp (a :~> D) -> G.Grammar (Err a)
 parsingModeMono e =
-  G.finalize $ k <$> unPExp e (PE.emptyRep)
+  G.reduce $ G.finalize $ k <$> unPExp e (PE.emptyRep)
   where
     k :: In a => Err (Result '[] (a :~> D)) -> Err a
     k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s

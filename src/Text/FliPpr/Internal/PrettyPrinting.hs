@@ -9,32 +9,34 @@
 module Text.FliPpr.Internal.PrettyPrinting where
 
 import Text.FliPpr.Internal.Type
-import Data.Functor.Identity 
 import Text.FliPpr.Doc
+import Text.FliPpr.Container2
+import Text.FliPpr.Internal.CPS
 
-newtype I a = I { unI :: a }
+import Data.Functor.Identity 
+
+import Data.Coerce
+
 
 data Ppr d (t :: FType) where
   PD :: d -> Ppr d D
   PF :: (a -> Ppr d r) -> Ppr d (a :~> r)
 
-instance DocLike d => FliPprC I (Ppr d) where
-  fapp (PF f) (I a) = f a
+instance DocLike d => FliPprCPre Identity (Ppr d) where
+  fapp (PF f) a = f (coerce a)
 
-  farg f = PF (f . I)
+  farg f = PF (coerce f)
 
-  ffix f k = let r = f r in k r
-
-  fcase (I a) = go a
+  fcase a = go (coerce a)
     where
       go a [] = error "Pattern matching failure"
       go a (Branch (PInv _ f g) h : bs) =
         case f a of
           Nothing -> go a bs
-          Just b  -> h (I b) 
+          Just b  -> h (Identity b) 
 
 
-  funpair (I (a,b)) f = f (I a) (I b)
+  funpair (Identity (a,b)) f = f (coerce a) (coerce b)
 
   fbchoice x _ = x
 
@@ -54,10 +56,15 @@ instance DocLike d => FliPprC I (Ppr d) where
   fspace  = PD (text " ")
   fspaces = PD empty 
 
+instance DocLike d => FliPprC Identity (Ppr d) where
+  ffix defs = cps $ \k -> 
+    let x = fmap2 (\k -> runRec k x) defs
+    in k x 
+
 pprModeMono :: (Ppr Doc (a :~> D)) -> a -> Doc
 pprModeMono (PF h) a = case h a of
                       PD d -> d 
                           
 pprMode :: FliPpr (a :~> D) -> a -> Doc
-pprMode (FliPpr e) = pprModeE e 
+pprMode (FliPpr e) = pprModeMono e 
 
