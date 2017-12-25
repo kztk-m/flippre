@@ -42,10 +42,6 @@ data Branch arg exp a (t :: FType) =
   forall b. In b => Branch (a <-> b) (arg b -> exp t)
 
 
-newtype ((f :: k' -> Type) :.: (g :: k -> k')) a = Comp { getComp :: f (g a) }
-
-infixl 5 :.:
-
 class FliPprCPre (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
   fapp   :: In a => exp (a :~> t) -> arg a -> exp t
   farg   :: In a => (arg a -> exp t) -> exp (a :~> t)

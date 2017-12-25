@@ -3,9 +3,12 @@
 
 module Text.FliPpr.Internal.CPS where
 
-newtype CPS e a = CPS { runCPS :: forall r. (a -> e r) -> e r }
-  -- ^ r is universally quantified and may have a kind other than "*". 
 
+-- Notice that this monod is not the Codensity monad.
+-- We do not expect e to be a monad, and we do restrict r to have
+-- kind "*". 
+newtype CPS e a = CPS { runCPS :: forall r. (a -> e r) -> e r }
+  --
 
 instance Functor (CPS e) where
   fmap f (CPS m) = CPS $ \k -> m (k . f)
