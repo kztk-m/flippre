@@ -36,6 +36,7 @@ class Pretty a where
 instance Pretty a => Pretty [a] where
   ppr = pprList 
 
+instance Pretty Bool where ppr = text . show 
 instance Pretty Int where ppr = text . show
 instance Pretty Integer where ppr = text . show
 instance Pretty Char where

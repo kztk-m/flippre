@@ -22,14 +22,21 @@ import Text.FliPpr.Internal.Type as T (Rec(..))
 import Text.FliPpr.Container2 as T
 import Text.FliPpr.Internal.CPS 
 
+import Text.FliPpr.Doc as D 
+
 import Data.Typeable ((:~:)(Refl))
+import Data.List     (sortBy)
+
 import Prelude hiding ((.), id)
 import Control.Category ((.), id) 
 import Control.Applicative as A (Alternative(..)) 
+import Data.Coerce 
 
 import Text.FliPpr.Internal.Grammar.Type as G
 
+
 import Debug.Trace
+
 
 {-
 Reduce a grammar, with a simple inlining 
@@ -37,6 +44,13 @@ Reduce a grammar, with a simple inlining
 
 newtype RedMap env new =
   RedMap { runRedMap :: forall a. V env a -> Maybe (V new a) }
+
+insert :: VT new new' -> V env a -> V new' a -> RedMap env new -> RedMap env new'
+insert vt x y m = RedMap $ \x' ->
+  case E.eqVar x' x of
+    Just Refl -> Just y
+    Nothing   -> fmap (shift vt) (runRedMap m x')
+  
 
 newtype Tr m rhs res a =
   Tr { runTr :: forall old.
@@ -49,8 +63,13 @@ toGrammar :: Tr m (OpenRHS c) (OpenRHS c) a -> m '[] -> Grammar c a
 toGrammar (Tr k) m0 =
   case k m0 E.emptyEnv of
     TrR ps _ env _ ->
-      let (env1, r1, _) = E.extendEnv' env (unFree ps)
-      in Grammar r1 (mapEnv finalizeRHS env1) 
+      case unFree ps of
+        RSingle (PSymb (NT x)) ->
+          Grammar x (mapEnv finalizeRHS env)
+        _ -> 
+          let (env1, r1, _) = E.extendEnv' env (unFree ps)
+          in Grammar r1 (mapEnv finalizeRHS env1) 
+  
 
 data FreeA f n a where
   FPure :: a -> FreeA f n a
@@ -125,6 +144,16 @@ makeAlt (Tr a) (Tr b) = Tr $ \m env ->
 makeEmpty :: TrG c m a
 makeEmpty = Tr $ \m env -> TrR (FRaw $ REmpty) m env id 
 
+makeAlts :: [TrG c m a] -> TrG c m a
+makeAlts []     = makeEmpty
+makeAlts [a]    = a
+makeAlts (a:as) = a `makeAlt` makeAlts as 
+
+tryDiscard :: Maybe (a :~: ()) -> TrG c m a -> TrG c m a
+tryDiscard Nothing x = x
+tryDiscard (Just Refl) (Tr a) = Tr $ \m env ->
+  case a m env of
+    TrR res1 m1 env1 vt1 -> TrR (FRaw $ RVoid $ unFree res1) m1 env1 vt1 
 
 reduce :: Grammar c a -> Grammar c a
 reduce (Grammar v oldEnv) =
@@ -135,10 +164,8 @@ reduce (Grammar v oldEnv) =
     -- of Pk = Pj.
 
     work :: RHS c env a -> E' (RHS c) env -> TrG c (RedMap env) a
-    work (RHS [])     _oldRules = Tr $ \m e -> TrR (FRaw REmpty) m e id
-    work (RHS [s])     oldRules = workProd s oldRules 
-    work (RHS (s:ss))  oldRules =
-      makeAlt (workProd s oldRules) (work (RHS ss) oldRules) 
+    work (RHS ss b) oldRules =
+      tryDiscard b $ makeAlts (map (\s -> workProd s oldRules) ss)
 
     workProd :: Prod c env a -> E' (RHS c) env -> TrG c (RedMap env) a
     workProd (PNil a)    _oldRules = pure a
@@ -159,10 +186,7 @@ reduce (Grammar v oldEnv) =
                runTr (work ps oldRules) m e
              else 
                let (env1, r1, vt1) = E.extendEnv' e RUnInit 
-                   m' = RedMap $ \v ->
-                     case E.eqVar v x of
-                       Just Refl ->  Just r1
-                       Nothing   ->  fmap (shift vt1) (runRedMap m v)
+                   m' = insert vt1 x r1 m 
                in case runTr (work ps oldRules) m' env1 of
                     TrR fps2 m2 env2 vt2 ->
                       let ps2   = unFree fps2
@@ -179,16 +203,20 @@ reduce (Grammar v oldEnv) =
     --   Tr $ \m e -> TrR (FRaw $ RSingle (PSymb Spaces)) m e id 
 
     inlinable :: RHS c env a -> Bool
-    inlinable (RHS [])  = True
-    inlinable (RHS [s]) = isConstant s
-    inlinable _         = False
+    inlinable (RHS [] _)  = True
+    inlinable (RHS [s] _) = isConstant s || isDirect s 
+    inlinable _           = False
+
+    isDirect (PNil _) = True
+    isDirect (PCons (NT _) (PNil _)) = True
+    isDirect _ = False 
 
     isConstant :: Prod c env a -> Bool
     isConstant (PNil _) = True
     isConstant (PCons s r) =
       nonNT s && isConstant r
       where
-q        nonNT (NT _) = False
+        nonNT (NT _) = False
         nonNT _      = True 
           
 
@@ -216,8 +244,8 @@ newtype ProdMap env new =
 productConstruction :: Grammar inc a -> Transducer inc outc -> Grammar outc a
 productConstruction (Grammar var env) (Transducer start states finals tr) =
   toGrammar  
-  (alts [ fmap (\a _ -> a) (goRHS (E.lookupEnv var env) env start fin tr) `makeProd` fromList os
-        | fin <- finals, os <- maybe [] (:[]) (finalProd fin tr) ])
+  (makeAlts [ fmap (\a _ -> a) (goRHS (E.lookupEnv var env) env start fin tr) `makeProd` fromList os
+            | fin <- finals, os <- maybe [] (:[]) (finalProd fin tr) ])
   (ProdMap $ \_ _ _ -> Nothing) 
   where
     fromList []     = pure []
@@ -226,17 +254,13 @@ productConstruction (Grammar var env) (Transducer start states finals tr) =
     fromTerm c = Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermC c))) m e id
 --    fromCond c = Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermP c))) m e id
 
-    alts []     = makeEmpty
-    alts [a]    = a
-    alts (a:as) = makeAlt a (alts as) 
-
     makeProd = prodOpt shifter
       where
         shifter vt m = ProdMap $ \v q q' -> fmap (shift vt) (runProdMap m v q q')
     
     goRHS :: RHS inc env a -> E' (RHS inc) env -> Q -> Q -> Trans inc outc -> TrG outc (ProdMap env) a
-    goRHS (RHS ps) oldRules q q' tr = 
-      alts $ map (\p -> goProd p oldRules q q' tr) ps
+    goRHS (RHS ps b) oldRules q q' tr = 
+      tryDiscard b $ makeAlts $ map (\p -> goProd p oldRules q q' tr) ps
 
     goProd :: Prod inc env a -> E' (RHS inc) env -> Q -> Q -> Trans inc outc -> TrG outc (ProdMap env) a
     goProd (PNil  ret) _ q q' _ = if q == q' then
@@ -248,7 +272,7 @@ productConstruction (Grammar var env) (Transducer start states finals tr) =
       let (os, qo) = transTo q c tr
       in fmap (\_ k -> k c) (fromList os) `makeProd` goProd rest oldRules qo q' tr
     goProd (PCons (NT x) rest) oldRules q q' tr =
-      alts [ fmap (\a k -> k a) (goNT x oldRules q qm tr) `makeProd` goProd rest oldRules qm q' tr | qm <- states ]
+      makeAlts [ fmap (\a k -> k a) (goNT x oldRules q qm tr) `makeProd` goProd rest oldRules qm q' tr | qm <- states ]
     goProd (PCons (TermP _c) _rest) _oldRules _q _q' _tr =
       error "Not implemented yet" 
 
@@ -271,8 +295,107 @@ productConstruction (Grammar var env) (Transducer start states finals tr) =
                      env2' = E.updateEnv (shift vt2 r1) ps2 env2
                  in TrR (FRaw $ RSingle $ PSymb $ NT $ shift vt2 r1) m2 env2' (vt2 . vt1)
 
+newtype Flag env a = Flag Bool 
+-- data TrP c old = TrP (forall env. E' (RHS c) env -> VT old env ->
+--                        exists env'. (RHS c env', VT old env', E' (RHS c) en'v))
+
+-- type TrP c orig a = Tr (VT orig) (OpenRHS c) (OpenRHS c) a
+
+instance Pretty (Flag env a) where
+  ppr (Flag b) = D.text "Flag" D.<+> ppr b 
+
+instance Pretty (E' Flag env) where
+  ppr = E.pprEnv (\_ -> ppr) (D.text "P")
+
+filterProductive :: Grammar c a -> Grammar c a
+filterProductive (Grammar x env) =
+  let m = loop (E.mapEnv (const $ Flag False) env) env 
+  in trace (show $ D.ppr m) $ toGrammar (goRHS m env (E.lookupEnv x env)) (RedMap $ const Nothing)
+  where
+    goRHS :: E' Flag orig -> E' (RHS c) orig -> RHS c orig a -> TrG c (RedMap orig) a
+    goRHS m orules (RHS ss w) =
+      tryDiscard w $ makeAlts $ map (\s -> goProd m orules s) ss 
+
+    goProd :: E' Flag orig -> E' (RHS c) orig -> Prod c orig a -> TrG c (RedMap orig) a
+    goProd _ _ (PNil a) = pure a
+    goProd m orules (PCons a r) =
+      fmap (\a k -> k a) (goSymb m orules a) `makeProd` goProd m orules r
+
+    makeProd = prodOpt shifter
+      where
+        shifter vt m = RedMap $ fmap (shift vt) . runRedMap m 
+
+    goSymb :: E' Flag orig -> E' (RHS c) orig -> Symb c orig a -> TrG c (RedMap orig) a
+    goSymb _ _ (TermC c) =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermC c))) m e id
+    goSymb _ _ (TermP c) =
+      Tr $ \m e -> TrR (FRaw $ RSingle (PSymb (TermP c))) m e id
+    goSymb m orules (NT x)
+      | coerce (E.lookupEnv x m) = Tr $ \tb env ->
+        case runRedMap tb x of
+          Just v -> TrR (FRaw $ RSingle (PSymb (NT v))) tb env id
+          Nothing ->
+            let r = E.lookupEnv x orules
+            in if inlinable r then
+                 runTr (goRHS m orules r) tb env 
+               else 
+                 let (env1, x1, vt1) = E.extendEnv' env RUnInit
+                     tb' = insert vt1 x x1 tb 
+                 in case runTr (goRHS m orules r) tb' env1 of
+                   TrR r2 tb2 env2 vt2 ->
+                     let env2' = E.updateEnv (shift vt2 x1) (unFree r2) env2
+                     in TrR (FRaw $ RSingle $ PSymb $ NT $ shift vt2 x1) tb2 env2' (vt2 . vt1)
+      | otherwise =
+          makeEmpty 
+      
+
+    inlinable :: RHS c env a -> Bool
+    inlinable (RHS [] _)  = True
+    inlinable (RHS [s] _) = isConstant s || isDirect s 
+    inlinable _           = False
+
+    isDirect (PNil _) = True
+    isDirect (PCons (NT _) (PNil _)) = True
+    isDirect _ = False 
+
+    isConstant :: Prod c env a -> Bool
+    isConstant (PNil _) = True
+    isConstant (PCons s r) =
+      nonNT s && isConstant r
+      where
+        nonNT (NT _) = False
+        nonNT _      = True 
+      
+    loop :: E' Flag env -> E' (RHS c) env -> E' Flag env 
+    loop m env =
+      let m' = update m env
+      in if eqFlag m m' then m' else loop m' env
+
+    eqFlag :: E' Flag env -> E' Flag env -> Bool 
+    eqFlag m m' =
+      foldrEnv (\(Flag b) r -> b && r) True $ E.zipWithEnv (\(Flag b) (Flag b') -> Flag (b == b')) m m' 
+
+    update :: E' Flag env -> E' (RHS c) env -> E' Flag env
+    update m env = E.zipWithEnv (check m) m env
+      where
+        check :: E' Flag env -> Flag env a -> RHS c env a -> Flag env a
+        check m (Flag b) (RHS ss _) =
+          if b then Flag True 
+          else      Flag $ or $ map (checkProd m) ss
+
+        checkProd :: E' Flag env -> Prod c env a -> Bool
+        checkProd _ (PNil _)    = True
+        checkProd m (PCons c r) = checkSymb m c && checkProd m r
+
+        checkSymb :: E' Flag env -> Symb c env a -> Bool
+        checkSymb m (NT x) = coerce $ E.lookupEnv x m          
+        checkSymb _ _      = True
+
+          
+
+
 optSpaces :: Grammar ExChar a -> Grammar ExChar a
-optSpaces g = productConstruction g tr
+optSpaces g = productConstruction (normalize g) tr 
   where 
     tr = Transducer 0 [0,1,2] [0,1,2] (Trans trC trF)
     trC 0 Space  = ([], 1)
@@ -293,7 +416,26 @@ optSpaces g = productConstruction g tr
     trF 1 = Just [Space]
     trF 2 = Just [Spaces]
     trF _ = error "Cannot happen" 
-  
+
+    normalize :: Grammar ExChar a -> Grammar ExChar a
+    normalize (Grammar x env) = Grammar x (E.mapEnv norm env)
+
+    norm :: RHS ExChar env a -> RHS ExChar env a
+    norm (RHS ss Nothing)     = RHS ss Nothing
+    norm (RHS ss (Just Refl)) = RHS (norm' False $ sortBy cmp ss) (Just Refl)
+      where
+        cmp :: Prod ExChar env a -> Prod ExChar env b -> Ordering
+        cmp (PNil _) (PCons _ _)    = LT
+        cmp (PNil _) (PNil _)       = EQ 
+        cmp (PCons _ _) (PNil _)    = GT
+        cmp (PCons _ a) (PCons _ b) = cmp a b 
+
+    norm' :: Bool -> [Prod ExChar env ()] -> [Prod ExChar env ()]
+    norm' _ (PNil _:ss) = norm' True ss
+    norm' True (PCons (TermC Space) (PCons (TermC Spaces) (PNil _)):ss) = PCons (TermC Spaces) (PNil $ const ()):norm' True ss
+    norm' b (s:ss) = s:norm' b ss
+    norm' b [] = if b then [PNil ()] else [] 
+      
 
 
 
@@ -306,7 +448,7 @@ example1 = finalize $ G.fix1 $ \p ->
 example2 :: Grammar ExChar ()
 example2 = finalize $
   let f (a,b) =
-        (() <$ alphas <* G.spaces <* G.text "[" <* b <* G.text "]",
+        (() <$ alphas <* G.spaces <* G.text "[" <* G.spaces <* b <* G.text "]",
          () <$ a <* G.spaces <* G.text "," <* G.spaces <* b 
          <|> () <$ a
          <|> pure ())
@@ -315,15 +457,32 @@ example2 = finalize $
     alpha = G.fix1 $ \_ ->
       foldr1 (<|>) $ map G.char ['a'..'z']                               
     alphas = G.fix1 $ \p ->
-      (:) <$> alpha <*> p <|> pure []
+      (:) <$> alpha <*> p <|> (:[]) <$> alpha 
 
+
+example3 :: Grammar ExChar ()
+example3 = finalize $ unCPS $ do 
+  alpha  <- G.share $ foldr1 (<|>) $ map G.char ['a'..'z']
+  alphas <- G.share $ G.fix1 $ \p -> (:) <$> alpha <*> p
+                                     <|> (:[]) <$> alpha
+  (tree :< _) <- G.fixn $
+    Rec (\(_ :< forest :< _) ->
+            () <$ alphas <* G.spaces <* G.text "[" <* G.spaces <* forest <* G.text "]")
+    :<
+    Rec (\(tree :< forest :< _) ->
+            () <$ tree <* G.spaces <* G.text "," <* G.spaces <* forest
+          <|> () <$ tree 
+          <|> pure ())
+    :< End
+  return tree 
+  
 {-
 Implementing mutual recursions by Bekic's lemma causes grammar-size blow-up.
 -} 
-example3 :: Grammar ExChar ()
-example3 = finalize $
+example4 :: Grammar ExChar ()
+example4 = finalize $
   let f (a,b) =
-        (() <$ alphas <* G.spaces <* G.text "[" <* b <* G.text "]",
+        (() <$ alphas <* G.spaces <* G.text "[" <* G.spaces <* b <* G.text "]",
          () <$ a <* G.spaces <* G.text "," <* G.spaces <* b 
          <|> () <$ a
          <|> pure ())
@@ -334,7 +493,7 @@ example3 = finalize $
     alpha = G.fix1 $ \_ ->
       foldr1 (<|>) $ map G.char ['a'..'z']                               
     alphas = G.fix1 $ \p ->
-      (:) <$> alpha <*> p <|> pure []
+      (:) <$> alpha <*> p <|> (:[]) <$> alpha 
 
 -- sample4 :: Grammar ()
 -- sample4 = finalize $
@@ -351,9 +510,13 @@ example3 = finalize $
 --       (:) <$> alpha <*> p <|> pure []
 
 example5 :: Grammar ExChar ()
-example5 = finalize $ unCPS $ do 
+example5 = finalize $ unCPS $ do
+  alpha  <- G.share $ foldr1 (<|>) $ map G.char ['a'..'z']
+  alphas <- G.share $ G.fix1 $ \p ->
+    (:) <$> alpha <*> p
+    <|> (:[]) <$> alpha 
   let f (a,b) =
-        (() <$ alphas <* G.spaces <* G.text "[" <* b <* G.text "]",
+        (() <$ alphas <* G.spaces <* G.text "[" <* G.spaces <* b <* G.text "]",
          () <$ a <* G.spaces <* G.text "," <* G.spaces <* b 
          <|> () <$ a
          <|> pure ())
@@ -368,11 +531,6 @@ example5 = finalize $ unCPS $ do
       --                       in a' :> b' :> End)
       --  :: Apps GrammarUC [(), ()] -> Apps GrammarUC [(), ()])
       -- (\(p1 :> p2 :> End) -> p1 <|> p2)
-  where
-    alpha = G.fix1 $ \_ ->
-      foldr1 (<|>) $ map G.char ['a'..'z']                               
-    alphas = G.fix1 $ \p ->
-      (:) <$> alpha <*> p <|> pure []
 
 -- similar, but alls are defined via gfixn 
 example6 :: Grammar ExChar ()
@@ -381,10 +539,10 @@ example6 = finalize $ unCPS $ do
     (Rec $ \_ -> foldr1 (<|>) $ map G.char ['a'..'z'])
     :<
     (Rec $ \(alpha :< alphas :< _) ->
-        (:) <$> alpha <*> alphas <|> pure [])
+        (:) <$> alpha <*> alphas <|> (:[]) <$> alpha)
     :<
     (Rec $ \(_ :< alphas :< _ :< forest :< _) ->
-        () <$ alphas <* G.spaces <* G.text "[" <* forest <* G.text "]")
+        () <$ alphas <* G.spaces <* G.text "[" <* G.spaces <* forest <* G.text "]")
     :<
     (Rec $ \(_ :< _ :< tree :< forest :< _) ->
          () <$ tree <* G.spaces <* G.text "," <* G.spaces <* forest

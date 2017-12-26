@@ -228,6 +228,11 @@ mapEnv :: (EnvImpl rep) =>
           (forall a. t use a -> t' use' a) -> Env rep t use def -> Env rep t' use' def
 mapEnv f = runIdentity . traverseEnvWithVar (const (Identity . f)) 
 
+zipWithEnv :: EnvImpl rep =>
+              (forall a. t use a -> t' use' a -> t'' use'' a) ->
+              Env rep t use def -> Env rep t' use' def -> Env rep t'' use'' def
+zipWithEnv f e1 e2 = runIdentity $ zipWithA (\x y -> Identity (f x y)) e1 e2 
+
 foldEnvWithVar :: (EnvImpl rep, Monoid m) =>
                   (forall a. Var rep def a -> t use a -> m) ->
                   Env rep t use def -> m

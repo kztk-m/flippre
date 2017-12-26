@@ -16,6 +16,7 @@ import Data.Functor.Identity
 import Control.Category
 import Prelude hiding (id, (.))
 import Control.Applicative (Alternative(..))
+import Data.Typeable ((:~:)(..))
 
 import Text.FliPpr.Internal.Env as E
 import Text.FliPpr.Doc as D
@@ -40,7 +41,7 @@ Transform, ENTCS 253 (2010) 51-64.
 data Grammar c a =
   forall env. Grammar (V env a) (E' (RHS c) env) 
 
-newtype RHS c (env :: [Type])  a = RHS { getRHS :: [ Prod c env a ] }
+data RHS c (env :: [Type])  a = RHS { getRHS :: [ Prod c env a ], isVoid :: Maybe (a :~: ()) }
 
 data Symb c env a where
   TermC  :: c -> Symb c env c
@@ -58,7 +59,7 @@ instance Shiftable EnvRep (Prod c) where
   shift vt (PCons s r) = PCons (shift vt s) (shift vt r) 
 
 instance Shiftable EnvRep (RHS c) where
-  shift vt (RHS ps) = RHS (map (shift vt) ps)
+  shift vt (RHS ps b) = RHS (map (shift vt) ps) b
 
 instance Shiftable EnvRep (Symb c) where
   shift _  (TermC c) = TermC c
@@ -96,9 +97,13 @@ instance Pretty c => Pretty (Prod c env a) where
       
 
 instance Pretty c => Pretty (RHS c env a) where
-  ppr (RHS []) = D.text "<empty>"
-  ppr (RHS ss) = group $ arrange (map (align . ppr) ss)
+  ppr (RHS xs b) = case b of
+    Just _  -> D.text "{" D.<> pprRHS xs D.<> D.text "}"
+    Nothing -> pprRHS xs 
     where
+      pprRHS [] = D.text "<empty>"
+      pprRHS ss = group $ arrange (map (align . ppr) ss) 
+      
       arrange :: [Doc] -> Doc
       arrange [d1, d2]     = group (go [d1,d2]) 
       arrange [d1, d2, d3] = group (go [d1,d2,d3]) 
@@ -132,11 +137,16 @@ newtype OpenGrammar c a =
 data ResultG c env a =
   forall env'. ResultG (OpenRHS c env' a) (E' (OpenRHS c) env') (VT env env') 
 
-data OpenRHS c env a = RUnion  (OpenRHS c env a) (OpenRHS c env a)
-                     | REmpty
-                     | RSingle (OpenProd c env a) 
-                     | RUnInit
+data OpenRHS c env a where
+  RUnion  :: OpenRHS c env a -> OpenRHS c env a -> OpenRHS c env a 
+  REmpty  :: OpenRHS c env a 
+  RSingle :: OpenProd c env a -> OpenRHS c env a 
+  RUnInit :: OpenRHS c env a
+  RVoid   :: OpenRHS c env a -> OpenRHS c env () 
 
+rvoid :: OpenRHS c env a -> OpenRHS c env ()
+rvoid (RVoid r) = RVoid r
+rvoid r         = RVoid r 
 
 runion :: OpenRHS c env a -> OpenRHS c env a -> OpenRHS c env a
 runion REmpty r = r
@@ -148,6 +158,7 @@ instance Shiftable EnvRep (OpenRHS c) where
   shift _  REmpty         = REmpty
   shift vt (RSingle p)    = RSingle (shift vt p)
   shift _  RUnInit        = RUnInit 
+  shift vt (RVoid r)      = RVoid (shift vt r) 
 
 data OpenProd c env a where
   PSymb :: Symb c env a -> OpenProd c env a
@@ -157,7 +168,7 @@ data OpenProd c env a where
 instance Shiftable EnvRep (OpenProd c) where
   shift vt (PSymb a)   = PSymb (shift vt a)
   shift vt (PMult p q) = PMult (shift vt p) (shift vt q)
-  shift _  (PPure a)   = PPure a 
+  shift _  (PPure a)   = PPure a
 
 instance Functor (OpenProd c env) where
   fmap f (PSymb s) = PPure f `PMult` PSymb s
@@ -181,11 +192,33 @@ finalize (OpenG k) =
           in Grammar r1 (mapEnv finalizeRHS env1)
 
 finalizeRHS :: OpenRHS c env a -> RHS c env a
-finalizeRHS x = RHS (go x [])
+finalizeRHS x = go x (RHS [] Nothing) 
   where
+    go :: OpenRHS c env a -> RHS c env a -> RHS c env a 
     go (RUnion x y) r = go x (go y r)
-    go (RSingle p)  r = finalizeProd p : r
+    go (RSingle p)  r = RHS (finalizeProd p : getRHS r) Nothing
+    go (RVoid p)    r = goVoid p (RHS (getRHS r) (Just Refl))
     go _            r = r
+
+    goVoid :: OpenRHS c env a -> RHS c env () -> RHS c env ()
+    goVoid (RUnion x y) r = goVoid x (goVoid y r)
+    goVoid (RSingle p)  r = RHS (finalizeProdV p : getRHS r) (isVoid r)
+    goVoid (RVoid p)    r = goVoid p r
+    goVoid _            r = r
+
+finalizeProdV :: OpenProd c env a -> Prod c env ()
+finalizeProdV = fnaive ()
+  where
+    fnaive :: b -> OpenProd c env a -> Prod c env b
+    fnaive f (PPure _)   = PNil f
+    fnaive f (PSymb s)   = PCons s (PNil (const f))
+    fnaive f (PMult p q) = go f p (\g -> fnaive g q)
+
+    go :: b -> OpenProd c env x -> (forall r. r -> Prod c env r) -> Prod c env b
+    go f (PPure _) r   = r f
+    go f (PSymb s) r   = PCons s $ r (const f)
+    go f (PMult p q) r = go f p (\k -> go k q r)                           
+    
 
 finalizeProd :: OpenProd c env a -> Prod c env a 
 finalizeProd = fnaive id 
@@ -227,6 +260,7 @@ instance Functor (OpenRHS c env) where
   fmap _ REmpty       = REmpty
   fmap f (RSingle p)  = RSingle (fmap f p) 
   fmap _ RUnInit      = RUnInit 
+  fmap f (RVoid p)    = fmap (f . const ()) p 
 
 instance  Applicative (OpenRHS c env) where
   pure a = RSingle (pure a)
@@ -236,6 +270,7 @@ instance  Applicative (OpenRHS c env) where
   RSingle f <*> RUnion a b = runion (RSingle f <*> a) (RSingle f <*> b)
   RSingle _ <*> REmpty     = REmpty
   RSingle f <*> RSingle a  = RSingle (f <*> a)
+  RSingle f <*> RVoid p    = RSingle (fmap (. const ()) f) <*> p
   _ <*> _                  = error "Shouldn't happen."  
   
 atmostSingle :: OpenRHS c env a -> Bool
@@ -246,11 +281,15 @@ atmostSingle = (>0) . go 2
     go lim  REmpty        = lim
     go _    RUnInit       = error "Shouldn't happen." 
     go lim  (RSingle _  ) = lim - 1
-    go lim  (RUnion x y)  = go (go lim x) y 
+    go lim  (RUnion x y)  = go (go lim x) y
+    go lim  (RVoid p)     = go lim p 
 
                              
 instance Functor (OpenGrammar c) where
-  fmap f x = pure f <*> x 
+  fmap f (OpenG k) = OpenG $ \env ->
+    case k env of
+      ResultG r1 env1 vt1 -> ResultG (fmap f r1) env1 vt1 
+    
 
 shareRHS :: OpenRHS c env a -> E' (OpenRHS c) env -> ResultG c env a
 shareRHS r env
@@ -276,6 +315,9 @@ instance Applicative (OpenGrammar c) where
                     ResultG r4 env4 vt4 ->
                       ResultG (shift vt4 r3 <*> r4) env4 (vt4 . vt3 . vt2 . vt1)
 
+  x <* y = fmap const x <*> discard y
+  x *> y = fmap (flip const) (discard x) <*> y 
+  
 
 instance Alternative (OpenGrammar c) where
   empty = OpenG $ \env -> ResultG REmpty env id 
@@ -340,13 +382,18 @@ instance Pretty ExChar where
 
                                
 
-  
+
+discard :: OpenGrammar c a -> OpenGrammar c ()
+discard (OpenG k) = OpenG $ \env ->
+  case k env of
+    ResultG rhs env vt -> ResultG (rvoid rhs) env vt
+ 
 
 space :: OpenGrammar ExChar ()
-space = fmap (const ()) $ liftSymbLiteral (TermC Space)
+space = discard $ liftSymbLiteral (TermC Space)
 
 spaces :: OpenGrammar ExChar ()
-spaces = fmap (const ()) $ liftSymbLiteral (TermC Spaces)
+spaces = discard $ liftSymbLiteral (TermC Spaces)
 
 
 
