@@ -3,7 +3,7 @@ module Text.FliPpr.Doc (
   Precedence, Pretty(..), DocLike(..), Renderable(..), 
   pretty, Doc,
 
-  hang,
+  hang, foldDoc, 
   hcat, vcat, cat,
   hsep, vsep, sep, 
   (<$$>), ($$), (</>), (//),
@@ -88,24 +88,25 @@ infixr 5 $$
 infixr 5 </> 
 infixr 5 //  
 
+foldDoc :: DocLike d => (d -> d -> d) -> [d] -> d 
+foldDoc _ []     = empty
+foldDoc _ [d]    = d
+foldDoc f (d:ds) = f d (foldDoc f ds)
+  
 hcat :: DocLike d => [d] -> d
-hcat = foldr (<>) empty
+hcat = foldDoc (<>) 
 
 vcat :: DocLike d => [d] -> d
-vcat = foldr ($$) empty
+vcat = foldDoc ($$) 
 
 cat :: DocLike d => [d] -> d 
 cat = group . vcat 
 
 vsep :: DocLike d => [d] -> d
-vsep []     = empty 
-vsep [x]    = x
-vsep (x:xs) = x </> vsep xs 
+vsep = foldDoc (</>)
 
 hsep :: DocLike d => [d] -> d
-hsep []     = empty
-hsep [x  ]  = x 
-hsep (x:xs) = x <+> hsep xs 
+hsep = foldDoc (</>)
 
 sep :: DocLike d => [d] -> d
 sep = group . vsep

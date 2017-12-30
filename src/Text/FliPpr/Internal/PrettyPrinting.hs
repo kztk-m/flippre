@@ -10,7 +10,7 @@ module Text.FliPpr.Internal.PrettyPrinting where
 
 import Text.FliPpr.Internal.Type
 import Text.FliPpr.Doc
-import Text.FliPpr.Container2
+import Data.Container2
 import Text.FliPpr.Internal.CPS
 
 import Data.Functor.Identity 

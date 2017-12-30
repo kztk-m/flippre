@@ -2,7 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PolyKinds #-}
 
-module Text.FliPpr.Container2 where
+module Data.Container2 where
 
 import Data.Functor.Identity
 import Control.Applicative (Const(..))

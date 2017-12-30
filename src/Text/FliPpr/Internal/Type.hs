@@ -27,8 +27,9 @@ import Data.Coerce
 import Data.Monoid    (Monoid(..))
 import Data.Semigroup (Semigroup(..))
 
+import Data.Container2 
+
 import Text.FliPpr.Doc as D
-import Text.FliPpr.Container2 
 import Text.FliPpr.Internal.CPS 
 
 data FType = D | Type :~> FType 

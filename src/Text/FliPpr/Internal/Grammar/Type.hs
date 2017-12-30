@@ -47,8 +47,6 @@ data Symb c env a where
   TermC  :: c -> Symb c env c
   TermP  :: (c -> Bool) -> Symb c env c 
   NT     :: V env a -> Symb c env a
-  -- Space  :: Symb env ()
-  -- Spaces :: Symb env ()
 
 data Prod c (env :: [Type]) a where
   PNil    :: a -> Prod c env a
@@ -65,16 +63,12 @@ instance Shiftable EnvRep (Symb c) where
   shift _  (TermC c) = TermC c
   shift _  (TermP p) = TermP p
   shift vt (NT v)    = NT (runVarT vt v) 
-  -- shift _  Space     = Space
-  -- shift _  Spaces    = Spaces 
 
 
 instance Pretty c => Pretty (Symb c env a) where
   ppr (TermC c) = D.ppr c
   ppr (TermP _) = D.text "<abstract>"
   ppr (NT    x) = D.text ("P" ++ showVar x)
-  -- ppr Space     = D.text "_"
-  -- ppr Spaces    = D.text "<spaces>"
 
 instance Pretty c => Pretty (Prod c env a) where
   ppr (PNil _) = D.text (show "")
@@ -142,15 +136,17 @@ data OpenRHS c env a where
   REmpty  :: OpenRHS c env a 
   RSingle :: OpenProd c env a -> OpenRHS c env a 
   RUnInit :: OpenRHS c env a
-  RVoid   :: OpenRHS c env a -> OpenRHS c env () 
+  RVoid   :: OpenRHS c env () -> OpenRHS c env () 
 
-rvoid :: OpenRHS c env a -> OpenRHS c env ()
+rvoid :: OpenRHS c env () -> OpenRHS c env ()
 rvoid (RVoid r) = RVoid r
 rvoid r         = RVoid r 
 
 runion :: OpenRHS c env a -> OpenRHS c env a -> OpenRHS c env a
 runion REmpty r = r
 runion r REmpty = r
+runion (RVoid r1) r2 = rvoid (runion r1 r2)
+runion r1 (RVoid r2) = rvoid (runion r1 r2) 
 runion r1 r2    = RUnion r1 r2 
 
 instance Shiftable EnvRep (OpenRHS c) where
@@ -386,7 +382,7 @@ instance Pretty ExChar where
 discard :: OpenGrammar c a -> OpenGrammar c ()
 discard (OpenG k) = OpenG $ \env ->
   case k env of
-    ResultG rhs env vt -> ResultG (rvoid rhs) env vt
+    ResultG rhs env vt -> ResultG (rvoid $ fmap (const ()) rhs) env vt
  
 
 space :: OpenGrammar ExChar ()
