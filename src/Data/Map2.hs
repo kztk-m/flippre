@@ -1,22 +1,34 @@
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ExistentialQuantification #-}
 
 module Data.Map2 (
-  Ord2(..), Ordering2(..),  Entry(..), Map2,
-  lookup, insert, empty
+  Ord2(..), Eq2(..), Ordering2(..),  Entry(..), Map2,  
+  lookup, insert, empty,
+  toList, fromAscList
   ) where
 
 import Prelude hiding (lookup)
 import Data.Container2
+import Data.Typeable ((:~:)(..))
 
 data Ordering2 a b where
   LT2 :: Ordering2 a b
   GT2 :: Ordering2 a b 
   EQ2 :: Ordering2 a a 
   
-class Ord2 k where
-  compare2 :: k a -> k b -> Ordering2 a b 
+class Eq2 k => Ord2 k where
+  compare2 :: k a -> k b -> Ordering2 a b
+  
+class Eq2 k where
+  eq2 :: k a -> k b -> Maybe (a :~: b) 
+
+  default eq2 :: Ord2 k => k a -> k b -> Maybe (a :~: b)
+  eq2 x y = case compare2 x y of
+              EQ2 -> Just Refl
+              _   -> Nothing 
 
 data Entry k1 k2 = forall a. Entry (k1 a) (k2 a)
 
@@ -92,6 +104,23 @@ toList t = go t []
     go (Node _ e l1 l2) r = go l1 (e:go l2 r)
 
 
+instance (Ord2 k1, Eq2 k2) => Eq (Map2 k1 k2) where
+  t1 == t2 = go (toList t1) (toList t2)
+    where
+      go :: (Ord2 k1, Eq2 k2) => [Entry k1 k2] -> [Entry k1 k2] -> Bool 
+      go []     []    = True
+      go []     (_:_) = False
+      go (_:_)  []    = False
+      go (Entry k1 v1:es1) (Entry k2 v2:es2) =
+        case compare2 k1 k2 of
+          EQ2 ->
+            case eq2 v1 v2 of
+              Just Refl -> go es1 es2
+              _         -> False
+          _ -> False 
+        
+        
+  
 
 instance Ord2 k1 => Container2 (Map2 k1) where
   traverse2 _ Leaf = pure Leaf
