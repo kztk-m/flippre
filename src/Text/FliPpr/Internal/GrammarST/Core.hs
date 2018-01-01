@@ -17,9 +17,6 @@ import Control.Applicative as A (Alternative(..))
 import Data.STRef
 import Data.Typeable ((:~:)(..))
 import qualified Data.IntMap as IM 
-import Data.Function (on)
-
-import Unsafe.Coerce 
 
 import Text.FliPpr.Doc as D hiding (text)
 import qualified Text.FliPpr.Doc as D
@@ -27,48 +24,7 @@ import qualified Text.FliPpr.Doc as D
 import Data.Map2 (Ord2(..), Ordering2(..), Map2) 
 import qualified Data.Map2 as M2 
 
-
-data Ref s a  = Ref !Int !(STRef s a)
-type RefM s = ReaderT (STRef s Int) (ST s) 
-
-class Monad m => MonadRef s m | m -> s where
-  newRef   :: a -> m (Ref s a)
-  readRef  :: Ref s a -> m a
-  writeRef :: Ref s a -> a -> m () 
-  modifyRef :: Ref s a -> (a -> a) -> m ()
-  modifyRef ref f = readRef ref >>= \a -> writeRef ref (f a)
-
-instance MonadRef s (RefM s) where 
-  newRef a = do
-    r <- ask
-    i <- lift $ readSTRef r
-    lift $ (writeSTRef r $! i+1)
-    ref <- lift $ newSTRef a
-    return (Ref i ref)
-
-  readRef (Ref _ ref) = lift $ readSTRef ref
-
-  writeRef (Ref _ ref) v = lift $ writeSTRef ref v
-
-instance MonadRef s (ReaderT r (RefM s)) where
-  newRef a = lift $ newRef a
-  readRef ref = lift $ readRef ref
-  writeRef ref a = lift $ writeRef ref a 
-
-
-refID :: Ref s a -> Int
-refID (Ref i _) = i
-
-instance Eq (Ref s a) where
-  (==) = (==) `on` refID
-
-instance Ord (Ref s a) where
-  compare = compare `on` refID 
-
-eqRef :: Ref s a -> Ref s b -> Maybe (a :~: b)
-eqRef (Ref i _) (Ref j _)
-  | i == j    = Just (unsafeCoerce Refl)
-  | otherwise = Nothing 
+import Text.FliPpr.Internal.Ref 
 
 newtype Grammar c a = Grammar (forall s. RefM s (Ref s (RHS s c a)))
 data RHS s c a = RHS [Prod s c a] (Maybe (a :~: ()))
@@ -259,17 +215,6 @@ share (OpenG m) = do
   --   newRef rhs
   -- return $ OpenG $ return $ RSingle (PSymb (NT r))
 
-instance M2.Eq2 (Ref s) 
-instance Ord2 (Ref s) where
-  compare2 r1 r2
-    | refID r1 < refID r2 = LT2
-    | refID r1 > refID r2 = GT2
-    | otherwise           =
-        case eqRef r1 r2 of
-          Just Refl -> EQ2
-          Nothing   -> error "Cannot happen" 
-      
-        
 -- newtype RefMap s k1 k2 = RefMap { runRefMap :: forall a. Ref s (k1 a) -> Maybe (Ref s (k2 a)) }
 
 -- lookupRefMap :: Ref s (k1 a) -> RefMap s k1 k2 -> Maybe (Ref s (k2 a))
