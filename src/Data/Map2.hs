@@ -6,7 +6,7 @@
 
 module Data.Map2 (
   Ord2(..), Eq2(..), Ordering2(..),  Entry(..), Map2,  
-  lookup, insert, empty,
+  lookup, insert, empty, adjust, 
   toList, fromAscList
   ) where
 
@@ -49,6 +49,14 @@ lookup x (Node _ (Entry y v) l1 l2) =
     LT2 -> lookup x l1
     GT2 -> lookup x l2
     EQ2 -> Just v 
+
+adjust :: Ord2 k1 => (k2 a -> k2 a) -> k1 a -> Map2 k1 k2 -> Map2 k1 k2
+adjust _ _ Leaf = Leaf
+adjust f x (Node c e@(Entry y v) l1 l2) =
+  case compare2 x y of
+    LT2 -> Node c e (adjust f x l1) l2
+    GT2 -> Node c e l1 (adjust f x l2)
+    EQ2 -> Node c (Entry y (f v)) l1 l2 
 
 insert :: Ord2 k1 => k1 a -> k2 a -> Map2 k1 k2 -> Map2 k1 k2
 insert x v = makeBlack . go x v

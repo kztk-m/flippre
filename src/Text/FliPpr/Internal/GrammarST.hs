@@ -35,9 +35,10 @@ import qualified Data.Map2 as M2
 
 import Data.List (sortBy)
 
-import Data.Maybe (fromMaybe)
 import qualified Data.IntMap as IM 
 -- import qualified Data.IntSet as IS 
+
+-- import Debug.Trace
 
 data Ref s a  = Ref !Int !(STRef s a)
 type RefM s = ReaderT (STRef s Int) (ST s) 
@@ -46,7 +47,8 @@ class Monad m => MonadRef s m | m -> s where
   newRef   :: a -> m (Ref s a)
   readRef  :: Ref s a -> m a
   writeRef :: Ref s a -> a -> m () 
-
+  modifyRef :: Ref s a -> (a -> a) -> m ()
+  modifyRef ref f = readRef ref >>= \a -> writeRef ref (f a)
 
 instance MonadRef s (RefM s) where 
   newRef a = do
@@ -560,20 +562,45 @@ inline (Grammar m) = finalize $ do
 
 newtype BoolR s c a = BoolR Bool
 
--- FIXME: Debug.
+showPM :: Ord2 k1 =>
+          (forall a. k1 a -> String) ->
+          (forall a. k2 a -> String) ->
+          Map2 k1 k2 -> String 
+showPM showKey showVal m = go (M2.toList m)
+  where
+    go [] = ""
+    go (M2.Entry k v:es) =
+      showKey k ++ " = " ++ showVal v ++ "\n" ++ go es 
+
+
+-- Table to check whether a nonterminal is visited or not 
+type VTable s c = Map2 (RefK s (RHS s c)) (Const ())
+
+-- Table to store whether a nonterminal is productive or not 
+type PTable s c = Map2 (RefK s (RHS s c)) (Const Bool)
+
+-- Monad to remove non-productive rules 
+type RemM s c = ReaderT (PTable s c, Ref s (Map2 (RefK s (RHS s c)) (OpenGrammar s c))) (RefM s)
+
+data SomeRef s c = forall a. SomeRef (Ref s (RHS s c a))
+
 removeNonProductive :: Grammar c a -> Grammar c a
 removeNonProductive (Grammar m) = finalize $ do
   ref <- m 
   pmRef <- newRef M2.empty
   pm <- check pmRef ref
-  removeSymb pm (NT ref)
+  rmRef <- newRef M2.empty 
+  runReaderT (removeSymb (NT ref)) (pm, rmRef)
   where
     check pmRef ref = do
+      ws <- gatherWorkList ref
+      loop pmRef ws
+
+    loop pmRef ws = do 
       pm <- readRef pmRef
-      viRef <- newRef M2.empty
-      _ <- checkSymb pmRef viRef (NT ref)
+      mapM_ (\(SomeRef ref) -> checkRef pmRef ref) ws
       pm' <- readRef pmRef
-      if eqMap pm pm' then return pm else check pmRef ref
+      if eqMap pm pm' then return pm else loop pmRef ws
         where
           eqMap pm pm' = go (M2.toList pm) (M2.toList pm')
             where
@@ -585,47 +612,91 @@ removeNonProductive (Grammar m) = finalize $ do
                   _   -> False 
               go _ _ = False
 
-    checkRHS :: Ref s (Map2 (RefK s (RHS s c)) (Const Bool)) -> Ref s (Map2 (RefK s (RHS s c)) (Const ())) -> RHS s c a -> RefM s Bool 
-    checkRHS pmRef viRef (RHS rs _) =
-      or <$> mapM (checkProd pmRef viRef) rs
+    gatherWorkList :: Ref s (RHS s c a) -> RefM s [SomeRef s c]
+    gatherWorkList ref = do
+      vmRef <- newRef M2.empty
+      list <- runReaderT (goSymb (NT ref)) vmRef
+      return $ nubWS list 
+        where
+          nubWS :: [SomeRef s c] -> [SomeRef s c]
+          nubWS list = let m = foldr (\(SomeRef r) -> M2.insert (RefK r) (Const ())) M2.empty list
+                           l = M2.toList m
+                       in map (\(M2.Entry (RefK k) _) -> SomeRef k) l 
+          
+          goSymb :: Symb RHS s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
+          goSymb (Term _) = return []
+          goSymb (NT ref) = do
+            vmRef <- ask
+            vm <- readRef vmRef
+            case M2.lookup (coerce ref) vm of
+              Just _  -> return []
+              Nothing -> do
+                modifyRef vmRef (M2.insert (coerce ref) (Const ()))
+                rs <- readRef ref >>= goRHS
+                return $ SomeRef ref:rs
 
-    checkProd :: Ref s (Map2 (RefK s (RHS s c)) (Const Bool)) -> Ref s (Map2 (RefK s (RHS s c)) (Const ())) -> Prod s c a -> RefM s Bool 
-    checkProd _     _     (PNil _) = return True
-    checkProd pmRef viRef (PCons s r) = do
-      sb <- checkSymb pmRef viRef s
-      rb <- checkProd pmRef viRef r
-      return $ sb && rb      
-    
-    checkSymb _ _ (Term _) = return True 
-    checkSymb pmRef viRef (NT ref) = do
+          goRHS (RHS rs _) = concat <$> mapM goProd rs
+
+          goProd :: Prod s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
+          goProd (PNil _) = return []
+          goProd (PCons s r) =
+            liftM2 (++) (goSymb s) (goProd r) 
+
+    checkRef :: Ref s (PTable s c) -> Ref s (RHS s c a) -> RefM s ()
+    checkRef pmRef ref = do
       pm <- readRef pmRef
-      vm <- readRef viRef
-      case M2.lookup (coerce ref) vm of
-        Just _ ->
-          return $ fromMaybe False $ fmap getConst (M2.lookup (coerce ref) pm)
-        Nothing -> do 
-          writeRef viRef (M2.insert (coerce ref) (Const ()) vm)
-          rhs <- readRef ref 
-          b <- checkRHS pmRef viRef rhs
-          writeRef pmRef (M2.insert (coerce ref) (Const b) pm)
-          return b
+      case M2.lookup (coerce ref) pm of
+        Just (Const True) -> return () 
+        _ -> do 
+          rhs <- readRef ref
+          let b = checkRHS pm rhs
+          modifyRef pmRef (M2.insert (coerce ref) (Const b))
+        where
+          checkRHS pm (RHS rs _) = or $ map (checkProd pm) rs
 
-    removeSymb :: Map2 (RefK s (RHS s c)) (Const Bool) -> Symb RHS s c a -> RefM s (OpenGrammar s c a)
-    removeSymb pm =
-      let TT _ _ f = foldGrammar
-            (return A.empty)
-            (\x y -> return $ x <|> y)
-            (\_ -> return)
-            (return . pure)
-            (\x y -> return $ fmap (\a k -> k a) x <*> y)
-            (return . term)
-            (\x res -> case M2.lookup (RefK x) pm of
-                Just (Const False) -> return A.empty
-                _                  -> do
-                  r <- newRef $ LazyRHS $ runOpenG res
-                  return $ OpenG $ return $ RSingle $ PSymb $ NT r                      
-                     )
-      in f
+          checkProd :: PTable s c -> Prod s c a -> Bool
+          checkProd _  (PNil _)    = True
+          checkProd pm (PCons s r) = checkSymb pm s && checkProd pm r
+
+          checkSymb :: PTable s c -> Symb RHS s c a -> Bool
+          checkSymb _  (Term _) = True
+          checkSymb pm (NT x)   =
+            case M2.lookup (coerce x) pm of
+              Just (Const True) -> True
+              _                 -> False 
+                        
+    removeRHS :: RHS s c a -> RemM s c (OpenGrammar s c a)
+    removeRHS (RHS rs b) =
+      tryDiscard b . unions <$> mapM removeProd rs
+
+    removeProd :: Prod s c a -> RemM s c (OpenGrammar s c a)
+    removeProd (PNil f) = return $ pure f
+    removeProd (PCons s r) = do
+      s' <- removeSymb s
+      r' <- removeProd r
+      return $ fmap (\a k -> k a) s' <*> r' 
+
+
+    removeSymb :: Symb RHS s c a -> RemM s c (OpenGrammar s c a)
+    removeSymb (Term c) = return $ term c
+    removeSymb (NT x) = do
+      (pm, rmRef) <- ask
+      rm <- readRef rmRef 
+      case M2.lookup (coerce x) pm of
+        Just (Const True) ->
+          case M2.lookup (coerce x) rm of
+            Just res -> return res
+            Nothing -> do
+              rec res <- do
+                    writeRef rmRef $ M2.insert (coerce x) res rm
+                    rhs <- readRef x
+                    g <- removeRHS rhs
+                    y <- newRef $ LazyRHS $ runOpenG g
+                    return $ OpenG $ return $ RSingle (PSymb (NT y))
+              return res
+        _ ->
+          return A.empty 
+                     
     
 
 type Q = Int
@@ -661,6 +732,13 @@ instance Ord q => Ord2 (RefTuple s c q) where
 
 type FuseM s inc outc = ReaderT (Ref s (Map2 (RefTuple s inc (Q,Q)) (OpenGrammar s outc))) (RefM s) 
 
+tryDiscard :: forall a s c. Maybe (a :~: ()) -> OpenGrammar s c a -> OpenGrammar s c a
+tryDiscard Nothing g     = g
+tryDiscard (Just Refl) g = discard g 
+
+unions :: forall f a. Alternative f => [f a] -> f a 
+unions = foldr (<|>) A.empty 
+
 fuseWithTransducer :: forall inc outc a. Grammar inc a -> Transducer inc outc -> Grammar outc a
 fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
   ref <- m 
@@ -676,13 +754,6 @@ fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
     fromList :: [outc] -> OpenGrammar s outc [outc]
     fromList []     = pure []
     fromList (o:os) = (:) <$> term o <*> fromList os 
-
-    unions :: forall f a. Alternative f => [f a] -> f a 
-    unions = foldr (<|>) A.empty 
-
-    tryDiscard :: forall a s c. Maybe (a :~: ()) -> OpenGrammar s c a -> OpenGrammar s c a
-    tryDiscard Nothing g     = g
-    tryDiscard (Just Refl) g = discard g 
 
     goRHS :: forall s a. Q -> Q -> RHS s inc a -> FuseM s inc outc (OpenGrammar s outc a)
     goRHS q q' (RHS rs b) = tryDiscard b . unions <$> mapM (\p -> goProd q q' p) rs
