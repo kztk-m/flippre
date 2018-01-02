@@ -19,8 +19,7 @@ import Data.Function (on)
 
 import Data.Map2 (Ord2(..), Eq2(..), Ordering2(..)) 
 
-
-data Ref s a  = Ref {-# UNPACK #-} !Int !(STRef s a)
+data Ref s a = Ref {-# UNPACK #-} !Int {-# UNPACK #-} !(STRef s a)
 type RefM s = ReaderT (STRef s Int) (ST s) 
 
 runRefM :: (forall s. RefM s a) -> a
@@ -32,11 +31,16 @@ runRefM m = runST $ do
 class Monad m => MonadRef s m | m -> s where
   newRef   :: a -> m (Ref s a)
   readRef  :: Ref s a -> m a
+
+  {-# INLINABLE writeRef #-}
   writeRef :: Ref s a -> a -> m ()
+  writeRef ref v = seq v (modifyRef ref (const v))
 
   {-# INLINABLE modifyRef #-}
   modifyRef :: Ref s a -> (a -> a) -> m ()
   modifyRef ref f = readRef ref >>= \a -> writeRef ref $! (f a)
+
+  {-# MINIMAL newRef, readRef, (writeRef | modifyRef) #-}
 
 instance MonadRef s (RefM s) where 
   {-# INLINABLE newRef #-}
@@ -66,21 +70,21 @@ refID :: Ref s a -> Int
 refID (Ref i _) = i
 
 instance Eq (Ref s a) where
-  {-# INLINABLE (==) #-}
+  {-# INLINE (==) #-}
   (==) = (==) `on` refID
 
 instance Ord (Ref s a) where
-  {-# INLINABLE compare #-}
+  {-# INLINE compare #-}
   compare = compare `on` refID 
 
 instance Eq2 (Ref s) where
-  {-# INLINABLE eq2 #-}
+  {-# INLINE eq2 #-}
   eq2 (Ref i _) (Ref j _)
     | i == j    = Just (unsafeCoerce Refl)
     | otherwise = Nothing 
   
 instance Ord2 (Ref s) where
-  {-# INLINABLE compare2 #-}
+  {-# INLINE compare2 #-}
   compare2 r1 r2
     | refID r1 < refID r2 = LT2
     | refID r1 > refID r2 = GT2

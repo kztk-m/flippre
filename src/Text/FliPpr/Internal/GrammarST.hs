@@ -9,26 +9,18 @@
 {-# LANGUAGE RecursiveDo #-}
 module Text.FliPpr.Internal.GrammarST (
   module Text.FliPpr.Internal.GrammarST.Core,
-  inline, removeNonProductive, fuseWithTransducer, optSpaces, foldGrammar
+  inline, removeNonProductive, fuseWithTransducer, optSpaces
   )
   where
 
 import Control.Monad.Reader
-
--- import Control.Monad.Fix
-
 import Control.Applicative as A (Alternative(..), Const(..)) 
-
-import Data.Typeable ((:~:)(..))
 
 import Data.Coerce 
 
 import Data.Map2 (Ord2(..), Ordering2(..), Map2) 
 import qualified Data.Map2 as M2 
 
-import Data.List (sortBy)
-
--- import qualified Data.IntSet as IS 
 
 -- import Debug.Trace
 
@@ -36,68 +28,63 @@ import Data.List (sortBy)
 import Text.FliPpr.Internal.GrammarST.Core 
 import Text.FliPpr.Internal.Ref
 
-data TT s c m res = TT (forall a. RHS s c a -> m (res s c a))
-                       (forall a. Prod s c a -> m (res s c a))
-                       (forall a. Symb RHS s c a -> m (res s c a))
+-- data TT s c m res = TT (forall a. RHS s c a -> m (res s c a))
+--                        (forall a. Prod s c a -> m (res s c a))
+--                        (forall a. Symb RHS s c a -> m (res s c a))
 
-{-
-The definition only corresponds to single fold. 
--}
-foldGrammar ::
-  forall s c res m. (MonadRef s m, MonadFix m) => 
-  (forall a. m (res s c a)) ->
-  (forall a. res s c a -> res s c a -> m (res s c a)) -> 
-  (forall a. Maybe (a :~: ()) -> res s c a -> m (res s c a)) -> 
-  (forall a. a -> m (res s c a)) ->
-  (forall a b. res s c a -> res s c (a -> b) -> m (res s c b)) ->
-  (c -> m (res s c c)) ->
-  (forall a. Ref s (RHS s c a) -> res s c a -> m (res s c a)) -> TT s c m res 
-  -- forall a. Grammar c a -> RefM s (rhs s c a)
-foldGrammar rhsNil rhsCons rhsCheckVoid prodNil prodCons term nt =
-  TT (\rhs  -> run (procRHS rhs))
-     (\prod -> run (procProd prod))
-     (\symb -> run (procSymb symb))
-  where
-    run :: ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m d -> m d 
-    run x = do
-      tbRef <- newRef M2.empty
-      runReaderT x tbRef 
+-- {-
+-- The definition only corresponds to single fold. 
+-- -}
+-- foldGrammar ::
+--   forall s c res m. (MonadRef s m, MonadFix m) => 
+--   (forall a. m (res s c a)) ->
+--   (forall a. res s c a -> res s c a -> m (res s c a)) -> 
+--   (forall a. Maybe (a :~: ()) -> res s c a -> m (res s c a)) -> 
+--   (forall a. a -> m (res s c a)) ->
+--   (forall a b. res s c a -> res s c (a -> b) -> m (res s c b)) ->
+--   (c -> m (res s c c)) ->
+--   (forall a. Ref s (RHS s c a) -> res s c a -> m (res s c a)) -> TT s c m res 
+--   -- forall a. Grammar c a -> RefM s (rhs s c a)
+-- foldGrammar rhsNil rhsCons rhsCheckVoid prodNil prodCons term nt =
+--   TT (\rhs  -> run (procRHS rhs))
+--      (\prod -> run (procProd prod))
+--      (\symb -> run (procSymb symb))
+--   where
+--     run :: ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m d -> m d 
+--     run x = do
+--       tbRef <- newRef M2.empty
+--       runReaderT x tbRef 
     
-    procRHS :: forall a. RHS s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m (res s c a)
-    procRHS (RHS rs b) = lift . rhsCheckVoid b =<< go rs
-      where
-        go [] = lift rhsNil
-        go (x:xs) = do
-          x'  <- procProd x
-          xs' <- go xs
-          lift $ rhsCons x' xs' 
+--     procRHS :: forall a. RHS s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m (res s c a)
+--     procRHS (RHS rs b) = lift . rhsCheckVoid b =<< go rs
+--       where
+--         go [] = lift rhsNil
+--         go (x:xs) = do
+--           x'  <- procProd x
+--           xs' <- go xs
+--           lift $ rhsCons x' xs' 
 
-    procProd :: forall a. Prod s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m (res s c a)
-    procProd (PNil f)    = lift $ prodNil f
-    procProd (PCons s r) = do
-      s' <- procSymb s
-      r' <- procProd r
-      lift $ prodCons s' r'
+--     procProd :: forall a. Prod s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m (res s c a)
+--     procProd (PNil f)    = lift $ prodNil f
+--     procProd (PCons s r) = do
+--       s' <- procSymb s
+--       r' <- procProd r
+--       lift $ prodCons s' r'
 
-    procSymb :: forall a. Symb RHS s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m (res s c a)
-    procSymb (Term c) = lift $ term c
-    procSymb (NT x) = do
-      tbRef <- ask
-      tb <- lift $ readRef tbRef
-      case M2.lookup (coerce x) tb of
-        Just v  -> return v
-        Nothing -> do
-          rec g <- do
-                lift $ writeRef tbRef (M2.insert (coerce x) g tb)
-                rhs  <- lift $ readRef x 
-                rhs' <- procRHS rhs
-                lift $ nt x rhs' 
-          return g
-                
-          
-      
-
-
+--     procSymb :: forall a. Symb RHS s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (res s c))) m (res s c a)
+--     procSymb (Term c) = lift $ term c
+--     procSymb (NT x) = do
+--       tbRef <- ask
+--       tb <- lift $ readRef tbRef
+--       case M2.lookup (coerce x) tb of
+--         Just v  -> return v
+--         Nothing -> do
+--           rec g <- do
+--                 lift $ writeRef tbRef (M2.insert (coerce x) g tb)
+--                 rhs  <- lift $ readRef x 
+--                 rhs' <- procRHS rhs
+--                 lift $ nt x rhs' 
+--           return g
 
 
 type TransM s c = ReaderT (Ref s (Map2 (RefK s (RHS s c)) (OpenGrammar s c))) (RefM s) 
@@ -119,8 +106,7 @@ inline (Grammar m) = finalize $ do
       lift $ writeRef tbRef (f tb) 
     
     inlineRHS :: RHS s c a -> TransM s c (OpenGrammar s c a) 
-    inlineRHS (RHS rs Nothing)     = foldr (<|>) A.empty <$> mapM inlineProd rs
-    inlineRHS (RHS rs (Just Refl)) = (discard . foldr (<|>) A.empty <$> mapM inlineProd rs)
+    inlineRHS (RHS rs)  = unions <$> mapM inlineProd rs
 
     inlineProd :: Prod s c a -> TransM s c (OpenGrammar s c a)
     inlineProd (PNil f)    = return $ pure f
@@ -132,7 +118,7 @@ inline (Grammar m) = finalize $ do
       tb <- getTable
       case M2.lookup (coerce x) tb of
         Nothing -> do 
-          modifyTable (M2.insert (coerce x) A.empty)
+          modifyTable (M2.insert (RefK x) A.empty)
           rhs <- lift $ readRef x
           rec y  <- lift $ newRef (LazyRHS $ runOpenG g)
               let res = if inlinable rhs then g else OpenG $ return $ RSingle (PSymb (NT y))
@@ -146,7 +132,7 @@ inline (Grammar m) = finalize $ do
     -- it is intentional to check based on the previous grammar, as
     -- inspecting a grammar being constructed could result in a infinite loop, in this construction. 
     inlinable :: RHS s c a -> Bool
-    inlinable (RHS rs _) = length rs <= 1 
+    inlinable (RHS rs) = length rs <= 1 
 
 -- newtype BoolR s c a = BoolR Bool
 
@@ -216,14 +202,14 @@ removeNonProductive (Grammar m) = finalize $ do
           goSymb (NT ref) = do
             vmRef <- ask
             vm <- readRef vmRef
-            case M2.lookup (coerce ref) vm of
+            case M2.lookup (RefK ref) vm of
               Just _  -> return []
               Nothing -> do
-                modifyRef vmRef (M2.insert (coerce ref) (Const ()))
+                modifyRef vmRef (M2.insert (RefK ref) (Const ()))
                 rs <- readRef ref >>= goRHS
                 return $ SomeRef ref:rs
 
-          goRHS (RHS rs _) = concat <$> mapM goProd rs
+          goRHS (RHS rs) = concat <$> mapM goProd rs
 
           goProd :: Prod s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
           goProd (PNil _) = return []
@@ -233,14 +219,14 @@ removeNonProductive (Grammar m) = finalize $ do
     checkRef :: Ref s (PTable s c) -> Ref s (RHS s c a) -> RefM s ()
     checkRef pmRef ref = do
       pm <- readRef pmRef
-      case M2.lookup (coerce ref) pm of
+      case M2.lookup (RefK ref) pm of
         Just (Const True) -> return () 
         _ -> do 
           rhs <- readRef ref
           let b = checkRHS pm rhs
-          modifyRef pmRef (M2.insert (coerce ref) (Const b))
+          modifyRef pmRef (M2.insert (RefK ref) (Const b))
         where
-          checkRHS pm (RHS rs _) = or $ map (checkProd pm) rs
+          checkRHS pm (RHS rs) = or $ map (checkProd pm) rs
 
           checkProd :: PTable s c -> Prod s c a -> Bool
           checkProd _  (PNil _)    = True
@@ -249,13 +235,12 @@ removeNonProductive (Grammar m) = finalize $ do
           checkSymb :: PTable s c -> Symb RHS s c a -> Bool
           checkSymb _  (Term _) = True
           checkSymb pm (NT x)   =
-            case M2.lookup (coerce x) pm of
+            case M2.lookup (RefK x) pm of
               Just (Const True) -> True
               _                 -> False 
                         
     removeRHS :: RHS s c a -> RemM s c (OpenGrammar s c a)
-    removeRHS (RHS rs b) =
-      tryDiscard b . unions <$> mapM removeProd rs
+    removeRHS (RHS rs) = unions <$> mapM removeProd rs
 
     removeProd :: Prod s c a -> RemM s c (OpenGrammar s c a)
     removeProd (PNil f) = return $ pure f
@@ -270,7 +255,7 @@ removeNonProductive (Grammar m) = finalize $ do
     removeSymb (NT x) = do
       (pm, rmRef) <- ask
       rm <- readRef rmRef 
-      case M2.lookup (coerce x) pm of
+      case M2.lookup (RefK x) pm of
         Just (Const True) ->
           case M2.lookup (coerce x) rm of
             Just res -> return res
@@ -320,9 +305,9 @@ instance Ord q => Ord2 (RefTuple s c q) where
 
 type FuseM s inc outc = ReaderT (Ref s (Map2 (RefTuple s inc (Q,Q)) (OpenGrammar s outc))) (RefM s) 
 
-tryDiscard :: forall a s c. Maybe (a :~: ()) -> OpenGrammar s c a -> OpenGrammar s c a
-tryDiscard Nothing g     = g
-tryDiscard (Just Refl) g = discard g 
+-- tryEnsureConstant :: forall a s c. Maybe (SingletonWit a) -> OpenGrammar s c a -> OpenGrammar s c a
+-- tryEnsureConstant Nothing g                      = g
+-- tryEnsureConstant (Just (SingletonWit Refl t)) g = constantResult t g 
 
 unions :: forall f a. Alternative f => [f a] -> f a 
 unions = foldr (<|>) A.empty 
@@ -344,7 +329,7 @@ fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
     fromList (o:os) = (:) <$> term o <*> fromList os 
 
     goRHS :: forall s a. Q -> Q -> RHS s inc a -> FuseM s inc outc (OpenGrammar s outc a)
-    goRHS q q' (RHS rs b) = tryDiscard b . unions <$> mapM (\p -> goProd q q' p) rs
+    goRHS q q' (RHS rs) = unions <$> mapM (\p -> goProd q q' p) rs
 
     goProd :: forall s a. Q -> Q -> Prod s inc a -> FuseM s inc outc (OpenGrammar s outc a)
     goProd q q' (PNil f) = return $ if q == q' then pure f else A.empty
@@ -375,10 +360,10 @@ fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
           return res 
 
 
-type GGM s c = ReaderT (Ref s (Map2 (RefK s (RHS s c)) (RefK s (RHS s c)))) (RefM s)
+-- type GGM s c = ReaderT (Ref s (Map2 (RefK s (RHS s c)) (RefK s (RHS s c)))) (RefM s)
 
 optSpaces :: Grammar ExChar a -> Grammar ExChar a
-optSpaces g = fuseWithTransducer (preprocess g) tr
+optSpaces g = fuseWithTransducer g tr
   where
     tr = Transducer 0 [0,1,2] [0,1,2] (Trans trC trF)
     trC 0 Space  = ([], 1)
@@ -401,58 +386,56 @@ optSpaces g = fuseWithTransducer (preprocess g) tr
     trF _ = error "Cannot happen" 
 
 
-    preprocess :: Grammar ExChar a -> Grammar ExChar a
-    preprocess (Grammar m) = Grammar $ do 
-      ref <- m
-      tbRef <- newRef $ M2.empty
-      NT ref' <- runReaderT (goSymb (NT ref)) tbRef
-      return ref' 
-        where
-          goRHS :: RHS s ExChar a -> GGM s ExChar (RHS s ExChar a)
-          goRHS (RHS rs b) = do
-            rs' <- mapM goProd (norm rs b)
-            return $ RHS rs' b
+    -- preprocess :: Grammar ExChar a -> Grammar ExChar a
+    -- preprocess (Grammar m) = Grammar $ do 
+    --   ref <- m
+    --   tbRef <- newRef $ M2.empty
+    --   NT ref' <- runReaderT (goSymb (NT ref)) tbRef
+    --   return ref' 
+    --     where
+    --       goRHS :: RHS s ExChar a -> GGM s ExChar (RHS s ExChar a)
+    --       goRHS (RHS rs) = do
+    --         rs' <- mapM goProd (norm rs b)
+    --         return $ RHS rs' b
 
-          goProd :: Prod s ExChar a -> GGM s ExChar (Prod s ExChar a)
-          goProd (PNil f) = return $ PNil f
-          goProd (PCons s r) = do
-            s' <- goSymb s
-            r' <- goProd r
-            return $ PCons s' r'
+    --       goProd :: Prod s ExChar a -> GGM s ExChar (Prod s ExChar a)
+    --       goProd (PNil f) = return $ PNil f
+    --       goProd (PCons s r) = do
+    --         s' <- goSymb s
+    --         r' <- goProd r
+    --         return $ PCons s' r'
 
-          goSymb :: Symb RHS s ExChar a -> GGM s ExChar (Symb RHS s ExChar a)
-          goSymb (Term c) = return (Term c)
-          goSymb (NT x)   = do
-            tbRef <- ask
-            tb <- lift $ readRef tbRef
-            case M2.lookup (coerce x) tb of
-              Just y -> return $ NT (coerce y)
-              Nothing -> do
-                rhs <- readRef x 
-                rec y <- do
-                      writeRef tbRef (M2.insert (coerce x) (coerce y) tb)
-                      rhs' <- goRHS rhs 
-                      newRef rhs'
-                return $ NT y 
-                      
-            
+    --       goSymb :: Symb RHS s ExChar a -> GGM s ExChar (Symb RHS s ExChar a)
+    --       goSymb (Term c) = return (Term c)
+    --       goSymb (NT x)   = do
+    --         tbRef <- ask
+    --         tb <- lift $ readRef tbRef
+    --         case M2.lookup (coerce x) tb of
+    --           Just y -> return $ NT (coerce y)
+    --           Nothing -> do
+    --             rhs <- readRef x 
+    --             rec y <- do
+    --                   writeRef tbRef (M2.insert (coerce x) (coerce y) tb)
+    --                   rhs' <- goRHS rhs 
+    --                   newRef rhs'
+    --             return $ NT y 
             
 
-          norm :: [Prod s ExChar a] -> Maybe (a :~: ()) -> [Prod s ExChar a]
-          norm ss Nothing     = ss
-          norm ss (Just Refl) = norm' False $ sortBy cmp ss
-            where
-              cmp :: Prod s ExChar a -> Prod s ExChar b -> Ordering
-              cmp (PNil _) (PCons _ _)    = LT
-              cmp (PNil _) (PNil _)       = EQ 
-              cmp (PCons _ _) (PNil _)    = GT
-              cmp (PCons _ a) (PCons _ b) = cmp a b 
+    --       norm :: [Prod s ExChar a] -> Maybe (SingletonWit a) -> [Prod s ExChar a]
+    --       norm ss Nothing  = ss
+    --       norm ss (Just (SingletonWit Refl t)) = norm' t False $ sortBy cmp ss
+    --         where
+    --           cmp :: Prod s ExChar a -> Prod s ExChar b -> Ordering
+    --           cmp (PNil _) (PCons _ _)    = LT
+    --           cmp (PNil _) (PNil _)       = EQ 
+    --           cmp (PCons _ _) (PNil _)    = GT
+    --           cmp (PCons _ a) (PCons _ b) = cmp a b 
 
-          norm' :: Bool -> [Prod s ExChar ()] -> [Prod s ExChar  ()]
-          norm' _ (PNil _:ss) = norm' True ss
-          norm' True (PCons (Term Space) (PCons (Term Spaces) (PNil _)):ss) = PCons (Term Space) (PNil $ const ()):norm' True ss
-          norm' b (s:ss) = s:norm' b ss
-          norm' b [] = if b then [PNil ()] else [] 
+    --       norm' :: t -> Bool -> [Prod s ExChar t] -> [Prod s ExChar t]
+    --       norm' t _ (PNil _:ss) = norm' t True ss
+    --       norm' t True (PCons (Term Space) (PCons (Term Spaces) (PNil _)):ss) = PCons (Term Space) (PNil $ const t):norm' t True ss
+    --       norm' t b (s:ss) = s:norm' t b ss
+    --       norm' t b [] = if b then [PNil t] else [] 
 
             
                   

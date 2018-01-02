@@ -15,7 +15,6 @@ import Control.Monad.State
 import Control.Applicative as A (Alternative(..)) 
 
 import Data.STRef
-import Data.Typeable ((:~:)(..))
 import qualified Data.IntMap as IM 
 
 import Text.FliPpr.Doc as D hiding (text)
@@ -27,11 +26,11 @@ import qualified Data.Map2 as M2
 import Text.FliPpr.Internal.Ref 
 
 newtype Grammar c a = Grammar (forall s. RefM s (Ref s (RHS s c a)))
-data RHS s c a = RHS [Prod s c a] (Maybe (a :~: ()))
+newtype RHS s c a = RHS [Prod s c a] 
 
 data Prod s c a =
-  forall r. PCons !(Symb RHS s c r) (Prod s c (r -> a))
-  | PNil a
+  PNil a | forall r. PCons !(Symb RHS s c r) (Prod s c (r -> a))
+
 
 data Symb rhs s c a where
   NT   :: !(Ref s (rhs s c a)) -> Symb rhs s c a 
@@ -47,7 +46,7 @@ instance Show c => Pretty (Grammar c a) where
     return $ D.text "main: " <> pprNT nt </> 
       vcat (map pprEntry $ IM.toList tb)
       where
-        pprEntry (k, d) = pprID k <+> D.text "=" <+> align d 
+        pprEntry (k, d) = pprID k <+> align (D.text "=" <+> d)
         pprID n = D.text ("P" ++ show n)
         pprNT n = pprID (refID n) 
 
@@ -72,10 +71,7 @@ instance Show c => Pretty (Grammar c a) where
           return $ pprID i 
 
         pprRHS :: forall s c a. Show c => RHS s c a -> PprM s Doc 
-        pprRHS (RHS rs b) =
-          case b of
-            Nothing ->  pprRHS' rs 
-            Just _  ->  braces <$> pprRHS' rs  
+        pprRHS (RHS rs) = pprRHS' rs 
           where
             pprRHS' [] = return $ D.text "<empty>"
             pprRHS' rs = arrange <$> mapM (fmap align . pprProd) rs
@@ -115,25 +111,23 @@ instance Show c => Show (Grammar c a) where
             
 
 newtype OpenGrammar s c a = OpenG { runOpenG :: RefM s (OpenRHS s c a) } 
-data OpenRHS s c a where
-  RUnion  :: OpenRHS s c a -> OpenRHS s c a -> OpenRHS s c a
-  REmpty  :: OpenRHS s c a
-  RUnInit :: OpenRHS s c a
-  RSingle :: OpenProd s c a -> OpenRHS s c a 
-  RVoid   :: OpenRHS s c () -> OpenRHS s c () 
+data OpenRHS s c a
+  = RUnion (OpenRHS s c a) (OpenRHS s c a)
+  | REmpty
+  | RUnInit
+  | RSingle (OpenProd s c a)
+  | RConstant a (OpenRHS s c a) 
 
 runion :: OpenRHS s c a -> OpenRHS s c a -> OpenRHS s c a
 runion REmpty r = r
 runion r REmpty = r
-runion (RVoid r1) r2 = rvoid (runion r1 r2)
-runion r1 (RVoid r2) = rvoid (runion r1 r2)
-runion r1 r2         = RUnion r1 r2
+runion r1 r2               = RUnion r1 r2
 
-rvoid :: OpenRHS s c () -> OpenRHS s c ()
-rvoid (RVoid r) = RVoid r
-rvoid REmpty    = REmpty
-rvoid RUnInit   = RUnInit
-rvoid r         = RVoid r 
+rconstant :: t -> OpenRHS s c t -> OpenRHS s c t
+rconstant _ (RConstant t r) = RConstant t r
+rconstant _ REmpty    = REmpty
+rconstant _ RUnInit   = RUnInit
+rconstant t r         = RConstant t r 
 
 newtype LazyRHS s c a = LazyRHS (RefM s (OpenRHS s c a))
 
@@ -153,20 +147,25 @@ instance Applicative (OpenProd s c) where
   (<*>) = PMult
   
 instance Functor (OpenRHS s c) where
-  fmap f (RUnion r1 r2) = RUnion (fmap f r1) (fmap f r2)
-  fmap f (RSingle r)    = RSingle (fmap f r)
-  fmap f (RVoid r)      = fmap (f . const ()) r
-  fmap _ REmpty         = REmpty
-  fmap _ RUnInit        = RUnInit 
+  fmap f (RUnion r1 r2)  = RUnion (fmap f r1) (fmap f r2)
+  fmap f (RSingle r)     = RSingle (fmap f r)
+  fmap f (RConstant t r) = RConstant (f t) $ fmap (f . const t) r
+  fmap _ REmpty          = REmpty
+  fmap _ RUnInit         = RUnInit 
 
 instance Applicative (OpenRHS s c) where
-  pure = RSingle . PPure
+  pure a = RConstant a (RSingle (PPure a))
+
   REmpty <*> _ = REmpty
   RUnion r1 r2 <*> r = runion (r1 <*> r) (r2 <*> r)
   RSingle _ <*> REmpty = REmpty
   RSingle p <*> (RUnion r1 r2) = runion (RSingle p <*> r1) (RSingle p <*> r2)
   RSingle p <*> RSingle q = RSingle (p <*> q)
-  RSingle p <*> RVoid r   = RSingle p <*> r 
+  RSingle p <*> RConstant _ r = RSingle p <*> r
+
+  RConstant f r1 <*> RConstant a r2 = RConstant (f a) (r1 <*> r2)
+  RConstant f r1 <*> (RUnion r2 r3) = runion (RConstant f r1 <*> r2) (RConstant f r1 <*> r3)
+  RConstant _ r1 <*> r2       = r1 <*> r2 
   _ <*> _ = error "Cannot happen."
 
 instance Alternative (OpenRHS s c) where
@@ -178,11 +177,11 @@ atmostSingle :: OpenRHS s c a -> Bool
 atmostSingle = (>0) . go 2
   where
     go :: Int -> OpenRHS s c a -> Int
-    go lim _ | lim <= 0 = lim
-    go lim (RSingle _)    = lim - 1
-    go lim (RUnion r1 r2) = go (go lim r1) r2
-    go lim (RVoid r)      = go lim r
-    go lim _              = lim 
+    go lim _ | lim <= 0    = lim
+    go lim (RSingle _)     = lim - 1
+    go lim (RUnion r1 r2)  = go (go lim r1) r2
+    go lim (RConstant _ r) = go lim r 
+    go lim _               = lim 
 
 instance Applicative (OpenGrammar s c) where
   pure a = OpenG $ return $ pure a  
@@ -198,8 +197,15 @@ instance Applicative (OpenGrammar s c) where
             return rhs
           else do 
             r <- newRef (LazyRHS $ return rhs)
-            return $ RSingle (PSymb (NT r))
+            case rhs of
+              RConstant c _ ->
+                return $ RConstant c $ RSingle $ PSymb $ NT r
+              _ ->
+                return $ RSingle $ PSymb $ NT r 
 
+  g1 <* g2 = fmap (\a _ -> a) g1 <*> constantResult () g2
+  g1 *> g2 = (constantResult (\a -> a) g1) <*> g2
+  
 instance Alternative (OpenGrammar s c) where
   empty = OpenG $ return A.empty
   OpenG m1 <|> OpenG m2 = OpenG $ liftM2 (<|>) m1 m2 
@@ -262,22 +268,21 @@ finalize m = Grammar $ do
       return $ ref 
 
 finalizeRHS :: OpenRHS s c a -> FinalizeM s c (RHS s c a)
-finalizeRHS = \r -> go r (RHS [] Nothing) 
+finalizeRHS = \r -> RHS <$> (go Nothing r [])
   where
-    go :: OpenRHS s c a -> RHS s c a -> FinalizeM s c (RHS s c a)
-    go REmpty         r = return r
-    go RUnInit        r = return r
-    go (RUnion r1 r2) r = go r2 r >>= go r1 
-    go (RSingle p)    r = do
-      let RHS ps w = r
-      p' <- case w of
-              Just Refl -> finalizeProdV p
-              Nothing   -> finalizeProd  p 
-      return $ RHS (p':ps) w 
-    go (RVoid r) ~(RHS ps _) = go r (RHS ps (Just Refl)) 
+    go :: Maybe a -> OpenRHS s c a -> [Prod s c a] -> FinalizeM s c [Prod s c a]
+    go _ REmpty         ps = return ps
+    go _ RUnInit        ps = return ps
+    go b (RUnion r1 r2) ps = go b r2 ps >>= go b r1 
+    go b (RSingle p)    ps = do
+      p' <- case b of
+              Just t  -> finalizeProdV t p
+              Nothing -> finalizeProd  p 
+      return $ p':ps
+    go _ (RConstant t r) ps = go (Just t) r ps 
 
-finalizeProdV :: OpenProd s c () -> FinalizeM s c (Prod s c ())
-finalizeProdV = fnaive ()
+finalizeProdV :: t -> OpenProd s c t -> FinalizeM s c (Prod s c t)
+finalizeProdV t = fnaive t
   where
     fnaive :: b -> OpenProd s c a -> FinalizeM s c (Prod s c b)
     fnaive f (PPure _)   = return $ PNil f
@@ -322,7 +327,7 @@ finalizeSymb (NT ref)   = do
   case lookupRefRefMap ref rMap of
     Just v  -> return $ NT v
     Nothing -> do 
-      ref' <- lift $ newRef $ RHS [] Nothing 
+      ref' <- lift $ newRef $ RHS []
       lift $ writeRef rm $! insertRefRefMap ref ref' rMap
       LazyRHS m <- lift $ readRef ref
       rhs' <- lift m >>= finalizeRHS 
@@ -337,13 +342,13 @@ instance Pretty ExChar where
   ppr Space          = D.text "_"
   ppr Spaces         = D.text "<spaces>"
 
-  pprList = uncurry pprList' . chars []
+  pprList = uncurry pprList' . chars [] 
     where
       chars s (NormalChar c:cs) = chars (c:s) cs
       chars s r                 = (reverse s, r)
 
       pprList' [] []     = D.text ""      
-      pprList' [] (c:cs) = ppr c D.<+> pprList cs
+      pprList' [] (c:cs) = case cs of { [] -> ppr c; _ -> ppr c D.<+> pprList cs }
       pprList' s  [] = D.ppr s
       pprList' s  r  = D.ppr s D.<+> pprList r 
 
@@ -359,24 +364,25 @@ instance CharLike ExChar where
   fromChar = NormalChar 
 
 term :: c -> OpenGrammar s c c
-term c = OpenG $ return $ RSingle (PSymb (Term c))
+term c = OpenG $ return $ RConstant c $ RSingle (PSymb (Term c))
 
 char :: CharLike c => Char -> OpenGrammar s c c
 char c = term (fromChar c)
 
 text :: CharLike c => String -> OpenGrammar s c [c]
-text s = OpenG $ return $ RSingle $ fromText s
+text s = let ts = map fromChar s
+         in OpenG $ return $ RConstant ts $ RSingle $ fromText ts
   where
-    fromText :: CharLike c => String -> OpenProd s c [c]
+    fromText :: [c] -> OpenProd s c [c]
     fromText []     = pure []
-    fromText (c:cs) = (:) <$> PSymb (Term $ fromChar c) <*> fromText cs
+    fromText (c:cs) = (:) <$> PSymb (Term $ c) <*> fromText cs
 
-
-discard :: OpenGrammar s c a -> OpenGrammar s c ()
-discard (OpenG m) = OpenG $ fmap (rvoid . fmap (const ())) m
+-- | Same as @fmap . const@ but this would be useful for further optimization. 
+constantResult :: t -> OpenGrammar s c a -> OpenGrammar s c t 
+constantResult t (OpenG m) = OpenG $ fmap (rconstant t . fmap (const t)) m
   
 space :: OpenGrammar s ExChar ()
-space = discard $ term Space 
+space = constantResult () $ term Space 
 
 spaces :: OpenGrammar s ExChar ()
-spaces = discard $ term Spaces
+spaces = constantResult () $ term Spaces

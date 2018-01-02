@@ -45,6 +45,9 @@ instance DocLike d => FliPprE Identity (Ppr d) where
   fline = PD line
   flinebreak = PD linebreak
 
+  fline'     = PD line
+  fnespaces' = PD (text " ")
+
   falign (PD d) = PD (align d)
 
   fnest n (PD d) = PD (nest n d)

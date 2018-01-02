@@ -70,7 +70,7 @@ instance Monad Err where
 err :: D.Doc -> Err a 
 err = Fail 
   
-newtype PArg a = PArg { unPArg :: forall r. Rep r -> Var r a }
+newtype PArg a   = PArg { unPArg :: forall r. Rep r -> Var r a }
 newtype PExp s t = PExp { unPExp :: forall r. Rep r -> GU s (Err (Result r t)) }
 
 data Result env t where
@@ -106,11 +106,15 @@ tryUpdateEnv k (Just v) env =
     Nothing   -> err (D.text "The same variable is updated twice")
 
 
-choice :: PExp s r -> PExp s r -> PExp s r 
+choice :: PExp s D -> PExp s D -> PExp s D
 choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
-      
+
+choiceGen :: PExp s r -> PExp s r -> PExp s r
+choiceGen p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv 
+                                                                   
 fromP :: GU s a -> PExp s D
-fromP x = PExp $ \_ -> return (RD PE.undeterminedEnv) <$ x 
+fromP x = PExp $ \_ -> G.constantResult (return $ RD PE.undeterminedEnv) x
+  -- return (RD PE.undeterminedEnv) <$ x 
 
 instance FliPprE PArg (PExp s) where
   fapp :: forall a t. In a => PExp s (a :~> t) -> PArg a -> PExp s t 
@@ -146,7 +150,7 @@ instance FliPprE PArg (PExp s) where
   fcase _   [] = PExp $ const A.empty 
   fcase inp (Branch (PInv s f finv) k : bs) =
     branch inp (PInv s f finv) k
-    `choice`
+    `choiceGen`
     fcase inp bs
     where
       branch :: (In a, In b) => PArg a -> (a <-> b) -> (PArg b -> PExp s r) -> PExp s r 
@@ -182,7 +186,7 @@ instance FliPprE PArg (PExp s) where
       k (RD env) (RD env') = RD <$> merge env env'
 
       merge e e' = case PE.mergeEnv mergeEqI e e' of
-                     Nothing  -> err $ D.text"Merge failed: update is consistent."
+                     Nothing  -> err $ D.text "Merge failed: update is consistent."
                      Just env -> return env 
 
 
@@ -193,8 +197,11 @@ instance FliPprE PArg (PExp s) where
 
   fspace     = fromP G.space 
   fspaces    = fromP G.spaces
+
+  fnespaces' = fromP G.spaces 
   
-  fline      = fspaces
+  fline      = fromP $ G.space <* G.spaces
+  fline'     = fspaces 
   flinebreak = fspaces
 
   falign     = id

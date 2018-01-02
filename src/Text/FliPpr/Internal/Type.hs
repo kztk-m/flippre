@@ -74,6 +74,9 @@ class FliPprE (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
   fline      :: exp D -- translated to @text " " <> spaces@ in parsing 
   flinebreak :: exp D -- translated to @spaces@ in parsing
 
+  fline'     :: exp D -- (fline `fbchoice` empty)
+  fnespaces' :: exp D -- ((fspace `fcat` fspaces) `fbchoice` empty)
+
   falign :: exp D -> exp D
   fgroup :: exp D -> exp D
   fnest  :: Int -> exp D -> exp D
@@ -176,6 +179,15 @@ spaces = E fspaces
 
 space :: FliPprE arg exp => E exp D
 space = E fspace
+
+nespaces :: FliPprE arg exp => E exp D
+nespaces = spaces <#> spaces
+
+nespaces' :: FliPprE arg exp => E exp D
+nespaces' = E fnespaces' 
+
+line' :: FliPprE arg exp => E exp D
+line' = E fline' 
 
 arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a :~> t)
 arg f = E (farg (coerce f))
@@ -484,6 +496,9 @@ instance FliPprE (Printer s) (Printer s) where
   fspace  = toPrinter $ D.text "space"
   fspaces = toPrinter $ D.text "spaces"
 
+  fline'     = toPrinter $ D.text "line'"
+  fnespaces' = toPrinter $ D.text "nespaces'" 
+
   fgroup a = Printer $ \vn k -> do
     da <- runPrinter a vn 10
     return $ parensIf (k > 9) $ D.text "group" <+> da
@@ -740,42 +755,6 @@ instance Show (FliPpr t) where
 -- instance Show (FliPpr t) where
 --   show = show . ppr 
 
-example1 :: FliPpr ([Bool] :~> D)
-example1 = flippr $ do
-  let manyParens d = local $ do
-        rec m <- share $ d <? parens m
-        return m
-
-  pprTF <- share $ arg $ \i -> manyParens $ case_ i
-    [ unTrue `Branch` \_ -> text "True",
-      unFalse `Branch` \_ -> text "False" ]
-
-  rec ppr <- share $ arg $ \x -> manyParens $ case_ x
-              [ unNil `Branch` \_ -> text "[" <> text "]",
-                unCons `Branch` \xx -> unpair xx $ \a x -> 
-                  brackets (ppr' `app` a `app` x)]
-
-      ppr' <- share $ arg $ \a -> arg $ \x -> case_ x
-        [ unNil `Branch` \_ -> pprTF `app` a, 
-          unCons `Branch` \xx -> 
-                  unpair xx $ \b x -> 
-                     pprTF `app` a <> text "," <> ppr' `app` b `app` x]
-  return ppr
-  where
-    unTrue  = PInv "unTrue" (\x -> if x then Just () else Nothing) (const (Just True))
-    unFalse = PInv "unFalse" (\x -> if x then Nothing else Just ()) (const (Just False))
-
-    unNil = PInv "unNil" f g
-      where
-        f [] = Just ()
-        f _  = Nothing
-        g () = Just []
-    unCons = PInv "unCons" f g
-      where
-        f [] = Nothing
-        f (a:x) = Just (a,x)
-        g (a,x) = Just (a:x) 
-    
 
 
 -- example1 :: FliPpr ([Bool] :~> D)

@@ -13,7 +13,7 @@ of which entry can be missing.
 module Text.FliPpr.Internal.PartialEnv where
 
 import Data.Kind 
-import Data.Typeable (Proxy)
+import Data.Typeable (Proxy, (:~:)(..))
 import Control.Category
 
 import Unsafe.Coerce 
@@ -46,6 +46,8 @@ class PartialEnvImpl i where
                -> (Env i t (a : env), Var i (a : env) a, VarT i env (a : env))
 
   emptyRep :: Rep i '[]
+  isEmptyRep :: Rep i r -> Maybe (r :~: '[]) 
+  
   extendRep :: Rep i env -> Proxy a ->
                (Rep i (a : env), Var i (a : env) a, VarT i env (a : env))
 
@@ -74,7 +76,7 @@ data EnvImpl = EEmp
 
 
 instance PartialEnvImpl U where
-  data  Var U env a = VarU Int
+  newtype Var U env a = VarU Int
   newtype Env U t a = EnvU EnvImpl 
 
   newtype Rep U env = RepU Int
@@ -117,6 +119,12 @@ instance PartialEnvImpl U where
                             VarT (\(VarU i) -> VarU (i+1)))
 
   emptyRep = RepU 0
+  isEmptyRep (RepU k) =
+    if k == 0 then
+      Just (unsafeCoerce Refl)
+    else
+      Nothing 
+  
   extendRep (RepU k) _ =
     (RepU (k+1), VarU 0, VarT (\(VarU i) -> VarU (i+1)))
      
