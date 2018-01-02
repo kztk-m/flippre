@@ -332,7 +332,7 @@ fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
   ref <- m 
   tMap <- newRef $ M2.empty
   runReaderT
-    (foldr (<|>) A.empty <$>
+    (unions <$>
      mapM (\q1 -> do
               g <- goRef q0 q1 ref
               let Just os = finalProd q1 tr 
@@ -455,45 +455,4 @@ optSpaces g = fuseWithTransducer (preprocess g) tr
           norm' b [] = if b then [PNil ()] else [] 
 
             
-      
-      
-
-_example1 :: Grammar ExChar ()
-_example1 = finalize $ do
-  rec p <- share $
-           text "(" *> p <* text ")" <* p
-           <|> pure ()
-  return p 
-
-
-_example2 :: Grammar ExChar [ExChar]
-_example2 = finalize $ do
-  rec alpha     <- share $ foldr1 (<|>) $ map char ['a'..'z']
-      alphas    <- share $ (:) <$> alpha <*> alphaStar
-      alphaStar <- share $ pure [] <|> alphas
-  return alphas 
-
-_example3 :: Grammar ExChar [ExChar]
-_example3 = finalize $ do
-  rec alphas    <- do
-        alpha     <- share $ foldr1 (<|>) $ map char ['a'..'z']
-        alphaStar <- share $ pure [] <|> alphas
-        share $ (:) <$> alpha <*> alphaStar
-  return alphas
-
-
-
-_example4 :: Grammar ExChar ()
-_example4 = finalize $ do
-  rec alphas <- do 
-        alpha     <- share $ foldr1 (<|>) $ map char ['a'..'z']
-        alphaStar <- share $ pure [] <|> alphas
-        share $ (:) <$> alpha <*> alphaStar
-  rec tree    <- share $ pure () <* alphas <* spaces <* text "[" <* spaces <* forest <* spaces <* text "]"
-      forest  <- share $ pure () <|> forest1 
-      forest1 <- share $
-                 tree
-                 <|> tree *> spaces <* text "," <* spaces <* forest1
-  return tree 
-  
                   

@@ -39,7 +39,6 @@ import qualified Control.Monad.Reader as RM
 
 import Text.FliPpr.Doc as D
 
-import Text.FliPpr.Internal.CPS 
 import Text.FliPpr.Internal.Ref
 
 data FType = D | Type :~> FType 
@@ -163,7 +162,6 @@ class (FliPprE arg exp, MonadFix m) => FliPprD m arg exp | exp -> arg, exp -> m 
   
 newtype A arg a = A { unA :: arg a }
 newtype E exp t = E { unE :: exp t }
-type C exp = CPS exp 
 
 newtype FliPpr t = FliPpr (forall m arg exp. FliPprD m arg exp => m (exp t))
 
@@ -199,8 +197,8 @@ unpair (A x) k = E $ funpair x (coerce k)
 -- unpair :: (In a, In b, FliPprE arg exp) => A arg (a,b) -> C exp (A arg a, A arg b)
 -- unpair (A x) = CPS $ \k -> funpair x (coerce (curry k))
 
-unC :: C exp (E exp a) -> E exp a
-unC (CPS m) = E (m unE)
+-- unC :: C exp (E exp a) -> E exp a
+-- unC (CPS m) = E (m unE)
 
 (<?) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
 (<?) (E x) (E y) = E (fbchoice x y)

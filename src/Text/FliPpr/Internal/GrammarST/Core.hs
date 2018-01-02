@@ -30,12 +30,12 @@ newtype Grammar c a = Grammar (forall s. RefM s (Ref s (RHS s c a)))
 data RHS s c a = RHS [Prod s c a] (Maybe (a :~: ()))
 
 data Prod s c a =
-  forall r. PCons (Symb RHS s c r) (Prod s c (r -> a))
+  forall r. PCons !(Symb RHS s c r) (Prod s c (r -> a))
   | PNil a
 
 data Symb rhs s c a where
-  NT   :: Ref s (rhs s c a) -> Symb rhs s c a 
-  Term :: c -> Symb rhs s c c 
+  NT   :: !(Ref s (rhs s c a)) -> Symb rhs s c a 
+  Term :: !c -> Symb rhs s c c 
 
 type PprM s = StateT (IM.IntMap Doc) (ST s) 
 
@@ -230,6 +230,7 @@ newtype RefK s k a = RefK { unRefK :: Ref s (k a) }
 
 instance M2.Eq2 (RefK s k) 
 instance Ord2 (RefK s k) where
+  {-# INLINABLE compare2 #-}
   compare2 (RefK x) (RefK y) =
     case compare2 x y of
       LT2 -> LT2

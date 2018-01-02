@@ -25,7 +25,6 @@ import qualified Control.Applicative as A (empty)
 import Control.Monad.Reader
 
 import Text.FliPpr.Internal.Type
-import Text.FliPpr.Internal.CPS
 
 import qualified Text.FliPpr.Internal.GrammarST as G 
 import qualified Text.FliPpr.Internal.PartialEnv as PE 

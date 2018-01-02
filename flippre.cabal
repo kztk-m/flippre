@@ -13,16 +13,20 @@ build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
 
+
 library
   hs-source-dirs:      src
   exposed-modules:     Text.FliPpr, 
+                       Text.FliPpr.Doc, 
                        Text.FliPpr.Internal.Type, 
-                       Text.FliPpr.Internal.PrettyPrinting
-                       Text.FliPpr.Internal.GrammarST
-                       Text.FliPpr.Internal.GrammarST.Core 
-                       Text.FliPpr.Internal.ParserGeneration
-                       Text.FliPpr.Internal.Env
-                       Text.FliPpr.Internal.PartialEnv
+                       Text.FliPpr.Internal.PrettyPrinting,
+                       Text.FliPpr.Internal.ParserGeneration,
+                       Text.FliPpr.Internal.Ref, 
+                       Text.FliPpr.Internal.GrammarST, 
+                       Text.FliPpr.Internal.GrammarST.Core, 
+                       Text.FliPpr.Internal.PartialEnv,
+                       Data.Map2, 
+                       Data.Container2
 
                                  
   build-depends:       base >= 4.7 && < 5, 
@@ -30,6 +34,14 @@ library
                        containers >= 0.5 && < 0.6
   default-language:    Haskell2010
   ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors
+
+
+benchmark grammar-trans 
+  type: exitcode-stdio-1.0 
+  main-is: bench/G.hs
+  build-depends: base, flippre                         
+  default-language:    Haskell2010
+
 
 source-repository head
   type:     mercurial

@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Data.Map2 (
   Ord2(..), Eq2(..), Ordering2(..),  Entry(..), Map2,  
@@ -32,15 +33,17 @@ class Eq2 k where
 
 data Entry k1 k2 = forall a. Entry (k1 a) (k2 a)
 
-data Color = Red | Black 
+-- data Color = Red | Black 
+type Color = Int
+
+pattern Red :: Color
+pattern Red   = 0
+
+pattern Black :: Color 
+pattern Black = 1 
 
 data Map2 k1 k2 =
-  Leaf | Node !Color (Entry k1 k2) (Map2 k1 k2) (Map2 k1 k2)
-
--- mapMap2 :: (forall a. k2 a -> k3 a) -> Map2 k1 k2 -> Map2 k1 k3
--- mapMap2 _ Leaf = Leaf
--- mapMap2 f (Node c (Entry ref v) l1 l2) =
---   Node c (Entry ref (f v)) (mapMap2 f l1) (mapMap2 f l2) 
+  Leaf | Node !Color !(Entry k1 k2) (Map2 k1 k2) (Map2 k1 k2)
 
 lookup :: Ord2 k1 => k1 a -> Map2 k1 k2 -> Maybe (k2 a)
 lookup _ Leaf = Nothing
@@ -61,8 +64,9 @@ adjust f x (Node c e@(Entry y v) l1 l2) =
 insert :: Ord2 k1 => k1 a -> k2 a -> Map2 k1 k2 -> Map2 k1 k2
 insert x v = makeBlack . go x v
   where
-    makeBlack ~(Node _ e l1 l2) = Node Black e l1 l2 
-
+    {-# INLINE makeBlack #-}
+    makeBlack (Node _ e l1 l2) = Node Black e l1 l2 
+    makeBlack t                = t 
       
     go :: Ord2 k1 => k1 a -> k2 a -> Map2 k1 k2 -> Map2 k1 k2
     go x v Leaf = Node Red (Entry x v) Leaf Leaf
@@ -72,12 +76,15 @@ insert x v = makeBlack . go x v
         GT2 -> node o e l1 (insert x v l2)
         EQ2 -> Node o (Entry y v) l1 l2 
       where
+        {-# INLINABLE node #-}
+        node :: Color -> Entry k1 k2 -> Map2 k1 k2 -> Map2 k1 k2 -> Map2 k1 k2 
         node Black e3 (Node Red e2 (Node Red e1 x y) z) w = Node Red e2 (Node Black e1 x y) (Node Black e3 z w)
         node Black e3 (Node Red e1 x (Node Red e2 y z)) w = Node Red e2 (Node Black e1 x y) (Node Black e3 z w)
         node Black e1 x (Node Red e3 (Node Red e2 y z) w) = Node Red e2 (Node Black e1 x y) (Node Black e3 z w)
         node Black e1 x (Node Red e2 y (Node Red e3 z w)) = Node Red e2 (Node Black e1 x y) (Node Black e3 z w)
         node color e1 x y                                 = Node color e1 x y 
-        
+
+{-# INLINABLE empty #-}        
 empty :: Map2 k1 k2
 empty = Leaf 
 

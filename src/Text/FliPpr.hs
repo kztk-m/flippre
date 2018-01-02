@@ -2,7 +2,7 @@
 
 module Text.FliPpr (
   -- * Types
-  A, E, C, FliPprE(), FliPprD(),
+  A, E, FliPprE(), FliPprD(),
   Branch(..), type (<->)(..), In, 
   
   -- * Syntax
