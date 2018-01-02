@@ -18,10 +18,9 @@ library
   exposed-modules:     Text.FliPpr, 
                        Text.FliPpr.Internal.Type, 
                        Text.FliPpr.Internal.PrettyPrinting
-                       Text.FliPpr.Internal.Grammar
+                       Text.FliPpr.Internal.GrammarST
+                       Text.FliPpr.Internal.GrammarST.Core 
                        Text.FliPpr.Internal.ParserGeneration
-                       Text.FliPpr.Container2 
-                       Text.FliPpr.Internal.CPS
                        Text.FliPpr.Internal.Env
                        Text.FliPpr.Internal.PartialEnv
 

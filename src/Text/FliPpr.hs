@@ -2,8 +2,8 @@
 
 module Text.FliPpr (
   -- * Types
-  A, E, C, FliPprC(), 
-  Branch(..), Rec(..), type (<->)(..), In, 
+  A, E, C, FliPprE(), FliPprD(),
+  Branch(..), type (<->)(..), In, 
   
   -- * Syntax
   -- ** Lambda 
@@ -15,14 +15,15 @@ module Text.FliPpr (
   -- ** Case
   case_, unpair,
 
-  -- ** Fixpoints
-  fix1, fix2, fixn, 
+  -- -- ** Fixpoints
+  -- fix1, fix2, fixn, 
+
+  -- ** tying
+  share, 
 
   -- ** Raw Pretty-Printing Combinators
   hardcat, spaces, space, 
 
-  -- ** Monad-related Operation
-  unC,  share, 
 
   -- * Evaluator
   pprMode, parsingMode 

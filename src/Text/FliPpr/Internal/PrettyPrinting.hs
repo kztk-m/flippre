@@ -10,8 +10,6 @@ module Text.FliPpr.Internal.PrettyPrinting where
 
 import Text.FliPpr.Internal.Type
 import Text.FliPpr.Doc
-import Data.Container2
-import Text.FliPpr.Internal.CPS
 
 import Data.Functor.Identity 
 
@@ -22,7 +20,7 @@ data Ppr d (t :: FType) where
   PD :: d -> Ppr d D
   PF :: (a -> Ppr d r) -> Ppr d (a :~> r)
 
-instance DocLike d => FliPprCPre Identity (Ppr d) where
+instance DocLike d => FliPprE Identity (Ppr d) where
   fapp (PF f) a = f (coerce a)
 
   farg f = PF (coerce f)
@@ -56,15 +54,18 @@ instance DocLike d => FliPprCPre Identity (Ppr d) where
   fspace  = PD (text " ")
   fspaces = PD empty 
 
-instance DocLike d => FliPprC Identity (Ppr d) where
-  ffix defs = cps $ \k -> 
-    let x = fmap2 (\k -> runRec k x) defs
-    in k x 
+instance DocLike d => FliPprD Identity Identity (Ppr d) where
+  fshare = Identity
+  flocal = runIdentity 
+  
+  -- ffix defs = cps $ \k -> 
+  --   let x = fmap2 (\k -> runRec k x) defs
+  --   in k x 
 
-pprModeMono :: Ppr Doc (a :~> D) -> a -> Doc
-pprModeMono (PF h) a = case h a of
-                      PD d -> d 
+pprModeMono :: Identity (Ppr Doc (a :~> D)) -> a -> Doc
+pprModeMono (Identity (PF h)) a =
+  case h a of
+    PD d -> d 
                           
 pprMode :: FliPpr (a :~> D) -> a -> Doc
 pprMode (FliPpr e) = pprModeMono e 
-

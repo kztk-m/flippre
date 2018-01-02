@@ -7,7 +7,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {-# LANGUAGE RecursiveDo #-}
-module Text.FliPpr.Internal.GrammarST where
+module Text.FliPpr.Internal.GrammarST (
+  module Text.FliPpr.Internal.GrammarST.Core,
+  inline, removeNonProductive, fuseWithTransducer, optSpaces, foldGrammar
+  )
+  where
 
 import Control.Monad.Reader
 
@@ -29,7 +33,8 @@ import Data.List (sortBy)
 -- import Debug.Trace
 
 
-import Text.FliPpr.Internal.GrammarST.Core as G 
+import Text.FliPpr.Internal.GrammarST.Core 
+import Text.FliPpr.Internal.Ref
 
 data TT s c m res = TT (forall a. RHS s c a -> m (res s c a))
                        (forall a. Prod s c a -> m (res s c a))
@@ -143,21 +148,21 @@ inline (Grammar m) = finalize $ do
     inlinable :: RHS s c a -> Bool
     inlinable (RHS rs _) = length rs <= 1 
 
-newtype BoolR s c a = BoolR Bool
+-- newtype BoolR s c a = BoolR Bool
 
-showPM :: Ord2 k1 =>
-          (forall a. k1 a -> String) ->
-          (forall a. k2 a -> String) ->
-          Map2 k1 k2 -> String 
-showPM showKey showVal m = go (M2.toList m)
-  where
-    go [] = ""
-    go (M2.Entry k v:es) =
-      showKey k ++ " = " ++ showVal v ++ "\n" ++ go es 
+-- showPM :: Ord2 k1 =>
+--           (forall a. k1 a -> String) ->
+--           (forall a. k2 a -> String) ->
+--           Map2 k1 k2 -> String 
+-- showPM showKey showVal m = go (M2.toList m)
+--   where
+--     go [] = ""
+--     go (M2.Entry k v:es) =
+--       showKey k ++ " = " ++ showVal v ++ "\n" ++ go es 
 
 
--- Table to check whether a nonterminal is visited or not 
-type VTable s c = Map2 (RefK s (RHS s c)) (Const ())
+-- -- Table to check whether a nonterminal is visited or not 
+-- type VTable s c = Map2 (RefK s (RHS s c)) (Const ())
 
 -- Table to store whether a nonterminal is productive or not 
 type PTable s c = Map2 (RefK s (RHS s c)) (Const Bool)
@@ -453,23 +458,23 @@ optSpaces g = fuseWithTransducer (preprocess g) tr
       
       
 
-example1 :: Grammar ExChar ()
-example1 = finalize $ do
+_example1 :: Grammar ExChar ()
+_example1 = finalize $ do
   rec p <- share $
            text "(" *> p <* text ")" <* p
            <|> pure ()
   return p 
 
 
-example2 :: Grammar ExChar [ExChar]
-example2 = finalize $ do
+_example2 :: Grammar ExChar [ExChar]
+_example2 = finalize $ do
   rec alpha     <- share $ foldr1 (<|>) $ map char ['a'..'z']
       alphas    <- share $ (:) <$> alpha <*> alphaStar
       alphaStar <- share $ pure [] <|> alphas
   return alphas 
 
-example3 :: Grammar ExChar [ExChar]
-example3 = finalize $ do
+_example3 :: Grammar ExChar [ExChar]
+_example3 = finalize $ do
   rec alphas    <- do
         alpha     <- share $ foldr1 (<|>) $ map char ['a'..'z']
         alphaStar <- share $ pure [] <|> alphas
@@ -478,8 +483,8 @@ example3 = finalize $ do
 
 
 
-example4 :: Grammar ExChar ()
-example4 = finalize $ do
+_example4 :: Grammar ExChar ()
+_example4 = finalize $ do
   rec alphas <- do 
         alpha     <- share $ foldr1 (<|>) $ map char ['a'..'z']
         alphaStar <- share $ pure [] <|> alphas
