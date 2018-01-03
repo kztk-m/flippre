@@ -174,35 +174,46 @@ newtype FliPpr t = FliPpr (forall m arg exp. FliPprD m arg exp => m (exp t))
 flippr :: (forall m arg exp. FliPprD m arg exp => m (E exp t)) -> FliPpr t
 flippr x = FliPpr (unE <$> x) -- flipprPure (unC x)
 
+{-# INLINABLE spaces #-}
 spaces :: FliPprE arg exp => E exp D
 spaces = E fspaces 
 
+{-# INLINABLE space #-}
 space :: FliPprE arg exp => E exp D
 space = E fspace
 
-nespaces :: FliPprE arg exp => E exp D
-nespaces = spaces <#> spaces
 
+{-# INLINABLE nespaces #-}
+nespaces :: FliPprE arg exp => E exp D
+nespaces = space <#> spaces
+
+{-# INLINABLE nespaces' #-}
 nespaces' :: FliPprE arg exp => E exp D
 nespaces' = E fnespaces' 
 
+{-# INLINABLE line' #-}
 line' :: FliPprE arg exp => E exp D
 line' = E fline' 
 
+{-# INLINABLE arg #-}
 arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a :~> t)
 arg f = E (farg (coerce f))
 
+{-# INLINABLE app #-}
 app :: (In a, FliPprE arg exp) => E exp (a :~> t) -> A arg a -> E exp t 
 app (E f) (A a) = E (fapp f a) 
 
+{-# INLINE (@@) #-}
 (@@) :: (In a, FliPprE arg exp) => E exp (a :~> t) -> A arg a -> E exp t 
 (@@) = app
 
 infixr 0 @@
 
+{-# INLINABLE case_ #-}
 case_ :: (In a, FliPprE arg exp) => A arg a -> [Branch (A arg) (E exp) a r] -> E exp r
 case_ (A a) bs = E (fcase a (coerce bs))
 
+{-# INLINABLE unpair #-}
 unpair :: (In a, In b, FliPprE arg exp) => A arg (a,b) -> (A arg a -> A arg b -> E exp r) -> E exp r
 unpair (A x) k = E $ funpair x (coerce k)
 
@@ -217,83 +228,18 @@ unpair (A x) k = E $ funpair x (coerce k)
 
 infixr 4 <?
 
--- share :: FliPprD arg exp => E exp t -> C exp (E exp t)
--- share e = E <$> flet (unE e)
-
 share :: FliPprD m arg exp => E exp t -> m (E exp t)
 share e = E <$> fshare (unE e) 
 
 local :: FliPprD m arg exp => m (E exp t) -> E exp t
 local m = E $ flocal (unE <$> m)
   
--- fix1 :: FliPprD arg exp => (E exp t -> E exp t) -> E exp t
--- fix1 f = E $ runCPS (ffix (Single (Rec $ \(Single f_) -> unE (f (E f_)))))
---                     (\(Single x) -> x)
 
--- fix2 :: FliPprD arg exp =>
---         ((E exp a, E exp b) -> (E exp a, E exp b)) -> C exp (E exp a, E exp b)
--- fix2 f = toPair <$> ffix
---          ((Rec $ \(f_ :< g_ :< End) -> unE $ fst $ f (E f_, E g_))
---           :<
---           (Rec $ \(f_ :< g_ :< End) -> unE $ snd $ f (E f_, E g_))
---           :<
---           End)
---   where
---     toPair (a :< b :< End) = (E a,E b) 
-
--- fixn :: (FliPprD arg exp, Container2 t) =>
---         t (Rec t (E exp)) -> C exp (t (E exp))
--- fixn defs =
---   fmap2 E <$> ffix (fmap2 (adjustRec2 unE E) defs)
-                
-
--- fix1 :: (exp t -> E arg exp t) -> E arg exp t
--- fix1 f = runCont (mrec (\(t :> End) -> (f t :> End))) k
---   where
---     k :: Apps (E arg exp) '[a] -> E arg exp a
---     k (t :> End) = t
-
--- fix2 :: ( (exp a, exp b) -> (E arg exp a, E arg exp b)) -> C arg exp r (E arg exp a, E arg exp b)
--- fix2 f = fmap toPair $ mrec (fromPair . f . toPair)
---   where
---     fromPair :: forall exp a b. (exp a,exp b) -> Apps exp '[a,b]
---     fromPair ~(a,b) = a :> (b :> End)
-
---     toPair :: forall exp a b. Apps exp '[a,b] -> (exp a, exp b)
---     toPair ~(a :> b :> End) = (a,b)
-
--- fix3 :: ( (exp a, exp b, exp c) -> (E arg exp a, E arg exp b , E arg exp c) ) ->
---         C arg exp r (E arg exp a, E arg exp b , E arg exp c)
--- fix3 f = fmap toTriple $ mrec (fromTriple . f  . toTriple )
-
--- toTriple :: Apps exp '[a,b,c] -> (exp a, exp b, exp c) 
--- toTriple (a :> b :> c :> End) = (a,b,c)
-
--- fromTriple (a,b,c) = a :> b :> c :> End 
-
--- fixs :: forall ts a arg exp r. Proxy ts ->
---         (FromList a exp ts, FromList a (E arg exp) ts)
---         => ([exp a] -> [E arg exp a]) -> C arg exp r [E arg exp a]
--- fixs _ f = fmap (fromJust . appsToList) $ mrec (fromJust . appsFromList . f . appsToList')
---   where
---     fromJust (Just x) = x
---     fromJust _        = error "fromJust @ fixs: []"
-
---     appsToList' a = fromJust (appsToList (a :: Apps exp ts ))
-
--- fixfix :: (TypeList ts, TypeList ts', TypeList (Append ts ts')) => 
---           (Apps exp ts -> Apps exp ts' -> Apps (E arg exp) ts) -> 
---           (Apps exp ts -> Apps exp ts' -> Apps (E arg exp) ts') ->
---           C arg exp r (Apps (E arg exp) ts,  Apps (E arg exp) ts')
--- fixfix f1 f2 =
---   fmap splitApps $   
---   mrec (\z -> let (a,b) = splitApps z
---               in appendApps (f1 a b) (f2 a b))
-
-  
+{-# INLINABLE hardcat #-}  
 hardcat :: FliPprE arg exp => E exp D -> E exp D -> E exp D
 hardcat (E x) (E y) = E (fcat x y)
 
+{-# INLINE (<#>) #-}
 (<#>) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
 (<#>) = hardcat 
 
@@ -544,253 +490,4 @@ instance D.Pretty (FliPpr t) where
 
 instance Show (FliPpr t) where
   show = show . ppr 
-    
-    
-
--- data Rep s a where
---   RArg    :: (a -> Rep s a) -> Rep s a
---   RApp    :: Rep s a -> Rep s a -> Rep s a 
---   RVar    :: a -> Rep s a 
---   RCase   :: Rep s a -> [(String, a -> Rep s a)] -> Rep s a
---   RUnPair :: Rep s a -> (a -> a -> Rep s a) -> Rep s a 
---   RText   :: String -> Rep s a
---   RChoice :: Rep s a -> Rep s a -> Rep s a
---   RCat    :: Rep s a -> Rep s a -> Rep s a
---   REmpty  :: Rep s a
---   RLine   :: Rep s a
---   RBreak  :: Rep s a
---   RSpace  :: Rep s a
---   RSpaces :: Rep s a
---   RAlign  :: Rep s a -> Rep s a
---   RGroup  :: Rep s a -> Rep s a
---   RNest   :: Int -> Rep s a -> Rep s a 
---   RLoc    :: Ref s (Rep s a) -> Rep s a 
---   RLocal  :: RefM s (Rep s a) -> Rep s a 
-
--- instance FliPprE (Const (Rep s a)) (Const (Rep s a)) where
---   fapp (Const f) (Const a) = Const (RApp f a)
---   farg f = Const $ RArg $ \a -> getConst $ f (Const $ RVar a)
-  
---   fcase (Const a) bs = Const $ RCase a (map conv bs)
---     where
---       conv (Branch (PInv s _ _) f) =
---         (s, \a -> getConst $ f (Const $ RVar a))
-
---   funpair (Const a) f =
---     Const $ RUnPair a (\a b -> getConst $ f (Const $ RVar a) (Const $ RVar b))
-
-  
---   fbchoice (Const a) (Const b) = Const (RChoice a b)
---   ftext s = Const (RText s)
---   fcat (Const a) (Const b) = Const (RCat a b)
---   fempty = Const REmpty
---   fline  = Const RLine
---   flinebreak = Const RBreak
-
---   fspace  = Const RSpace
---   fspaces = Const RSpaces
-
---   falign (Const a) = Const (RAlign a)
---   fgroup (Const a) = Const (RGroup a)
---   fnest n (Const a) = Const (RNest n a) 
-
--- instance FliPprD (RefM s) (Const (Rep s a)) (Const (Rep s a)) where
---   fshare e = do 
---     ref <- newRef (getConst e) 
---     return $ Const $ RLoc ref
-
---   flocal m = Const $ RLocal (getConst <$> m)
-
--- pprRep :: Rep s D.Doc -> RefM s D.Doc
--- pprRep rep = do
---   tbRef <- newRef $ M.empty 
---   v <- runReaderT (go rep 0 0) tbRef
---   tb <- readRef tbRef 
---   let ts = M.toList tb 
---   return $
---     D.text "do rec"
---     <+> D.align (vsep $ map (\(ref, def) ->
---                                pprRef ref  <+> D.text "=" <+> D.align def) ts)
---     $$ D.text "return" D.<+> v 
---   where
---     go :: Rep s D.Doc -> VCount -> Prec
---           -> ReaderT (Ref s (M.Map (Ref s (Rep s D.Doc)) D.Doc)) (RefM s) D.Doc
---     go (RArg f) vn k = do 
---       d <- go (f (pprVName vn)) (vn+1) k
---       return $ D.text "\\" <> pprVName vn <+> D.text "->" <+> D.align d
-
---     go (RApp f a) vn k = do
---       df <- go f vn 9
---       da <- go a vn 10
---       return $ parensIf (k > 9) $ df <+> da
-
---     go (RVar a) _ _ = return a
-    
---     go (RCase a bs) vn k = do 
---       da <- go a vn 10
---       ds <- mapM (\(s,f) -> do 
---                      df <- go (f (pprVName vn)) (vn+1) 0
---                      return $ D.text s <+> D.text "$" <+> D.text "\\" <> pprVName vn <+> D.text "->" <+> D.align df) bs 
---       return $ parensIf (k > 9) $
---         D.text "case_" <+> da <+> 
---           D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
-
---     go (RUnPair a f) vn k = do
---       da <- go a vn 10
---       let dx = pprVName vn
---       let dy = pprVName (vn + 1)
---       db <- go (f dx dy) (vn+2) 0
---       return $ parensIf (k > 0) $ D.align $ D.group $ 
---          D.text "let" <+> parens (dx <> D.text "," <+> dy) <+> D.text "=" <+> D.align da </>
---          D.text "in"  <+> D.align db
-
---     go (RText s) _ k = 
---       return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
-
---     go (RCat a b) vn k = do
---       da <- go a vn 9
---       db <- go b vn 9
---       return $ parensIf (k > 9) $ da <+> D.text "`hardcat`" <+> db
-
---     go (RChoice a b) vn k = do
---       da <- go a vn 4
---       db <- go b vn 4
---       return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
-
-
---     go REmpty  _ _ = return $ D.text "empty"
---     go RLine   _ _ = return $ D.text "line"
---     go RBreak  _ _ = return $ D.text "linebreak"
---     go RSpace  _ _ = return $ D.text "space"
---     go RSpaces _ _ = return $ D.text "spaces"
-
---     go (RGroup a) vn k = do
---       da <- go a vn 10
---       return $ parensIf (k > 10) $ D.text "group" <+> da
-
---     go (RAlign a) vn k = do
---       da <- go a vn 10
---       return $ parensIf (k > 10) $ D.text "align" <+> da
-
---     go (RNest n a) vn k = do
---       da <- go a vn 10
---       return $ parensIf (k > 10) $ D.text "nest" <+> D.text (show n) <+> da 
-    
-      
---     go (RLoc ref) _ _ = do
---       tbRef <- ask
---       tb <- readRef tbRef 
---       case M.lookup ref tb of
---         Just _  -> return $ pprRef ref 
---         Nothing -> do
---           modifyRef tbRef (M.insert ref D.empty)
---           e <- readRef ref
---           d <- go e 0 0
---           modifyRef tbRef (M.insert ref d)
---           return $ pprRef ref
-
---     go (RLocal m) vn k = do
---       tbRef' <- newRef M.empty
---       e <- lift m
---       d <- RM.local tbRef' $ go e vn 0 
-      
-
---     pprRef ref = D.text ("ppr" ++ show (refID ref))
-          
-      
-
-                                                
-    
-  
-
--- instance FliPprD (ST s) (Printing D.Doc) (Printing D.Doc) where
---   fshare = Share
-
-
-
-  
-  -- ffix :: forall f. Container2 f =>
-  --         f (Rec f (Printing D.Doc)) -> C (Printing D.Doc) (f (Printing D.Doc))
-  -- ffix defs = CPS $ \cont -> Printing $ \fn vn k ->
-  --   let fn' = length2 defs + fn
-  --       fs  = evalState
-  --               (traverse2 (const $ state $ \i -> (Printing $ \_ _ _ -> pprFName i, i+1)) defs)
-  --               fn
-  --       ns  = fold2 (\p -> [unPrinting p fn' vn 0])             fs
-  --       ds  = fold2 (\a -> [unPrinting (pprDef fs a) fn' vn 0]) defs
-  --   in parensIf (k > 0) $ D.align $ 
-  --      D.align (D.text "letrec" D.<+>
-  --               trav (zipWith (\a b -> a D.<+> D.text "=" D.<+> D.align b) ns ds)
-  --              )
-  --      D.</>
-  --      D.text "in" D.<+> D.align (unPrinting (cont fs) fn' vn 0)
-  --   where
-  --     pprDef fs (Rec f) = f fs
-
-  --     trav []  = D.empty
-  --     trav [d] = d
-  --     trav (d:ds) = d D.</> D.text "   and" D.<+> trav ds
-
-  -- flet :: Printing D.Doc a -> C (Printing D.Doc) (Printing D.Doc a)
-  -- flet a = CPS $ \cont -> Printing $ \fn vn k ->
-  --   let fn' = fn + 1
-  --       v   = Printing $ \_ _ _ -> pprFName fn
-  --   in parensIf (k > 0) $ D.align $ 
-  --        D.align (D.text "let" D.<+>
-  --                   pprFName fn D.<+> D.text "=" D.<+>
-  --                    D.align (unPrinting a fn' vn 0))         
-  --        D.</>
-  --        D.text "in" D.<+> D.align (unPrinting (cont v) fn' vn 0)
-      
-  
-
-
--- instance (exp ~ Printing D.Doc) => D.Pretty (E exp t) where
---   pprPrec k e = unPrinting (unE e) 0 0 k 
-
-
--- instance D.Pretty (FliPpr t) where
---   pprPrec k (FliPpr e) = unPrinting e 0 0 k
-
--- instance Show (FliPpr t) where
---   show = show . ppr 
-
-
-
--- example1 :: FliPpr ([Bool] :~> D)
--- example1 = flippr $ do
---   let manyParens d = fix1 (\m -> d <? parens m)
-
---   pprTF <- share $ arg $ \i -> manyParens $ case_ i
---         [ unTrue  `Branch` \_ -> text "True",
---           unFalse `Branch` \_ -> text "False" ]
-
---   (ppr, _ppr') <- fix2 $ \(~(_ppr, ppr')) ->
---     let ppr_ = arg $ \x -> case_ x
---               [ unNil `Branch` \_ -> text "[" <> text "]",
---                 unCons `Branch` \xx -> unC $ do
---                   (a,x) <- unpair xx
---                   return $ brackets (ppr' `app` a `app` x)]
---         ppr'_ = arg $ \a -> arg $ \x -> case_ x
---           [ unNil `Branch` \_ -> pprTF `app` a
---               , unCons `Branch` \xx -> unC $ do
---                   (b,x) <- unpair xx
---                   return $ pprTF `app` a <> text "," <> ppr' `app` b `app` x]
---     in (ppr_, ppr'_)
---   return ppr 
---   where
---     unTrue  = PInv "unTrue" (\x -> if x then Just () else Nothing) (const (Just True))
---     unFalse = PInv "unFalse" (\x -> if x then Nothing else Just ()) (const (Just False))
-
---     unNil = PInv "unNil" f g
---       where
---         f [] = Just ()
---         f _  = Nothing
---         g () = Just []
---     unCons = PInv "unCons" f g
---       where
---         f [] = Nothing
---         f (a:x) = Just (a,x)
---         g (a,x) = Just (a:x) 
-  
     
