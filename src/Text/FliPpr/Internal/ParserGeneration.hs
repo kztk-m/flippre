@@ -25,12 +25,15 @@ import qualified Control.Applicative as A (empty)
 import Control.Monad.Reader
 
 import Text.FliPpr.Internal.Type
+import Text.FliPpr.Err 
 
 import qualified Text.FliPpr.Internal.GrammarST as G 
 import qualified Text.FliPpr.Internal.PartialEnv as PE 
 import qualified Text.FliPpr.Doc as D 
 
 import Text.FliPpr.Internal.Ref
+
+import Debug.Trace 
 
 type PEImpl = PE.U 
 type Rep = PE.Rep PEImpl
@@ -46,29 +49,6 @@ type GU s = G.OpenGrammar s G.ExChar
 mergeEqI :: EqI a -> EqI a -> Maybe (EqI a)
 mergeEqI (EqI a) (EqI b) | a == b    = Just (EqI a)
                          | otherwise = Nothing 
-
-data Err a = Ok a | Fail D.Doc
-
-instance Functor Err where
-  fmap f (Ok a)   = Ok (f a)
-  fmap _ (Fail d) = Fail d
-
-instance Applicative Err where
-  pure = return
-  Fail d <*> Ok _    = Fail d
-  Fail d <*> Fail d' = Fail (d D.$$ d')
-  Ok   _ <*> Fail d  = Fail d
-  Ok   f <*> Ok a    = Ok (f a)
-
-instance Monad Err where
-  return = Ok
-  Fail d >>= _ = Fail d
-  Ok a >>= f   = f a 
-
-  fail = Fail . D.text 
-
-err :: D.Doc -> Err a 
-err = Fail 
   
 newtype PArg a   = PArg { unPArg :: forall r. Rep r -> Var r a }
 newtype PExp s t = PExp { unPExp :: forall r. Rep r -> GU s (Err (Result r t)) }
@@ -102,9 +82,20 @@ tryUpdateEnv :: Var env a -> Maybe (EqI a) -> Env env -> Err (Env env)
 tryUpdateEnv _ Nothing  env = return env
 tryUpdateEnv k (Just v) env =
   case PE.updateEnv mergeEqI k v env of
-    Just env' -> return env'
-    Nothing   -> err (D.text "The same variable is updated twice")
+    Just env' -> -- trace (show $ pprEnv env D.<+> D.text "->" D.<+> D.align (pprEnv env')) $
+                 return env'
+    Nothing   -> err (D.text "The same variable is updated twice:"
+                              D.$$ D.text "updating position" D.<+> pprVar k D.<+> D.text "in" D.<+> pprEnv env )
+  where
+    pprVar (PE.VarU i) = D.ppr i 
 
+pprEnv :: Env env -> D.Doc 
+pprEnv (PE.EnvU impl) = D.group $ D.text "<" D.<> go (0 :: Int) impl D.<> D.text ">"
+  where
+  go _ PE.EEmp   = D.empty
+  go _ PE.EUndet = D.text "???"
+  go n (PE.EExt b r) =
+    (D.ppr n D.<> D.text ":" D.<> maybe (D.text "_") (const $ D.text "*") b) D.</> go (n+1) r 
 
 choice :: PExp s D -> PExp s D -> PExp s D
 choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
@@ -115,6 +106,13 @@ choiceGen p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
 fromP :: GU s a -> PExp s D
 fromP x = PExp $ \_ -> G.constantResult (return $ RD PE.undeterminedEnv) x
   -- return (RD PE.undeterminedEnv) <$ x 
+
+refineValue :: forall b. Typeable b => Maybe (EqI b) -> Maybe (EqI b)
+refineValue x =
+  case eqT :: Maybe (b :~: ()) of
+    Just Refl -> Just (EqI ())
+    _         -> x
+
 
 instance FliPprE PArg (PExp s) where
   fapp :: forall a t. In a => PExp s (a :~> t) -> PArg a -> PExp s t 
@@ -141,7 +139,7 @@ instance FliPprE PArg (PExp s) where
       updateP v = mapToEnvA $
                 \eab -> let (b, ea) = PE.popEnv eab
                             (a, e)  = PE.popEnv ea
-                        in tryUpdateEnv v (liftA2 pair a b) e
+                        in tryUpdateEnv v (liftA2 pair (refineValue a) (refineValue b)) e
 
       pair :: EqI a -> EqI b -> EqI (a,b)
       pair (EqI a) (EqI b) = EqI (a,b) 
@@ -164,15 +162,10 @@ instance FliPprE PArg (PExp s) where
                  (b -> Maybe a) -> Var env a -> Result (b : env) r -> Err (Result env r) 
       updateB finv v = mapToEnvA $ \eb ->
         let (b, e) = PE.popEnv eb
-            a      = fmap EqI $ refine b >>= \b' -> case b' of
-                                                      EqI bb -> finv bb
+            a      = fmap EqI $ refineValue b >>= \b' -> case b' of
+                                                           EqI bb -> finv bb
         in tryUpdateEnv v a e 
 
-      refine :: forall b. Typeable b => Maybe (EqI b) -> Maybe (EqI b)
-      refine x =
-        case eqT :: Maybe (b :~: ()) of
-          Just Refl -> Just (EqI ())
-          _         -> x
 
 
   ftext s = fromP $ G.text s
@@ -185,9 +178,12 @@ instance FliPprE PArg (PExp s) where
       k :: Result env D -> Result env D -> Err (Result env D)
       k (RD env) (RD env') = RD <$> merge env env'
 
-      merge e e' = case PE.mergeEnv mergeEqI e e' of
-                     Nothing  -> err $ D.text "Merge failed: update is consistent."
-                     Just env -> return env 
+      merge :: Env env -> Env env -> Err (Env env)
+      merge e e' = 
+        case PE.mergeEnv mergeEqI e e' of
+          Nothing  -> err $ D.text "Merge failed: update is consistent."
+          Just env -> -- trace (show $ D.text "merging" D.<+> pprEnv e D.<+> pprEnv e' D.<+> D.nest 2 (D.text "->" D.</> pprEnv env)) $
+                      return env 
 
 
   
@@ -235,7 +231,8 @@ instance FliPprD (PM s) PArg (PExp s) where
   fshare (PExp e) = do 
     SomeRep tenv <- askRep
     g <- PM $ lift $ G.share (e tenv)
-    return $ PExp $ \tenv' -> fmap (fmap (mapToEnv $ PE.embedEnv tenv tenv')) g 
+    return $ PExp $ \tenv' -> -- trace (show tenv ++ "->" ++ show tenv') $
+                              fmap (mapToEnv $ PE.embedEnv tenv tenv') <$> g 
 
 
   flocal m = PExp $ \tenv ->
@@ -292,7 +289,7 @@ parsingModeMono m = G.finalize $ do
     k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s
     k (Ok a)   =
       case a of
-        RF (RD e) ->
+        RF (RD e) -> 
           let (a, _) = PE.popEnv e
           in case a of
             Just (EqI a) -> return a
@@ -300,4 +297,8 @@ parsingModeMono m = G.finalize $ do
 
 parsingMode :: In a => FliPpr (a :~> D) -> G.Grammar G.ExChar (Err a)
 parsingMode (FliPpr m) = parsingModeMono m
-                            
+
+parsingModeSP :: In a => G.Grammar Char () -> FliPpr (a :~> D) -> G.Grammar Char (Err a)
+parsingModeSP gsp (FliPpr m) =
+  let g   = parsingModeMono m
+  in G.thawSpace gsp $ G.inline $ G.removeNonProductive $ G.optSpaces g 

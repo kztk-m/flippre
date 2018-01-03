@@ -44,9 +44,13 @@ un cname = do
             _ ->
               return False 
         _ ->
-          return False 
+          return False
+          
     numberOfArgs :: TH.Type -> Int
     numberOfArgs (TH.AppT (TH.AppT ArrowT _) t2) = numberOfArgs t2 + 1
+    numberOfArgs (TH.ForallT _ _ t)              = numberOfArgs t
+    numberOfArgs (TH.SigT t _)                   = numberOfArgs t
+    numberOfArgs (TH.ParensT t)                  = numberOfArgs t
     numberOfArgs _                               = 0 
     
     makeForward :: TH.Name -> Int -> Bool -> Q TH.Exp

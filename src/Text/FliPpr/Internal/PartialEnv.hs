@@ -66,20 +66,22 @@ class PartialEnvImpl i where
 data U
 
 data Untype = forall a. Untype a
+instance Show Untype where
+  show _ = "<abstract>" 
 
 unsafeCast :: Untype -> a
 unsafeCast (Untype a) = unsafeCoerce a
 
 data EnvImpl = EEmp
              | EUndet 
-             | EExt (Maybe Untype) EnvImpl
+             | EExt (Maybe Untype) EnvImpl deriving Show 
 
 
 instance PartialEnvImpl U where
   newtype Var U env a = VarU Int
-  newtype Env U t a = EnvU EnvImpl 
+  newtype Env U t a = EnvU EnvImpl deriving Show
 
-  newtype Rep U env = RepU Int
+  newtype Rep U env = RepU Int deriving Show 
 
   lookupEnv (VarU i) (EnvU es) = unsafeCast <$> go i es
     where
@@ -93,7 +95,9 @@ instance PartialEnvImpl U where
       go 0 v (EExt Nothing e) = Just (EExt (Just (Untype v)) e)
       go 0 v (EExt (Just v') e)
         | Just r <- mg v (unsafeCast v') = Just (EExt (Just (Untype r)) e)
+      go 0 v EUndet      = Just $ EExt (Just (Untype v)) EUndet 
       go n v (EExt v' e) = EExt v' <$> go (n-1) v e
+      go n v EUndet      = EExt Nothing <$> go (n-1) v EUndet
       go _ _ _           = Nothing
 
   mergeEnv mg (EnvU es) (EnvU es') = EnvU <$> go es es' 

@@ -6,7 +6,37 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
 
-module Text.FliPpr.Internal.GrammarST.Core where
+{-# LANGUAGE RecursiveDo #-}
+
+module Text.FliPpr.Internal.GrammarST.Core (
+
+  -- ** Types
+  -- *** Grammar for Manipulation
+  Grammar(..), RHS(..), Prod(..), Symb(..),
+
+  -- *** Grammar for Construction 
+  OpenGrammar(..), OpenRHS(..), OpenProd(..), LazyRHS(..),
+
+  -- *** Character type for manipulation
+  ExChar(..), CharLike(..), 
+
+  -- *** Parser I/F
+  Driver(..), 
+
+  -- ** Conversion
+  finalize, open,
+
+  -- ** Knot-Tying
+  share,
+
+  -- ** Primitives
+  term, char, text, constantResult,
+  space, spaces,
+
+  -- ** Misc.
+  atmostSingle, RefK(..)
+  
+  ) where
 
 import Control.Monad.ST
 import Control.Monad.Reader
@@ -24,6 +54,7 @@ import Data.Map2 (Ord2(..), Ordering2(..), Map2)
 import qualified Data.Map2 as M2 
 
 import Text.FliPpr.Internal.Ref 
+import Text.FliPpr.Err
 
 newtype Grammar c a = Grammar (forall s. RefM s (Ref s (RHS s c a)))
 newtype RHS s c a = RHS [Prod s c a] 
@@ -108,7 +139,15 @@ instance Show c => Pretty (Grammar c a) where
 
 instance Show c => Show (Grammar c a) where
   show = show . ppr 
-            
+
+instance Functor (Grammar c) where
+  fmap f (Grammar m) = Grammar $ do
+    r <- m
+    ref <- newRef $ RHS [PCons (NT r) $ PNil f]
+    return ref 
+
+class Driver n where
+  parse :: (Eq c, Pretty c) => n -> Grammar c (Err a) -> [c] -> Err [a]          
 
 newtype OpenGrammar s c a = OpenG { runOpenG :: RefM s (OpenRHS s c a) } 
 data OpenRHS s c a
@@ -252,12 +291,12 @@ insertRefRefMap :: Ref s (k1 a) -> Ref s (k2 a) -> RefRefMap s k1 k2 -> RefRefMa
 insertRefRefMap x y = M2.insert (RefK x) (RefK y) 
 
 
-type FinalizeM s c = ReaderT (Ref s (RefRefMap s (LazyRHS s c) (RHS s c))) (RefM s) 
+type FinalizeM s c = ReaderT (RawRef s (RefRefMap s (LazyRHS s c) (RHS s c))) (RefM s) 
 
 finalize :: (forall s. RefM s (OpenGrammar s c a)) -> Grammar c a
 finalize m = Grammar $ do
   rhs <- join (fmap runOpenG m) 
-  refMap <- newRef $ M2.empty
+  refMap <- newRawRef $ M2.empty
   case rhs of
     RSingle (PSymb (NT x)) -> do 
       NT x' <- runReaderT (finalizeSymb (NT x)) refMap
@@ -323,16 +362,52 @@ finalizeSymb :: Symb LazyRHS s c a -> FinalizeM s c (Symb RHS s c a)
 finalizeSymb (Term c) = return (Term c)
 finalizeSymb (NT ref)   = do
   rm <- ask 
-  rMap <- lift $ readRef rm
+  rMap <- lift $ readRawRef rm
   case lookupRefRefMap ref rMap of
     Just v  -> return $ NT v
     Nothing -> do 
       ref' <- lift $ newRef $ RHS []
-      lift $ writeRef rm $! insertRefRefMap ref ref' rMap
+      lift $ writeRawRef rm $! insertRefRefMap ref ref' rMap
       LazyRHS m <- lift $ readRef ref
       rhs' <- lift m >>= finalizeRHS 
       lift $ writeRef ref' rhs'
       return $ NT ref'
+
+type OpenM s c = ReaderT (RawRef s (Map2 (RefK s (RHS s c)) (OpenGrammar s c))) (RefM s)
+
+open :: Grammar c a -> OpenGrammar s c a
+open (Grammar m) = OpenG $ do
+  ref <- m 
+  tbRef <- newRawRef M2.empty
+  g <- runReaderT (goSymb (NT ref)) tbRef
+  runOpenG g 
+    where
+      goSymb :: Symb RHS s c a -> OpenM s c (OpenGrammar s c a)
+      goSymb (Term c) = return (term c)
+      goSymb (NT ref) = do 
+        tbRef <- ask
+        tb <- readRawRef tbRef 
+        case M2.lookup (RefK ref) tb of
+          Just res -> return res
+          Nothing  -> do
+            rec res <- do
+                  modifyRawRef tbRef (M2.insert (RefK ref) res)
+                  rhs  <- readRef ref
+                  g    <- goRHS rhs
+                  ref' <- newRef $ LazyRHS (runOpenG g)
+                  return $ OpenG $ return $ RSingle (PSymb (NT ref'))
+            return res
+
+      goRHS :: RHS s c a -> OpenM s c (OpenGrammar s c a)
+      goRHS (RHS rs) = foldr (<|>) A.empty <$> mapM goProd rs
+
+      goProd :: Prod s c a -> OpenM s c (OpenGrammar s c a)
+      goProd (PNil a)    = return $ pure a
+      goProd (PCons c r) =
+        liftM2 (<*>) (fmap (\a k -> k a) <$> goSymb c) (goProd r)
+
+
+            
 
 
 data ExChar = NormalChar Char | Space | Spaces 
@@ -359,6 +434,9 @@ instance Show ExChar where
 
 class CharLike c where
   fromChar :: Char -> c 
+
+instance CharLike Char where
+  fromChar = id 
 
 instance CharLike ExChar where
   fromChar = NormalChar 

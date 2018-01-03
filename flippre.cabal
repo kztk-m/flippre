@@ -19,6 +19,8 @@ library
   exposed-modules:     Text.FliPpr, 
                        Text.FliPpr.Doc, 
                        Text.FliPpr.TH, 
+                       Text.FliPpr.Driver.Earley, 
+                       Text.FliPpr.Err, 
                        Text.FliPpr.Internal.Type, 
                        Text.FliPpr.Internal.PrettyPrinting,
                        Text.FliPpr.Internal.ParserGeneration,
@@ -33,8 +35,8 @@ library
   build-depends:       base >= 4.7 && < 5, 
                        mtl  >= 2.0 && < 3, 
                        containers >= 0.5 && < 0.6,
-                       template-haskell >= 2.11 && < 2.13,
-                       th-abstraction >= 0.2 && < 0.3
+                       template-haskell >= 2.11 && < 2.13, 
+                       Earley >= 0.11 && < 0.13
   default-language:    Haskell2010
   ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors
 

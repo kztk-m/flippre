@@ -387,6 +387,10 @@ instance MonadRef s (PrinterM s) where
   readRef r    = PrinterM $ readRef r
   writeRef r a = PrinterM $ writeRef r a 
 
+  newRawRef a = PrinterM $ newRawRef a
+  readRawRef r = PrinterM $ readRawRef r
+  writeRawRef r a = PrinterM $ writeRawRef r a 
+
 instance MonadReader [Ref s (M.Map (Ref s ()) (PrinterM s Doc))] (PrinterM s) where
   ask = PrinterM $ ask
   local f (PrinterM m) = PrinterM $ RM.local f m 

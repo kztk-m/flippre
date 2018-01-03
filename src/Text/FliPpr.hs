@@ -4,7 +4,7 @@
 module Text.FliPpr (
   -- * Types
   A, E, FliPprE(), FliPprD(), FliPpr, 
-  Branch(..), type (<->)(..), In, 
+  Branch(..), type (<->)(..), In, Err(..), 
   
   -- * Syntax
   -- ** Types
@@ -35,7 +35,7 @@ module Text.FliPpr (
   (<>), (<+>), (<+>.), (</>.), shares, shareN, 
 
   -- * Evaluator
-  pprMode, parsingMode 
+  pprMode, parsingMode, parsingModeSP, G.Grammar, G.OpenGrammar, 
   ) where
 
 import Text.FliPpr.Internal.Type
@@ -43,8 +43,12 @@ import Text.FliPpr.Internal.PrettyPrinting
 import Text.FliPpr.Internal.ParserGeneration 
 
 import Text.FliPpr.Doc as D
+import Text.FliPpr.Err
+
 import qualified Data.IntMap as IM 
 import qualified Data.Map as M
+
+import qualified Text.FliPpr.Internal.GrammarST as G
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
 --   it behaves as '<>'.

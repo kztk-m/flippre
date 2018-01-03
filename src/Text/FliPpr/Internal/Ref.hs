@@ -21,6 +21,7 @@ import Data.Map2 (Ord2(..), Eq2(..), Ordering2(..))
 
 data Ref s a = Ref {-# UNPACK #-} !Int {-# UNPACK #-} !(STRef s a)
 type RefM s = ReaderT (STRef s Int) (ST s) 
+type RawRef s a = STRef s a 
 
 runRefM :: (forall s. RefM s a) -> a
 runRefM m = runST $ do
@@ -40,7 +41,16 @@ class Monad m => MonadRef s m | m -> s where
   modifyRef :: Ref s a -> (a -> a) -> m ()
   modifyRef ref f = readRef ref >>= \a -> writeRef ref $! (f a)
 
-  {-# MINIMAL newRef, readRef, (writeRef | modifyRef) #-}
+  newRawRef  :: a -> m (RawRef s a)
+  readRawRef  :: RawRef s a -> m a 
+  writeRawRef :: RawRef s a -> a -> m ()
+  writeRawRef ref v = seq v (modifyRawRef ref (const v))
+
+  modifyRawRef :: RawRef s a -> (a -> a) -> m ()
+  modifyRawRef ref f = readRawRef ref >>= \a -> writeRawRef ref $! (f a)
+
+  {-# MINIMAL newRef, readRef, (writeRef | modifyRef), newRawRef, readRawRef, (writeRawRef | modifyRawRef)  #-}
+
 
 instance MonadRef s (RefM s) where 
   {-# INLINABLE newRef #-}
@@ -57,6 +67,17 @@ instance MonadRef s (RefM s) where
   {-# INLINABLE writeRef #-}
   writeRef (Ref _ ref) v = lift $ writeSTRef ref $! v
 
+  {-# INLINABLE newRawRef #-}
+  newRawRef = lift . newSTRef
+
+  {-# INLINABLE readRawRef #-}
+  readRawRef = lift . readSTRef
+
+  {-# INLINABLE writeRawRef #-}
+  writeRawRef ref = lift . writeSTRef ref
+
+  modifyRawRef ref = lift . modifySTRef' ref
+  
 instance MonadRef s (ReaderT r (RefM s)) where
   {-# INLINABLE newRef #-}
   newRef a = lift $ newRef a
@@ -65,6 +86,12 @@ instance MonadRef s (ReaderT r (RefM s)) where
   {-# INLINABLE writeRef #-}
   writeRef ref a = lift $ writeRef ref a 
 
+  newRawRef  = lift . newRawRef
+  readRawRef = lift . readRawRef
+  writeRawRef ref = lift . writeRawRef ref
+  modifyRawRef ref = lift . modifyRawRef ref 
+  
+  
 
 refID :: Ref s a -> Int
 refID (Ref i _) = i

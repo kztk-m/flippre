@@ -9,7 +9,7 @@
 {-# LANGUAGE RecursiveDo #-}
 module Text.FliPpr.Internal.GrammarST (
   module Text.FliPpr.Internal.GrammarST.Core,
-  inline, removeNonProductive, fuseWithTransducer, optSpaces
+  inline, removeNonProductive, fuseWithTransducer, optSpaces, thawSpace,
   )
   where
 
@@ -87,23 +87,23 @@ import Text.FliPpr.Internal.Ref
 --           return g
 
 
-type TransM s c = ReaderT (Ref s (Map2 (RefK s (RHS s c)) (OpenGrammar s c))) (RefM s) 
+type TransM s c = ReaderT (RawRef s (Map2 (RefK s (RHS s c)) (OpenGrammar s c))) (RefM s) 
 
 inline :: Grammar c a -> Grammar c a
 inline (Grammar m) = finalize $ do
   ref <- m 
-  tbRef  <- newRef M2.empty
+  tbRef  <- newRawRef M2.empty
   runReaderT (inlineSymb (NT ref)) tbRef
   where
     getTable :: TransM s c (Map2 (RefK s (RHS s c)) (OpenGrammar s c))
     getTable = do
       tbRef <- ask
-      lift $ readRef tbRef
+      lift $ readRawRef tbRef
 
     modifyTable f = do
       tbRef <- ask
-      tb <- lift $ readRef tbRef
-      lift $ writeRef tbRef (f tb) 
+      tb <- lift $ readRawRef tbRef
+      lift $ writeRawRef tbRef (f tb) 
     
     inlineRHS :: RHS s c a -> TransM s c (OpenGrammar s c a) 
     inlineRHS (RHS rs)  = unions <$> mapM inlineProd rs
@@ -154,16 +154,16 @@ inline (Grammar m) = finalize $ do
 type PTable s c = Map2 (RefK s (RHS s c)) (Const Bool)
 
 -- Monad to remove non-productive rules 
-type RemM s c = ReaderT (PTable s c, Ref s (Map2 (RefK s (RHS s c)) (OpenGrammar s c))) (RefM s)
+type RemM s c = ReaderT (PTable s c, RawRef s (Map2 (RefK s (RHS s c)) (OpenGrammar s c))) (RefM s)
 
 data SomeRef s c = forall a. SomeRef (Ref s (RHS s c a))
 
 removeNonProductive :: Grammar c a -> Grammar c a
 removeNonProductive (Grammar m) = finalize $ do
   ref <- m 
-  pmRef <- newRef M2.empty
+  pmRef <- newRawRef M2.empty
   pm <- check pmRef ref
-  rmRef <- newRef M2.empty 
+  rmRef <- newRawRef M2.empty 
   runReaderT (removeSymb (NT ref)) (pm, rmRef)
   where
     check pmRef ref = do
@@ -171,9 +171,9 @@ removeNonProductive (Grammar m) = finalize $ do
       loop pmRef ws
 
     loop pmRef ws = do 
-      pm <- readRef pmRef
+      pm <- readRawRef pmRef
       mapM_ (\(SomeRef ref) -> checkRef pmRef ref) ws
-      pm' <- readRef pmRef
+      pm' <- readRawRef pmRef
       if eqMap pm pm' then return pm else loop pmRef ws
         where
           eqMap pm pm' = go (M2.toList pm) (M2.toList pm')
@@ -188,7 +188,7 @@ removeNonProductive (Grammar m) = finalize $ do
 
     gatherWorkList :: Ref s (RHS s c a) -> RefM s [SomeRef s c]
     gatherWorkList ref = do
-      vmRef <- newRef M2.empty
+      vmRef <- newRawRef M2.empty
       list <- runReaderT (goSymb (NT ref)) vmRef
       return $ nubWS list 
         where
@@ -197,34 +197,34 @@ removeNonProductive (Grammar m) = finalize $ do
                            l = M2.toList m
                        in map (\(M2.Entry (RefK k) _) -> SomeRef k) l 
           
-          goSymb :: Symb RHS s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
+          goSymb :: Symb RHS s c a -> ReaderT (RawRef s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
           goSymb (Term _) = return []
           goSymb (NT ref) = do
             vmRef <- ask
-            vm <- readRef vmRef
+            vm <- readRawRef vmRef
             case M2.lookup (RefK ref) vm of
               Just _  -> return []
               Nothing -> do
-                modifyRef vmRef (M2.insert (RefK ref) (Const ()))
+                modifyRawRef vmRef (M2.insert (RefK ref) (Const ()))
                 rs <- readRef ref >>= goRHS
                 return $ SomeRef ref:rs
 
           goRHS (RHS rs) = concat <$> mapM goProd rs
 
-          goProd :: Prod s c a -> ReaderT (Ref s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
+          goProd :: Prod s c a -> ReaderT (RawRef s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
           goProd (PNil _) = return []
           goProd (PCons s r) =
             liftM2 (++) (goSymb s) (goProd r) 
 
-    checkRef :: Ref s (PTable s c) -> Ref s (RHS s c a) -> RefM s ()
+    checkRef :: RawRef s (PTable s c) -> Ref s (RHS s c a) -> RefM s ()
     checkRef pmRef ref = do
-      pm <- readRef pmRef
+      pm <- readRawRef pmRef
       case M2.lookup (RefK ref) pm of
         Just (Const True) -> return () 
         _ -> do 
           rhs <- readRef ref
           let b = checkRHS pm rhs
-          modifyRef pmRef (M2.insert (RefK ref) (Const b))
+          modifyRawRef pmRef (M2.insert (RefK ref) (Const b))
         where
           checkRHS pm (RHS rs) = or $ map (checkProd pm) rs
 
@@ -254,14 +254,14 @@ removeNonProductive (Grammar m) = finalize $ do
     removeSymb (Term c) = return $ term c
     removeSymb (NT x) = do
       (pm, rmRef) <- ask
-      rm <- readRef rmRef 
+      rm <- readRawRef rmRef 
       case M2.lookup (RefK x) pm of
         Just (Const True) ->
           case M2.lookup (coerce x) rm of
             Just res -> return res
             Nothing -> do
               rec res <- do
-                    writeRef rmRef $ M2.insert (coerce x) res rm
+                    writeRawRef rmRef $ M2.insert (coerce x) res rm
                     rhs <- readRef x
                     g <- removeRHS rhs
                     y <- newRef $ LazyRHS $ runOpenG g
@@ -303,7 +303,7 @@ instance Ord q => Ord2 (RefTuple s c q) where
           GT -> GT2
           EQ -> EQ2 
 
-type FuseM s inc outc = ReaderT (Ref s (Map2 (RefTuple s inc (Q,Q)) (OpenGrammar s outc))) (RefM s) 
+type FuseM s inc outc = ReaderT (RawRef s (Map2 (RefTuple s inc (Q,Q)) (OpenGrammar s outc))) (RefM s) 
 
 -- tryEnsureConstant :: forall a s c. Maybe (SingletonWit a) -> OpenGrammar s c a -> OpenGrammar s c a
 -- tryEnsureConstant Nothing g                      = g
@@ -315,7 +315,7 @@ unions = foldr (<|>) A.empty
 fuseWithTransducer :: forall inc outc a. Grammar inc a -> Transducer inc outc -> Grammar outc a
 fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
   ref <- m 
-  tMap <- newRef $ M2.empty
+  tMap <- newRawRef $ M2.empty
   runReaderT
     (unions <$>
      mapM (\q1 -> do
@@ -347,13 +347,13 @@ fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
     goRef :: forall s a. Q -> Q -> Ref s (RHS s inc a) -> FuseM s inc outc (OpenGrammar s outc a)
     goRef q q' x = do
       tbRef <- ask
-      tb    <- lift $ readRef tbRef
+      tb    <- lift $ readRawRef tbRef
       case M2.lookup (RefTuple x (q,q')) tb of
         Just v  -> return v
         Nothing -> do
           rhs <- lift $ readRef x
           rec res <- do
-                lift $ writeRef tbRef (M2.insert (RefTuple x (q,q')) res tb)
+                lift $ writeRawRef tbRef (M2.insert (RefTuple x (q,q')) res tb)
                 g <- goRHS q q' rhs 
                 r <- newRef $ LazyRHS $ runOpenG g
                 return $ OpenG $ return $ RSingle (PSymb (NT r))
@@ -385,6 +385,51 @@ optSpaces g = fuseWithTransducer g tr
     trF 2 = Just [Spaces]
     trF _ = error "Cannot happen" 
 
+type ThawM s = ReaderT (RawRef s (Map2 (RefK s (RHS s ExChar)) (OpenGrammar s Char))) (RefM s)
+
+thawSpace :: (Grammar Char ()) -> Grammar ExChar a -> Grammar Char a
+thawSpace gspace (Grammar m) = finalize $ do 
+  mstart <- m
+  let space0 = open gspace
+  rec spaces <- share $   pure Spaces
+                      <|> Spaces <$ space0 <* spaces
+  space <- share $ Space <$ space0 
+  tbRef <- newRawRef $ M2.empty
+  runReaderT (goRef space spaces mstart) tbRef
+    where
+      goRef :: OpenGrammar s Char ExChar -> OpenGrammar s Char ExChar -> Ref s (RHS s ExChar a) -> ThawM s (OpenGrammar s Char a)
+      goRef space spaces ref = do
+        tbRef <- ask
+        table <- readRawRef tbRef
+        case M2.lookup (coerce ref) table of
+          Just res -> return res
+          Nothing   -> do
+            rec res <- do
+                  modifyRawRef tbRef $ M2.insert (coerce ref) res
+                  rhs <- readRef ref
+                  g <- goRHS space spaces rhs 
+                  ref' <- newRef $ LazyRHS (runOpenG g)
+                  return $ OpenG $ return $ RSingle (PSymb (NT ref'))
+            return res 
+
+      goRHS :: OpenGrammar s Char ExChar -> OpenGrammar s Char ExChar -> RHS s ExChar a -> ThawM s (OpenGrammar s Char a)  
+      goRHS space spaces (RHS ps) = unions <$> mapM (goProd space spaces) ps
+        
+
+      goProd :: OpenGrammar s Char ExChar -> OpenGrammar s Char ExChar -> Prod s ExChar a -> ThawM s (OpenGrammar s Char a)
+      goProd _     _  (PNil f) = return $ pure f
+      goProd space spaces (PCons s r) = do 
+        g1 <- goSymb space spaces s
+        g2 <- goProd space spaces r
+        return $ fmap (\a k -> k a) g1 <*> g2
+
+      goSymb :: OpenGrammar s Char ExChar -> OpenGrammar s Char ExChar -> Symb RHS s ExChar a -> ThawM s (OpenGrammar s Char a)
+      goSymb space spaces (NT r) = goRef space spaces r
+      goSymb space spaces (Term c) =
+        case c of
+          Space  -> return space          
+          Spaces -> return spaces
+          NormalChar c -> return $ fmap fromChar (term c)
 
     -- preprocess :: Grammar ExChar a -> Grammar ExChar a
     -- preprocess (Grammar m) = Grammar $ do 
