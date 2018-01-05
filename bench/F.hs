@@ -15,18 +15,18 @@ example1 = flippr $ do
   let manyParens d = local $ do
         rec m <- share $ d <? parens m
         return m
-
-  pprTF <- share $ arg $ \i -> manyParens $ case_ i
+        
+  pprTF <- define $ \i -> manyParens $ case_ i
     [ $(un 'True)  $ text "True",
       $(un 'False) $ text "False" ]
 
-  rec ppr <- share $ arg $ \x -> manyParens $ case_ x
+  rec ppr <- define $ \x -> manyParens $ case_ x
         [ $(un '[]) $ text "[" <> text "]",
-          $(branch [p| a:x' |] [| brackets (ppr' `app` a `app` x') |]) ]
-      ppr' <- share $ arg $ \a -> arg $ \x -> case_ x
-        [ $(un '[]) $ pprTF @@ a,
-          $(branch [p| b:y |] [| pprTF `app` a <> text "," <+>. ppr' `app` b `app` y |]) ]
-  return ppr
+          $(branch [p| a:x' |] [| brackets (ppr' a x') |]) ]
+      ppr' <- define $ \a x -> case_ x
+        [ $(un '[]) $ pprTF a,
+          $(branch [p| b:y |] [| pprTF a <> text "," <+>. ppr' b y |]) ]
+  return (fromFunction ppr)
 
 gsp :: G.Grammar Char ()
 gsp = G.finalize $ return $ fmap (const ()) $ G.text " " 
@@ -56,6 +56,3 @@ main :: IO ()
 main = do
   let g = parsingMode example1
   print $ g
-  putStrLn "------------------------------"
-  let g0 = G.inline $ G.removeNonProductive $ G.optSpaces g
-  print $ G.thawSpace (G.finalize $ return $ fmap (const ()) $ G.text " ") $ g0             

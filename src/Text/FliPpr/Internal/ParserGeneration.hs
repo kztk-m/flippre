@@ -33,7 +33,7 @@ import qualified Text.FliPpr.Doc as D
 
 import Text.FliPpr.Internal.Ref
 
-import Debug.Trace 
+-- import Debug.Trace 
 
 type PEImpl = PE.U 
 type Rep = PE.Rep PEImpl
@@ -295,8 +295,15 @@ parsingModeMono m = G.finalize $ do
             Just (EqI a) -> return a
             Nothing      -> err $ D.text "Input is unused in evaluation."
 
-parsingMode :: In a => FliPpr (a :~> D) -> G.Grammar G.ExChar (Err a)
-parsingMode (FliPpr m) = parsingModeMono m
+-- data CommentSpec =
+--   CommentSpec (Maybe String)            -- ^ Starting string for line comments 
+--               (Maybe (String, String))  -- ^ Opening and closing strings for block comments.
+--               Bool                      -- ^ Is nestable or not 
+
+parsingMode :: In a => FliPpr (a :~> D) -> G.Grammar Char (Err a)
+parsingMode = parsingModeSP gsp
+  where
+    gsp = G.finalize $ return $ () <$ (foldr1 (<|>) $ map G.text [" ", "\n", "\r", "\t"])
 
 parsingModeSP :: In a => G.Grammar Char () -> FliPpr (a :~> D) -> G.Grammar Char (Err a)
 parsingModeSP gsp (FliPpr m) =
