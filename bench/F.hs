@@ -4,7 +4,6 @@
 {-# LANGUAGE RecursiveDo #-}
 
 import Text.FliPpr
-import Text.FliPpr.Doc
 import Text.FliPpr.TH
 
 import qualified Text.FliPpr.Internal.GrammarST as G 

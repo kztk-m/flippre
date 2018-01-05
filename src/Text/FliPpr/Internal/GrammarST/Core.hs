@@ -30,7 +30,7 @@ module Text.FliPpr.Internal.GrammarST.Core (
   share,
 
   -- ** Primitives
-  term, char, text, constantResult,
+  term, termSet, char, text, constantResult,
   space, spaces,
 
   -- ** Misc.
@@ -56,6 +56,8 @@ import qualified Data.Map2 as M2
 import Text.FliPpr.Internal.Ref 
 import Text.FliPpr.Err
 
+import Data.RangeSet.List as RS
+
 newtype Grammar c a = Grammar (forall s. RefM s (Ref s (RHS s c a)))
 newtype RHS s c a = RHS [Prod s c a] 
 
@@ -64,8 +66,9 @@ data Prod s c a =
 
 
 data Symb rhs s c a where
-  NT   :: !(Ref s (rhs s c a)) -> Symb rhs s c a 
-  Term :: !c -> Symb rhs s c c 
+  NT    :: !(Ref s (rhs s c a)) -> Symb rhs s c a 
+  Term  :: !c -> Symb rhs s c c
+  TermI :: !(RSet c) -> Symb rhs s c c 
 
 type PprM s = StateT (IM.IntMap Doc) (ST s) 
 
@@ -108,8 +111,9 @@ instance Show c => Pretty (Grammar c a) where
             pprRHS' rs = arrange <$> mapM (fmap align . pprProd) rs
             
             arrange :: [Doc] -> Doc
-            arrange [d1,d2]    = group (go [d1,d2])
-            arrange [d1,d2,d3] = group (go [d1,d2,d3])
+            arrange [d1,d2]          = group (go [d1,d2])
+            arrange [d1,d2,d3]       = group (go [d1,d2,d3])
+            arrange [d1,d2,d3,d4]    = group (go [d1,d2,d3,d4])            
             arrange (d1:d2:d3:d4:ds) =
               group (go [d1,d2,d3,d4]) </> D.text "|" <+> arrange ds
             arrange ds = group (go ds) 
@@ -126,6 +130,10 @@ instance Show c => Pretty (Grammar c a) where
             go s (PNil _) = return $ D.text (show (reverse s))
             go s (PCons (Term c) (PNil _)) = return $ D.text (show $ reverse $ c:s)
             go s (PCons (Term c) r) = go (c:s) r
+            go s (PCons (TermI cs) (PNil _)) = return $ pprS (reverse s) (D.text $ show cs)
+            go s (PCons (TermI cs) r) = do 
+              dr <- go [] r
+              return $ pprS (reverse s) $ D.text (show cs) <+> dr 
             go s (PCons (NT n) (PNil _)) = do 
               dn <- pprRefM n
               return $ pprS (reverse s) dn
@@ -147,7 +155,7 @@ instance Functor (Grammar c) where
     return ref 
 
 class Driver n where
-  parse :: (Eq c, Pretty c) => n -> Grammar c (Err a) -> [c] -> Err [a]          
+  parse :: (Ord c, Pretty c) => n -> Grammar c (Err a) -> [c] -> Err [a]          
 
 newtype OpenGrammar s c a = OpenG { runOpenG :: RefM s (OpenRHS s c a) } 
 data OpenRHS s c a
@@ -248,7 +256,14 @@ instance Applicative (OpenGrammar s c) where
 instance Alternative (OpenGrammar s c) where
   empty = OpenG $ return A.empty
   OpenG m1 <|> OpenG m2 = OpenG $ liftM2 (<|>) m1 m2 
-  
+
+  many g = OpenG $ do
+    rec a <- share $
+             pure []
+             <|> (:) <$> g <*> a
+    runOpenG a 
+
+  some g = (:) <$> g <*> many g 
     
 
 share :: OpenGrammar s c a -> RefM s (OpenGrammar s c a)
@@ -359,6 +374,7 @@ finalizeProd = fnaive id
 
 
 finalizeSymb :: Symb LazyRHS s c a -> FinalizeM s c (Symb RHS s c a) 
+finalizeSymb (TermI c) = return (TermI c) 
 finalizeSymb (Term c) = return (Term c)
 finalizeSymb (NT ref)   = do
   rm <- ask 
@@ -383,7 +399,8 @@ open (Grammar m) = OpenG $ do
   runOpenG g 
     where
       goSymb :: Symb RHS s c a -> OpenM s c (OpenGrammar s c a)
-      goSymb (Term c) = return (term c)
+      goSymb (Term c)   = return (term c)
+      goSymb (TermI cs) = return (termSet cs) 
       goSymb (NT ref) = do 
         tbRef <- ask
         tb <- readRawRef tbRef 
@@ -410,7 +427,29 @@ open (Grammar m) = OpenG $ do
             
 
 
-data ExChar = NormalChar Char | Space | Spaces 
+data ExChar =
+  Space | Spaces | NormalChar Char
+            deriving (Eq, Ord)
+
+
+instance Enum ExChar where
+  toEnum 0 = Space
+  toEnum 1 = Spaces
+  toEnum n = NormalChar (toEnum (n-2))
+
+  fromEnum Space          = 0
+  fromEnum Spaces         = 1
+  fromEnum (NormalChar c) = fromEnum c + 2
+
+  succ Space          = Spaces
+  succ Spaces         = NormalChar minBound
+  succ (NormalChar c) = NormalChar (succ c) 
+
+  pred Spaces = Space
+  pred (NormalChar c)
+    | c == minBound = Spaces
+    | otherwise     = NormalChar (pred c)
+  pred Space = error "pred: no predecessor"
 
 instance Pretty ExChar where
   ppr (NormalChar c) = ppr c
@@ -443,6 +482,9 @@ instance CharLike ExChar where
 
 term :: c -> OpenGrammar s c c
 term c = OpenG $ return $ RConstant c $ RSingle (PSymb (Term c))
+
+termSet :: RSet c -> OpenGrammar s c c
+termSet cs = OpenG $ return $ RSingle (PSymb (TermI cs))
 
 char :: CharLike c => Char -> OpenGrammar s c c
 char c = term (fromChar c)

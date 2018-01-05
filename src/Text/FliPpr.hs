@@ -9,7 +9,7 @@
 
 module Text.FliPpr (
   -- * Types
-  A, E, FliPprE(), FliPprD(), FliPpr, 
+  A, E, FliPprE, FliPprD, FliPpr, 
   Branch(..), type (<->)(..), In, Err(..), 
   
   -- * Syntax
@@ -42,7 +42,9 @@ module Text.FliPpr (
   define, Repr(..), defineR, defines, 
 
   -- * Evaluator
-  pprMode, parsingMode, parsingModeSP, G.Grammar, G.OpenGrammar,
+  pprMode, parsingMode, parsingModeWith, parsingModeSP,
+  CommentSpec(..), BlockCommentSpec(..),
+  G.Grammar, G.OpenGrammar,
   ) where
 
 import Text.FliPpr.Internal.Type
@@ -90,12 +92,12 @@ defineR (k1,k2) f = do
 {- |
 @defines [k1,...,kn] f@ is equivalent to:
 
-@@ 
+@ 
   do  fk1 <- define (f k1)
       ...
       fk2 <- define (f k2)
       return $ \k -> lookup k [(k1,fk1),...,(k2,fk2)]
-@@
+@
 -}
 
 {-# SPECIALIZE
@@ -132,30 +134,22 @@ instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a :~> t) (A 
 The function 'define' provides an effective way to avoid writing 'app' and 'arg'.
 We can write
 
-@@ 
-  f <- define $ \i -> ...
-  ... f a ...
-@@
+>  f <- define $ \i -> ...
+>  ... f a ...
 
 instead of:
 
-@@ 
-  f <- share $ arg $ \i -> ...
-  ... f `app` a ...
-@@
+>  f <- share $ arg $ \i -> ...
+>  ... f `app` a ...
 
 It works also with recursive defintions.
 We can write
 
-@@
-  rec f <- define $ \i -> ... f a ...  
-@@
+>  rec f <- define $ \i -> ... f a ...  
 
 instead of:
 
-@@
-  rec f <- share $ arg $ \i -> ... f `app` a ... 
-@@
+>  rec f <- share $ arg $ \i -> ... f `app` a ... 
 
 -}
 define :: (FliPprD m arg exp, Repr arg exp t r) => r -> m r

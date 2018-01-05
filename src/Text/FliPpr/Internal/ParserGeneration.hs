@@ -13,13 +13,15 @@
 
 {-# LANGUAGE ScopedTypeVariables #-}
 
+{-# LANGUAGE RecursiveDo #-}
+
 module Text.FliPpr.Internal.ParserGeneration where
 
 import Data.Typeable 
 import Data.Functor.Identity 
 
 import Control.Monad (join) 
-import Control.Applicative ((<|>), liftA2)
+import Control.Applicative ((<|>), liftA2, many)
 import qualified Control.Applicative as A (empty)
 
 import Control.Monad.Reader
@@ -32,6 +34,8 @@ import qualified Text.FliPpr.Internal.PartialEnv as PE
 import qualified Text.FliPpr.Doc as D 
 
 import Text.FliPpr.Internal.Ref
+
+import qualified Data.RangeSet.List as RS 
 
 -- import Debug.Trace 
 
@@ -295,15 +299,63 @@ parsingModeMono m = G.finalize $ do
             Just (EqI a) -> return a
             Nothing      -> err $ D.text "Input is unused in evaluation."
 
--- data CommentSpec =
---   CommentSpec (Maybe String)            -- ^ Starting string for line comments 
---               (Maybe (String, String))  -- ^ Opening and closing strings for block comments.
---               Bool                      -- ^ Is nestable or not 
+data BlockCommentSpec =
+  BlockCommentSpec { bcOpen  :: String    -- ^ The opening string for block comments
+                   , bcClose :: String    -- ^ The closing string for block comments 
+                   , bcNestable :: Bool   -- ^ Nestable or not 
+                   }
+data CommentSpec =
+  CommentSpec { lcSpec :: Maybe String,             -- ^ Starting string for line comments 
+                bcSpec :: Maybe BlockCommentSpec }  -- ^ Spec for block comments.
+
+
+fromCommentSpec :: CommentSpec -> G.Grammar Char ()
+fromCommentSpec (CommentSpec lc bc) = G.finalize $ do
+  let glc = case lc of
+              Nothing -> A.empty
+              Just s  -> () <$ G.text s <* many (G.termSet nb) <* G.termSet br 
+  rec gbc <-
+        case bc of
+          Nothing       -> return A.empty
+          Just (BlockCommentSpec op cl isNestable) -> 
+            if isNestable then do
+              nonOpCl <- non [op, cl]
+              G.share $ () <$ G.text op <* nonOpCl <* many (gbc <* nonOpCl) <* G.text cl
+            else do
+              nonCl   <- non [cl]
+              return $ () <$  G.text op <* nonCl <* G.text cl 
+  
+  let gsp = () <$ G.termSet sp 
+  return $ glc <|> gbc <|> gsp 
+  where
+    sp = RS.fromList " \r\n\t\v\f"
+    br = RS.fromList "\n\r" 
+    nb = RS.complement br 
+    
+
+non :: [String] -> RefM s (G.OpenGrammar s Char ())
+non ss = G.share $ () <$ many (go ss)
+  where
+    -- invaliant: ss is a list of nonempty strings 
+    go ss =
+      let firsts = RS.fromList (map head ss)
+          ss'    = map tail ss 
+      in G.termSet (RS.complement firsts) <|>
+         if any null ss' then
+           A.empty
+         else
+           foldr (<|>) A.empty [ G.term f *> go [ tail s | s <- ss, head s == f ] | f <- RS.toList firsts ] 
+
+
+
 
 parsingMode :: In a => FliPpr (a :~> D) -> G.Grammar Char (Err a)
 parsingMode = parsingModeSP gsp
   where
     gsp = G.finalize $ return $ () <$ (foldr1 (<|>) $ map G.text [" ", "\n", "\r", "\t"])
+
+parsingModeWith :: In a => CommentSpec -> FliPpr (a :~> D) -> G.Grammar Char (Err a)
+parsingModeWith = parsingModeSP . fromCommentSpec
 
 parsingModeSP :: In a => G.Grammar Char () -> FliPpr (a :~> D) -> G.Grammar Char (Err a)
 parsingModeSP gsp (FliPpr m) =

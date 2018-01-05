@@ -28,6 +28,8 @@ import qualified Data.Map2 as M2
 import Text.FliPpr.Internal.GrammarST.Core 
 import Text.FliPpr.Internal.Ref
 
+import qualified Data.RangeSet.List as RS
+
 -- data TT s c m res = TT (forall a. RHS s c a -> m (res s c a))
 --                        (forall a. Prod s c a -> m (res s c a))
 --                        (forall a. Symb RHS s c a -> m (res s c a))
@@ -113,7 +115,10 @@ inline (Grammar m) = finalize $ do
     inlineProd (PCons s r) = liftM2 (<*>) (fmap (\a k -> k a) <$> inlineSymb s) (inlineProd r)
 
     inlineSymb :: Symb RHS s c a -> TransM s c (OpenGrammar s c a)
-    inlineSymb (Term c) = return $ term c
+    inlineSymb (Term c)   = return $ term c
+    inlineSymb (TermI cs)
+      | RS.null cs = return A.empty
+      | otherwise  = return $ termSet cs 
     inlineSymb (NT x) = do
       tb <- getTable
       case M2.lookup (coerce x) tb of
@@ -158,7 +163,7 @@ type RemM s c = ReaderT (PTable s c, RawRef s (Map2 (RefK s (RHS s c)) (OpenGram
 
 data SomeRef s c = forall a. SomeRef (Ref s (RHS s c a))
 
-removeNonProductive :: Grammar c a -> Grammar c a
+removeNonProductive :: Eq c => Grammar c a -> Grammar c a
 removeNonProductive (Grammar m) = finalize $ do
   ref <- m 
   pmRef <- newRawRef M2.empty
@@ -198,6 +203,7 @@ removeNonProductive (Grammar m) = finalize $ do
                        in map (\(M2.Entry (RefK k) _) -> SomeRef k) l 
           
           goSymb :: Symb RHS s c a -> ReaderT (RawRef s (Map2 (RefK s (RHS s c)) (Const ()))) (RefM s) [SomeRef s c]
+          goSymb (TermI _) = return []
           goSymb (Term _) = return []
           goSymb (NT ref) = do
             vmRef <- ask
@@ -233,16 +239,17 @@ removeNonProductive (Grammar m) = finalize $ do
           checkProd pm (PCons s r) = checkSymb pm s && checkProd pm r
 
           checkSymb :: PTable s c -> Symb RHS s c a -> Bool
-          checkSymb _  (Term _) = True
+          checkSymb _  (TermI s) = not (RS.null s) 
+          checkSymb _  (Term _)  = True
           checkSymb pm (NT x)   =
             case M2.lookup (RefK x) pm of
               Just (Const True) -> True
               _                 -> False 
                         
-    removeRHS :: RHS s c a -> RemM s c (OpenGrammar s c a)
+    removeRHS :: Eq c => RHS s c a -> RemM s c (OpenGrammar s c a)
     removeRHS (RHS rs) = unions <$> mapM removeProd rs
 
-    removeProd :: Prod s c a -> RemM s c (OpenGrammar s c a)
+    removeProd :: Eq c => Prod s c a -> RemM s c (OpenGrammar s c a)
     removeProd (PNil f) = return $ pure f
     removeProd (PCons s r) = do
       s' <- removeSymb s
@@ -250,8 +257,12 @@ removeNonProductive (Grammar m) = finalize $ do
       return $ fmap (\a k -> k a) s' <*> r' 
 
 
-    removeSymb :: Symb RHS s c a -> RemM s c (OpenGrammar s c a)
-    removeSymb (Term c) = return $ term c
+    removeSymb :: Eq c => Symb RHS s c a -> RemM s c (OpenGrammar s c a)
+    removeSymb (Term c)   = return $ term c
+    removeSymb (TermI s)
+      | RS.null s = return A.empty
+      | [(a,b)] <- RS.toRangeList s, a == b = return $ term a
+      | otherwise = return $ termSet s  
     removeSymb (NT x) = do
       (pm, rmRef) <- ask
       rm <- readRawRef rmRef 
@@ -273,14 +284,15 @@ removeNonProductive (Grammar m) = finalize $ do
     
 
 type Q = Int
-data Transducer inc outc =
-  Transducer Q                     -- ^ init state
-             [Q]                   -- ^ all the states
-             [Q]                   -- ^ final states
-             (Trans inc outc)
 
-data Trans inc outc = Trans (Q -> inc -> ([outc], Q)) -- ^ transitions
-                            (Q -> Maybe [outc])             -- ^ final rules 
+data Transducer inc outc = Transducer
+                           Q                     -- init state
+                           [ Q ]                 -- all the states
+                           [ Q ]                 -- final states
+                           (Trans inc outc)
+
+data Trans inc outc = Trans (Q -> inc -> ([outc], Q)) -- transitions
+                            (Q -> Maybe [outc])       -- final rules 
 
 finalProd :: Q -> Trans inc outc -> Maybe [outc]
 finalProd q (Trans _ f) = f q 
@@ -312,7 +324,7 @@ type FuseM s inc outc = ReaderT (RawRef s (Map2 (RefTuple s inc (Q,Q)) (OpenGram
 unions :: forall f a. Alternative f => [f a] -> f a 
 unions = foldr (<|>) A.empty 
 
-fuseWithTransducer :: forall inc outc a. Grammar inc a -> Transducer inc outc -> Grammar outc a
+fuseWithTransducer :: forall inc outc a. (Enum inc) => Grammar inc a -> Transducer inc outc -> Grammar outc a
 fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
   ref <- m 
   tMap <- newRawRef $ M2.empty
@@ -333,6 +345,9 @@ fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
 
     goProd :: forall s a. Q -> Q -> Prod s inc a -> FuseM s inc outc (OpenGrammar s outc a)
     goProd q q' (PNil f) = return $ if q == q' then pure f else A.empty
+    goProd q q' (PCons (TermI s) r) =
+      -- FIXME: too slow
+      unions <$> mapM (\c -> goProd q q' (PCons (Term c) r)) (RS.toList s)
     goProd q q' (PCons (Term c) r) = do 
       let (os, q0) = transTo q c tr
       g <- goProd q0 q' r 
@@ -362,28 +377,107 @@ fuseWithTransducer (Grammar m) (Transducer q0 qs qf tr) = finalize $ do
 
 -- type GGM s c = ReaderT (Ref s (Map2 (RefK s (RHS s c)) (RefK s (RHS s c)))) (RefM s)
 
+data Qsp = Qn | Qs | Qss deriving (Eq, Ord) 
+type OptSpM s  = ReaderT (RawRef s (Map2 (RefTuple s ExChar (Qsp,Qsp)) (OpenGrammar s ExChar))) (RefM s)
+
 optSpaces :: Grammar ExChar a -> Grammar ExChar a
-optSpaces g = fuseWithTransducer g tr
+optSpaces (Grammar m) = finalize $ do
+  ref <- m 
+  tMap <- newRawRef $ M2.empty
+  runReaderT
+    (unions <$>
+     mapM (\q1 -> do
+              g <- goRef Qn q1 ref
+              return $ g <* finalProd q1) [Qn, Qs, Qss])
+    tMap
   where
-    tr = Transducer 0 [0,1,2] [0,1,2] (Trans trC trF)
-    trC 0 Space  = ([], 1)
-    trC 0 Spaces = ([], 2)
-    trC 0 (NormalChar c) = ([NormalChar c], 0)
+    finalProd Qn  = pure () 
+    finalProd Qs  = () <$ term Space
+    finalProd Qss = () <$ term Spaces 
 
-    trC 1 Space  = ([Space], 1)
-    trC 1 Spaces = ([Space], 2)
-    trC 1 (NormalChar c) = ([Space, NormalChar c], 0)
+    tr Qn Space  = (pure Space, Qs)
+    tr Qn Spaces = (pure Spaces, Qss)
+    tr Qn (NormalChar c) = (char c, Qn)
 
-    trC 2 Space  = ([Space],  2)
-    trC 2 Spaces = ([],       2)
-    trC 2 (NormalChar c) = ([Spaces, NormalChar c], 0)
+    tr Qs Space  = (term Space, Qs)
+    tr Qs Spaces = (term Space, Qss)
+    tr Qs (NormalChar c) = (term Space *> char c, Qn)
 
-    trC _ _ = error "Cannot happen"
+    tr Qss Space  = (term Space, Qss)
+    tr Qss Spaces = (pure Spaces, Qss)
+    tr Qss (NormalChar c) = (term Spaces *> char c, Qn) 
 
-    trF 0 = Just []
-    trF 1 = Just [Space]
-    trF 2 = Just [Spaces]
-    trF _ = error "Cannot happen" 
+    goRef :: Qsp -> Qsp -> Ref s (RHS s ExChar a) -> OptSpM s (OpenGrammar s ExChar a)
+    goRef q q' x = do
+      tbRef <- ask
+      tb <- readRawRef tbRef
+      case M2.lookup (RefTuple x (q,q')) tb of
+        Just v -> return v
+        Nothing -> do
+          rhs <- readRef x
+          rec res <- do
+                modifyRawRef tbRef (M2.insert (RefTuple x (q,q')) res)
+                g <- goRHS q q' rhs
+                r <- newRef $ LazyRHS $ runOpenG g
+                return $ OpenG $ return $ RSingle $ PSymb $ NT r
+          return res
+
+    goRHS :: Qsp -> Qsp -> RHS s ExChar a -> OptSpM s (OpenGrammar s ExChar a)
+    goRHS q q' (RHS rs) =
+      unions <$> mapM (goProd q q') rs
+
+    goProd :: Qsp -> Qsp -> Prod s ExChar a -> OptSpM s (OpenGrammar s ExChar a)
+    goProd q q' (PNil f) = return $ if q == q' then pure f else A.empty
+    goProd q q' (PCons (TermI s) r) = do 
+      r1 <- if RS.member Space  s then goProd q q' (PCons (Term Space) r)  else return A.empty
+      r2 <- if RS.member Spaces s then goProd q q' (PCons (Term Spaces) r) else return A.empty
+      r3 <- do
+        let s' = RS.delete Space $ RS.delete Spaces $ s
+        let (o, qm) = case q of
+                        Qn  -> (termSet s', Qn)
+                        Qs  -> (term Space *> termSet s', Qn)
+                        Qss -> (term Spaces *> termSet s', Qn)
+        gr <- goProd qm q' r
+        return $ fmap (\a k -> k a) o <*> gr
+      return $ r1 <|> r2 <|> r3 
+        
+      
+    goProd q q' (PCons (Term c) r) = do
+      let (o, qm) = tr q c
+      gr <- goProd qm q' r 
+      return $ fmap (\a k -> k a) o <*> gr
+    goProd q q' (PCons (NT x) r) = do
+      unions <$> 
+        mapM (\qm -> do
+                 g1 <- goRef  q  qm x 
+                 g2 <- goProd qm q' r
+                 return $ fmap (\a k -> k a) g1 <*> g2) [Qn, Qs, Qss]
+      
+  
+-- optSpaces g = fuseWithTransducer g tr
+--   where
+--     tr = Transducer 0 [0,1,2] [0,1,2] (Trans trC trF)
+--     trC 0 Space  = ([], 1)
+--     trC 0 Spaces = ([], 2)
+--     trC 0 (NormalChar c) = ([NormalChar c], 0)
+
+--     trC 1 Space  = ([Space], 1)
+--     trC 1 Spaces = ([Space], 2)
+--     trC 1 (NormalChar c) = ([Space, NormalChar c], 0)
+
+--     trC 2 Space  = ([Space],  2)
+--     trC 2 Spaces = ([],       2)
+--     trC 2 (NormalChar c) = ([Spaces, NormalChar c], 0)
+
+--     trC _ _ = error "Cannot happen"
+
+--     trF 0 = Just []
+--     trF 1 = Just [Space]
+--     trF 2 = Just [Spaces]
+--     trF _ = error "Cannot happen" 
+
+
+
 
 type ThawM s = ReaderT (RawRef s (Map2 (RefK s (RHS s ExChar)) (OpenGrammar s Char))) (RefM s)
 
@@ -430,6 +524,13 @@ thawSpace gspace (Grammar m) = finalize $ do
           Space  -> return space          
           Spaces -> return spaces
           NormalChar c -> return $ fmap fromChar (term c)
+      goSymb space spaces (TermI cs) =
+        let r1 = if RS.member Space  cs then space  else A.empty
+            r2 = if RS.member Spaces cs then spaces else A.empty
+            r3 = let rs = RS.toRangeList $ RS.delete Space $ RS.delete Spaces cs
+                 in fmap fromChar $ termSet
+                    $ RS.fromNormalizedRangeList $ map (\(NormalChar a1, NormalChar a2) -> (a1,a2)) rs
+        in return $ r1 <|> r2 <|> r3 
 
     -- preprocess :: Grammar ExChar a -> Grammar ExChar a
     -- preprocess (Grammar m) = Grammar $ do 
