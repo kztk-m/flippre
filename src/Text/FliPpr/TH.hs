@@ -6,27 +6,119 @@ module Text.FliPpr.TH where
 import Text.FliPpr.Internal.Type
 
 import Language.Haskell.TH as TH
+import Language.Haskell.TH.Datatype as TH
+
+import Data.Char as C 
+
+
+{-
+Needs FlexibleContents.
+-}
+mkUn :: TH.Name -> Q [TH.Dec]
+mkUn n = do
+  info <- TH.reifyDatatype n
+  dss <- mapM makeUn (TH.datatypeCons info)
+  return $ concat dss
+  where
+    makeUn :: TH.ConstructorInfo -> Q [TH.Dec]
+    makeUn cinfo = do 
+      let n  = TH.constructorName cinfo
+      let bn = TH.nameBase n
+      fn <- makeUnName bn
+      (t,e) <- unGen n
+      -- let sigd = TH.SigD fn t
+      -- (sigd:) <$> [d| $(TH.varP fn) = $(return e) |]
+      return $ [TH.SigD fn t, TH.ValD (TH.VarP fn) (TH.NormalB e) [] ]
+      where
+        makeUnName :: String -> Q TH.Name 
+        makeUnName ":"  = return $ TH.mkName "unCons"
+        makeUnName "[]" = return $ TH.mkName "unNil"
+        makeUnName n | C.isUpper (head n) = return $ TH.mkName $ "un" ++ n 
+        makeUnName n =
+          case [ i | i <- (0:[2..5]), n == TH.nameBase (TH.tupleDataName i) ] of
+            j:_ -> return $ TH.mkName $ "unTuple" ++ show j
+            _   -> fail $ "mkUn does not support non-letter constructors in general: " ++ show n 
+
+
 
 {- |
+Make an (injective) deconstructor from a constructor.
 
+For example, we have:
+
+>>> :t $(un '(:))
+$(un '(:))
+  :: (FliPprE arg exp, Eq a, Data.Typeable.Internal.Typeable a) =>
+     (A arg a -> A arg [a] -> E exp t) -> Branch (A arg) (E exp) [a] t
+
+>>> :t $(un 'Left)
+$(un 'Left)
+  :: (FliPprE arg exp, Eq a, Data.Typeable.Internal.Typeable a) =>
+     (A arg a -> E exp t1) -> Branch (A arg) (E exp) (Either a t) t1
+
+In general, use of 'un' requires FlexibleContents. 
 -}
+
 un :: TH.Name -> Q TH.Exp
-un cname = do
-  cinfo <- TH.reify cname
+un n = do
+  (t, e) <- unGen n
+  [| $(return e) :: $(return t) |]
+
+unGen :: TH.Name -> Q (TH.Type, TH.Exp)
+unGen cname = do
+  -- We do not use 'reifyConstructor' from th-abstraction, as we want to check whether
+  -- the constructor is the only one constructor of the datatype or not. 
+  cinfo <- TH.reify cname 
   case cinfo of
     TH.DataConI _ ty tyname -> do 
       let n   = numberOfArgs ty
       isSing <- isSingleton tyname 
       let f   = makeForward  cname n isSing
       let fi  = makeBackward cname n 
-      let exp = makeBody n 
-      [| \e ->
-          PInv $(TH.litE $ TH.stringL $ TH.nameBase cname) $f $fi
-        `Branch`
-        $(exp) e |]
+      let exp = makeBody n
+      t <- makeTy ty
+      r <- [| \e ->
+               PartialBij $(TH.litE $ TH.stringL $ TH.nameBase cname) $f $fi
+               `Branch`
+               $(exp) e |]
+      return (t, r) 
     _ ->
       fail $ "un: " ++ show cname ++ " is not a constructor" 
   where
+    -- ... => a -> b -> c  ---> ... (A arg a -> A arg b -> E arg t) -> Branch (A arg) (E exp) c t
+    makeTy :: TH.Type -> Q TH.Type
+    makeTy ty = do 
+      let (_ctxt, body) = splitType ty
+      (argsTy, retTy) <- parseType body
+      arg_ <- TH.varT =<< TH.newName "arg"
+      exp_ <- TH.varT =<< TH.newName "exp"
+      res_ <- TH.varT =<< TH.newName "r"
+      let arg = return arg_
+      let exp = return exp_ 
+      let res = return res_
+      let contTy   = foldr (\a r -> [t| A $arg $(return a) -> $r |]) [t| E $exp $res |] argsTy
+      let resultTy = [t| Branch (A $arg) (E $exp) $(return retTy) $res |]
+      let inCtxt t = do
+           cs <- mapM (\a -> [t| In $(return a) |]) argsTy
+           TH.ForallT [] cs <$> t
+      [t| FliPprE $arg $exp => $(inCtxt [t| $contTy -> $resultTy |]) |]
+        where
+          splitType :: TH.Type -> (TH.Type -> TH.Type, TH.Type)
+          splitType (TH.ForallT tvs ctxt t) =
+             let (k,t') = splitType t 
+             in (TH.ForallT tvs ctxt . k, t')
+          splitType t = (id , t)
+
+
+
+    -- FIXME: Generate Error Messages
+    parseType :: TH.Type -> Q ([TH.Type], TH.Type)
+    parseType (TH.AppT (TH.AppT ArrowT t1) t2) = do
+       (args, ret) <- parseType t2
+       return (t1:args, ret)
+    parseType (TH.SigT _ _) = fail "Kind signatures are not supported yet."
+    parseType t = return ([], t)
+
     isSingleton :: TH.Name -> Q Bool
     isSingleton tyname = do
       info <- TH.reify tyname
@@ -82,6 +174,7 @@ un cname = do
             [| unpair $( TH.varE x) $
                  \ $( TH.varP v ) $( TH.varP x' ) -> $(go vs ovs x' z) |]
 
+
 {- |
 A syntactic sugar for 'Branch'. 
 A typical usage is:
@@ -102,7 +195,7 @@ branch patQ expQ = do
   let f  = makeForward  pat vs
   let fi = makeBackward pat vs 
   let nf = "<" ++ pprint pat ++ ">"
-  [| Branch (PInv $(TH.litE $ TH.stringL $ nf) $f $fi)
+  [| Branch (PartialBij $(TH.litE $ TH.stringL $ nf) $f $fi)
      $(makeBody exp vs) |]
     where
       gatherVarNames :: TH.Pat -> [TH.Name]

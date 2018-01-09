@@ -150,13 +150,13 @@ instance FliPprE PArg (PExp s) where
     
 
   fcase _   [] = PExp $ const A.empty 
-  fcase inp (Branch (PInv s f finv) k : bs) =
-    branch inp (PInv s f finv) k
+  fcase inp (Branch (PartialBij s f finv) k : bs) =
+    branch inp (PartialBij s f finv) k
     `choiceGen`
     fcase inp bs
     where
-      branch :: (In a, In b) => PArg a -> (a <-> b) -> (PArg b -> PExp s r) -> PExp s r 
-      branch inp (PInv _ _ finv) k =
+      branch :: (In a, In b) => PArg a -> (PartialBij a b) -> (PArg b -> PExp s r) -> PExp s r 
+      branch inp (PartialBij _ _ finv) k =
         PExp $ \tenv ->
         let (tenvb, vb, _) = PE.extendRep tenv Proxy
             argB  = PArg $ \tenv' -> PE.embedVar tenvb tenv' vb
@@ -360,4 +360,5 @@ parsingModeWith = parsingModeSP . fromCommentSpec
 parsingModeSP :: In a => G.Grammar Char () -> FliPpr (a :~> D) -> G.Grammar Char (Err a)
 parsingModeSP gsp (FliPpr m) =
   let g   = parsingModeMono m
-  in G.thawSpace gsp $ G.inline $ G.removeNonProductive $ G.optSpaces g 
+  in G.thawSpace gsp $ G.inline $ G.removeNonProductive $ G.optSpaces g
+  

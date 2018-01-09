@@ -1,10 +1,10 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RecursiveDo #-}
 
 import Text.FliPpr
-import Text.FliPpr.TH
 
 import qualified Text.FliPpr.Internal.GrammarST as G 
 import Text.FliPpr.Driver.Earley (Earley(..))
@@ -20,8 +20,8 @@ example1 = flippr $ do
       $(un 'False) $ text "False" ]
 
   rec ppr <- define $ \x -> manyParens $ case_ x
-        [ $(un '[]) $ text "[" <> text "]",
-          $(branch [p| a:x' |] [| brackets (ppr' a x') |]) ]
+        [ unNil  $ text "[" <> text "]",
+          unCons $ \a x' -> brackets (ppr' a x') ]
       ppr' <- define $ \a x -> case_ x
         [ $(un '[]) $ pprTF a,
           $(branch [p| b:y |] [| pprTF a <> text "," <+>. ppr' b y |]) ]

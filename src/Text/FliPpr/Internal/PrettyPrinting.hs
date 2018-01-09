@@ -28,7 +28,7 @@ instance DocLike d => FliPprE Identity (Ppr d) where
   fcase a = go (coerce a)
     where
       go _ [] = error "Pattern matching failure"
-      go a (Branch (PInv _ f _) h : bs) =
+      go a (Branch (PartialBij _ f _) h : bs) =
         case f a of
           Nothing -> go a bs
           Just b  -> h (Identity b) 

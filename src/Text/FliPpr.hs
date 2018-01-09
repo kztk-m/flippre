@@ -1,16 +1,17 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE DataKinds #-}
 
 module Text.FliPpr (
   -- * Types
   A, E, FliPprE, FliPprD, FliPpr, 
-  Branch(..), type (<->)(..), In, Err(..), 
+  Branch(..), PartialBij(..), In, Err(..), 
   
   -- * Syntax
   -- ** Types
@@ -39,17 +40,28 @@ module Text.FliPpr (
   (<+>.), (</>.), 
 
   -- ** Easy Definition
-  define, Repr(..), defineR, defines, 
+  define, Repr(..), defineR, defines,
 
+  -- ** Template Haskell
+  un, branch, mkUn, 
+
+  -- ** Predefined Deconstructors 
+  unTrue, unFalse, unNil, unCons,
+  unLeft, unRight, unTuple3, 
+  
   -- * Evaluator
   pprMode, parsingMode, parsingModeWith, parsingModeSP,
   CommentSpec(..), BlockCommentSpec(..),
   G.Grammar, G.OpenGrammar,
+
+  -- * Utils
+  Fixity(..), Assoc(..), Prec, opPrinter, 
   ) where
 
 import Text.FliPpr.Internal.Type
 import Text.FliPpr.Internal.PrettyPrinting 
 import Text.FliPpr.Internal.ParserGeneration 
+import Text.FliPpr.TH
 
 import Text.FliPpr.Doc 
 import Text.FliPpr.Err
@@ -156,3 +168,31 @@ define :: (FliPprD m arg exp, Repr arg exp t r) => r -> m r
 define f = do
   f' <- share $ fromFunction f
   return $ toFunction f' 
+
+type Prec = Int 
+
+data Fixity = Fixity Assoc Prec
+
+data Assoc = AssocL
+           | AssocR
+           | AssocN
+
+
+opPrinter :: DocLike d => 
+             Fixity -> (d -> d -> d) -> (Prec -> d) -> (Prec -> d) -> (Prec -> d)
+opPrinter (Fixity a opPrec) opD ppr1 ppr2 k =
+  let (dl, dr) = case a of
+                   AssocL -> (0, 1)
+                   AssocR -> (1, 0)
+                   AssocN -> (0, 0)                              
+  in ifParens (k > opPrec) $ opD (ppr1 (opPrec+dl)) (ppr2 (opPrec+dr))
+  where
+    ifParens b = if b then parens else id 
+
+$(mkUn ''Bool)
+$(mkUn ''(:))
+$(mkUn ''Either)
+$(mkUn ''(,,))
+
+  
+  

@@ -20,7 +20,21 @@
 
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
-module Text.FliPpr.Internal.Type where
+module Text.FliPpr.Internal.Type (
+  FType(..), In, FliPprE(..), FliPprD(..),
+  A(..), E(..), FliPpr(..), Branch(..), 
+  PartialBij(..), 
+  
+  flippr, 
+
+  arg, app, (@@),
+
+  case_, unpair, share, local, 
+  
+  line', space, spaces, nespaces, nespaces',
+  (<?), hardcat, (<#>)  
+  
+  ) where
 
 import Data.Kind 
 import Control.Monad.State
@@ -48,11 +62,11 @@ type In a = (Typeable a, Eq a)
 
 -- | A type for partial bijections. The 'String'-typed field will be used in pretty-printing
 --   of FliPpr expressions. 
-data a <-> b = PInv String (a -> Maybe b) (b -> Maybe a) 
+data PartialBij a b = PartialBij String (a -> Maybe b) (b -> Maybe a) 
 
 -- | A datatype represents branches. 
 data Branch arg exp a (t :: FType) =
-  forall b. In b => Branch (a <-> b) (arg b -> exp t)
+  forall b. In b => Branch (PartialBij a b) (arg b -> exp t)
 
 -- | A finally-tagless implementation of FliPpr expressions. 
 --   The APIs are only for internal use. 
@@ -356,7 +370,7 @@ instance FliPprE (Printer s) (Printer s) where
 
   fcase a bs = Printer $ \vn k -> do 
     da <- runPrinter a vn 10
-    ds <- mapM (\(Branch (PInv s _ _) f) -> do 
+    ds <- mapM (\(Branch (PartialBij s _ _) f) -> do 
                      df <- runPrinter (f (toPrinter $ pprVName vn)) (vn+1) 0
                      return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprVName vn <+> D.text "->" <+> df) bs 
     return $ parensIf (k > 9) $ D.group $ 

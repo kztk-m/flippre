@@ -37,7 +37,9 @@ library
                        containers >= 0.5 && < 0.6,
                        template-haskell >= 2.11 && < 2.13, 
                        Earley >= 0.11 && < 0.13, 
-                       range-set-list >= 0.1 && < 0.2 
+                       range-set-list >= 0.1 && < 0.2, 
+                       th-abstraction >= 0.2 && < 0.3
+                       
   default-language:    Haskell2010
   ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors
 
@@ -54,8 +56,14 @@ benchmark bool-list
   main-is: bench/F.hs
   build-depends: base, flippre                         
   default-language:    Haskell2010
-  ghc-options: -rtsopts 
+  ghc-options: -rtsopts
 
+benchmark arith
+  type: exitcode-stdio-1.0 
+  main-is: bench/C.hs
+  build-depends: base, flippre
+  default-language:    Haskell2010
+  ghc-options: -rtsopts 
 
 source-repository head
   type:     mercurial
