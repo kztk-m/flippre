@@ -28,6 +28,10 @@ pExp = flippr $ do
   let subD x y = align $ group (x </>. text "-" <+>. y)
   let divD x y = x <+>. text "/" <+>. align y
 
+  let manyParens d = local $ do
+        rec m <- share $ d <? parens m
+        return m
+
   rec pprDigit <- define $ \x ->
         case_ x
         [ is 0 $ text "0",
@@ -46,7 +50,7 @@ pExp = flippr $ do
         [ lt10 $ \x -> pprDigit x,
           dm10 $ \d r -> pprNum d <#> pprDigit r ]
   
-  rec ppr <- defines [0,1,2] $ \k x ->
+  rec ppr <- defines [0,1,2] $ \k x -> manyParens $ 
         case_ x
         [ unAdd $ \e1 e2 -> opPrinter (Fixity AssocL 0) addD (flip ppr e1) (flip ppr e2) k,
           unSub $ \e1 e2 -> opPrinter (Fixity AssocL 0) subD (flip ppr e1) (flip ppr e2) k,
