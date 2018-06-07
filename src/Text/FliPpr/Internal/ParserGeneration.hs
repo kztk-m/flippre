@@ -39,7 +39,7 @@ import qualified Data.RangeSet.List as RS
 
 -- import Debug.Trace 
 
-type PEImpl = PE.U 
+type PEImpl = PE.UB 
 type Rep = PE.Rep PEImpl
 type Env = PE.Env PEImpl EqI
 type Var = PE.Var PEImpl
@@ -89,17 +89,10 @@ tryUpdateEnv k (Just v) env =
     Just env' -> -- trace (show $ pprEnv env D.<+> D.text "->" D.<+> D.align (pprEnv env')) $
                  return env'
     Nothing   -> err (D.text "The same variable is updated twice:"
-                              D.$$ D.text "updating position" D.<+> pprVar k D.<+> D.text "in" D.<+> pprEnv env )
-  where
-    pprVar (PE.VarU i) = D.ppr i 
+                             D.$$ D.text "updating position" D.<+> pprVar k D.<+> D.text "in" D.<+> PE.pprEnv env )
+ where
+   pprVar v = D.ppr (PE.toIndex v)
 
-pprEnv :: Env env -> D.Doc 
-pprEnv (PE.EnvU impl) = D.group $ D.text "<" D.<> go (0 :: Int) impl D.<> D.text ">"
-  where
-  go _ PE.EEmp   = D.empty
-  go _ PE.EUndet = D.text "???"
-  go n (PE.EExt b r) =
-    (D.ppr n D.<> D.text ":" D.<> maybe (D.text "_") (const $ D.text "*") b) D.</> go (n+1) r 
 
 choice :: PExp s D -> PExp s D -> PExp s D
 choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
@@ -108,7 +101,7 @@ choiceGen :: PExp s r -> PExp s r -> PExp s r
 choiceGen p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv 
                                                                    
 fromP :: GU s a -> PExp s D
-fromP x = PExp $ \_ -> G.constantResult (return $ RD PE.undeterminedEnv) x
+fromP x = PExp $ \tenv -> G.constantResult (return $ RD (PE.undeterminedEnv tenv)) x
   -- return (RD PE.undeterminedEnv) <$ x 
 
 refineValue :: forall b. Typeable b => Maybe (EqI b) -> Maybe (EqI b)
