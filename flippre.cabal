@@ -53,14 +53,14 @@ benchmark grammar-trans
 
 benchmark bool-list
   type: exitcode-stdio-1.0 
-  main-is: bench/F.hs
+  main-is: bench/BoolList.hs
   build-depends: base, flippre                         
   default-language:    Haskell2010
   ghc-options: -rtsopts
 
 benchmark arith
   type: exitcode-stdio-1.0 
-  main-is: bench/C.hs
+  main-is: bench/Arith.hs
   build-depends: base, flippre
   default-language:    Haskell2010
   ghc-options: -rtsopts 
