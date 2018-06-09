@@ -39,7 +39,7 @@ import qualified Data.RangeSet.List as RS
 
 -- import Debug.Trace 
 
-type PEImpl = PE.UB 
+type PEImpl = PE.UB
 type Rep = PE.Rep PEImpl
 type Env = PE.Env PEImpl EqI
 type Var = PE.Var PEImpl
@@ -286,7 +286,7 @@ parsingModeMono m = G.finalize $ do
     k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s
     k (Ok a)   =
       case a of
-        RF (RD e) -> 
+        RF (RD e) -> -- xtrace (show $ PE.pprEnv e) $ 
           let (a, _) = PE.popEnv e
           in case a of
             Just (EqI a) -> return a

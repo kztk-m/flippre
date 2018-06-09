@@ -191,14 +191,18 @@ instance PartialEnvImpl UB where
       go 0 (BExt v _)  = Just v
       go n (BExt _ r)  = go (n-1) r 
       go _ BEnd        = Nothing
-      go n (BSkip m e) = go 0 (bskip' (m-n) e)
+      go n (BSkip m e) =
+        let kk = min n m
+        in go (n-kk) (bskip' (m-kk) e)
 
   updateEnv mg (VarUB i) v (EnvUB es) = EnvUB <$> go i v es
     where
       go 0 v (BExt u e) | Just r <- mg v (unsafeCast u) = pure $ BExt (Untype r) e
       go 0 v (BSkip m e) = pure $ BExt (Untype v) (bskip' (m-1) e)
       go n v (BExt u e)  = BExt u <$> go (n-1) v e
-      go n v (BSkip m e) = bskip n <$> go 0 v (bskip' (m-n) e)
+      go n v (BSkip m e) =
+        let kk = min n m
+        in bskip kk <$> go (n-kk) v (bskip' (m-kk) e)
       go _ _ _            = Nothing
 
   
@@ -259,7 +263,7 @@ instance PartialEnvImpl UB where
   pprEnv (EnvUB impl) = D.group $ D.text "<" D.<> go (0 :: Int) impl D.<> D.text ">"
     where
       go _ BEnd       = D.empty
-      go n (BSkip m e) = D.text "_" D.<+> D.text (show m) D.</> go (n+m) e 
+      go n (BSkip m e) = D.text "_" D.<> D.brackets (D.text (show m)) D.</> go (n+m) e 
       go n (BExt _ r) =
         (D.ppr n D.<> D.text ":" D.<> D.text "*") D.</> go (n+1) r 
 

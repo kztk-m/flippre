@@ -54,16 +54,24 @@ benchmark grammar-trans
 benchmark bool-list
   type: exitcode-stdio-1.0 
   main-is: bench/BoolList.hs
-  build-depends: base, flippre                         
+  build-depends: base, flippre
   default-language:    Haskell2010
   ghc-options: -rtsopts
 
 benchmark arith
   type: exitcode-stdio-1.0 
   main-is: bench/Arith.hs
-  build-depends: base, flippre
+  build-depends: base, flippre, deepseq 
   default-language:    Haskell2010
   ghc-options: -rtsopts 
+
+benchmark arithlet
+  type: exitcode-stdio-1.0 
+  main-is: bench/Let.hs
+  build-depends: base, flippre, deepseq 
+  default-language:    Haskell2010
+  ghc-options: -rtsopts 
+
 
 source-repository head
   type:     mercurial

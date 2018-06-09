@@ -9,6 +9,7 @@ import Text.FliPpr
 import qualified Text.FliPpr.Internal.GrammarST as G 
 import Text.FliPpr.Driver.Earley (Earley(..))
 
+import Control.DeepSeq 
 import System.CPUTime
 
 data Exp = Add Exp Exp
@@ -105,15 +106,12 @@ countTime str comp = do
   return r 
 
 main :: IO ()
-main = do
-  countTime "Exp1" $ do 
-    putStrLn s1
+main = do  
+  rnf s1 `seq` countTime "Exp1" $ do     
     print (parseExp' s1)
-  countTime "Exp2" $ do 
-    putStrLn s2
+  rnf s2 `seq` countTime "Exp2" $ do 
     print (parseExp' s2)
-  countTime "Exp3" $ do 
-    putStrLn s3
+  rnf s3 `seq` countTime "Exp3" $ do    
     print (parseExp' s3)
   where
     s1 = show $ pprExp exp1

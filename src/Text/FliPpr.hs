@@ -33,7 +33,7 @@ module Text.FliPpr (
   share, local, 
 
   -- ** Pretty-Printing Combinators and Datatypes
-  spaces, space, (<#>), 
+  spaces, space, (<#>), line', 
   module Text.FliPpr.Doc, 
 
   -- ** Derived Combinators
