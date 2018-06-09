@@ -295,8 +295,11 @@ infixr 5 <#>
 instance (D ~ t, FliPprE arg exp) => Semigroup (E exp t) where
   (<>) x y  = x `hardcat` (spaces `hardcat` y)
 
+
+-- FIXME: This instance does not satisify the laws. Maybe, we should remove Monoid from the
+-- superclass of DocLike.
 instance (D ~ t, FliPprE arg exp) => Monoid (E exp t) where
-  mempty  = spaces -- Notice that 'mempty' is not 'empty', as it is not a unit of @(<>)@.
+  mempty  = spaces 
   mappend = (Data.Semigroup.<>) 
 
 -- | We can use pretty-printing combinators defined in 'Text.FliPpr.Doc' also for FliPpr expressions. 

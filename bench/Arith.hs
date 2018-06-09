@@ -62,12 +62,6 @@ pExp = flippr $ do
   return $ fromFunction (ppr 0) 
     
   where
-    is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) c r
-    is c f = PartialBij ("is " ++ show c)
-                       (\x -> if x == c then Just () else Nothing)
-                       (\_ -> Just c)
-            `Branch` const f 
-    
     lt10 :: FliPprE arg exp => (A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
     lt10 f = Branch (PartialBij "lt10" (\x -> if x < 10 then Just x else Nothing) Just) f 
 

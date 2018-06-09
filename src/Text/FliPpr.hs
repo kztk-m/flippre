@@ -55,7 +55,7 @@ module Text.FliPpr (
   G.Grammar, G.OpenGrammar,
 
   -- * Utils
-  Fixity(..), Assoc(..), Prec, opPrinter, 
+  Fixity(..), Assoc(..), Prec, opPrinter, is
   ) where
 
 import Text.FliPpr.Internal.Type
@@ -141,6 +141,14 @@ instance FliPprE arg exp => Repr arg exp D (E exp D) where
 instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a :~> t) (A arg a -> r) where
   toFunction f = \a -> toFunction (f `app` a) 
   fromFunction k = arg (fromFunction . k)
+
+is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) c r
+is c f = PartialBij ("is " ++ show c)
+                    (\x -> if x == c then Just () else Nothing)
+                    (\_ -> Just c)
+         `Branch` const f 
+    
+
 
 {- |
 The function 'define' provides an effective way to avoid writing 'app' and 'arg'.
