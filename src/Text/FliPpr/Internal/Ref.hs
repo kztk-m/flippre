@@ -115,9 +115,6 @@ instance Ord2 (Ref s) where
   compare2 r1 r2
     | refID r1 < refID r2 = LT2
     | refID r1 > refID r2 = GT2
-    | otherwise           =
-        case eq2 r1 r2 of
-          Just Refl -> EQ2
-          Nothing   -> error "Cannot happen" 
+    | otherwise           = unsafeCoerce EQ2 
       
         

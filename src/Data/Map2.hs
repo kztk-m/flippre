@@ -43,7 +43,7 @@ pattern Black :: Color
 pattern Black = 1 
 
 data Map2 k1 k2 =
-  Leaf | Node !Color !(Entry k1 k2) (Map2 k1 k2) (Map2 k1 k2)
+  Leaf | Node {-# UNPACK #-} !Color !(Entry k1 k2) (Map2 k1 k2) (Map2 k1 k2)
 
 lookup :: Ord2 k1 => k1 a -> Map2 k1 k2 -> Maybe (k2 a)
 lookup _ Leaf = Nothing

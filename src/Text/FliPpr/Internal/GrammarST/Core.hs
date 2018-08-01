@@ -34,7 +34,7 @@ module Text.FliPpr.Internal.GrammarST.Core (
   space, spaces,
 
   -- ** Misc.
-  atmostSingle, RefK(..)
+  atmostSingle, RefK(..), resolveRHS
   
   ) where
 
@@ -219,6 +219,12 @@ instance Alternative (OpenRHS s c) where
   empty = REmpty
   (<|>) = runion 
 
+resolveRHS :: Ref s (LazyRHS s c a) -> RefM s (OpenRHS s c a)
+resolveRHS ref = do
+  LazyRHS m <- readRef ref
+  rhs <- m
+  writeRef ref (LazyRHS $ return rhs)
+  return rhs 
 
 atmostSingle :: OpenRHS s c a -> Bool
 atmostSingle = (>0) . go 2
@@ -384,8 +390,8 @@ finalizeSymb (NT ref)   = do
     Nothing -> do 
       ref' <- lift $ newRef $ RHS []
       lift $ writeRawRef rm $! insertRefRefMap ref ref' rMap
-      LazyRHS m <- lift $ readRef ref
-      rhs' <- lift m >>= finalizeRHS 
+      rhs  <- lift $ resolveRHS ref
+      rhs' <- finalizeRHS rhs 
       lift $ writeRef ref' rhs'
       return $ NT ref'
 
