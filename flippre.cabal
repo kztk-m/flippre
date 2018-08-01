@@ -2,12 +2,12 @@ name:                flippre
 version:             0.1.0
 synopsis:            FliPpr, embedded 
 -- description:
-homepage:            https://github.com/githubuser/flippre#readme
+homepage:            https://bitbucket.org/kztk/flippre/src/default/
 license:             BSD3
 license-file:        LICENSE
-author:              Author name here
-maintainer:          example@example.com
-copyright:           2017 Author name here
+author:              Kazutaka Matsuda
+maintainer:          kztk@ecei.tohoku.ac.jp
+copyright:           2017 Kazutaka Matsuda
 category:            Text 
 build-type:          Simple
 extra-source-files:  README.md
