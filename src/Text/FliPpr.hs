@@ -27,7 +27,7 @@ module Text.FliPpr (
   (<?),
 
   -- ** Case
-  case_, unpair,
+  case_, unpair, ununit, 
 
   -- ** knot-tying
   share, local, 
@@ -146,7 +146,7 @@ is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) 
 is c f = PartialBij ("is " ++ show c)
                     (\x -> if x == c then Just () else Nothing)
                     (\_ -> Just c)
-         `Branch` const f 
+         `Branch` (\x -> ununit x f)
     
 
 

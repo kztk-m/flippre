@@ -168,7 +168,8 @@ unGen cname = do
       z  <- TH.newName "z" 
       [| \ $( TH.varP z ) $( TH.varP x ) -> $( go vs vs x z ) |]
         where
-          go []     ovs _ z = return $ foldl TH.AppE (TH.VarE z) $ map TH.VarE ovs 
+          go []     ovs x z =
+            [| ununit $( TH.varE x ) $( return $ foldl TH.AppE (TH.VarE z) $ map TH.VarE ovs ) |]
           go (v:vs) ovs x z = do
             x' <- TH.newName "_u"
             [| unpair $( TH.varE x) $
@@ -249,7 +250,7 @@ branch patQ expQ = do
         x  <- TH.newName "_u"
         [| \ $( TH.varP x ) -> $( go vs x ) |]
           where
-            go []     _ = return $ exp
+            go []     x = [| ununit $( TH.varE x ) $( return exp ) |]
             go (u:us) x = do
               x' <- TH.newName "_u"
               [| unpair $( TH.varE x) $

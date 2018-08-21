@@ -274,7 +274,7 @@ instance Alternative (OpenGrammar s c) where
 
 share :: OpenGrammar s c a -> RefM s (OpenGrammar s c a)
 share (OpenG m) = do
-  ref <- newRef $ LazyRHS $ m
+  ref <- newRef $ LazyRHS m
   return $ OpenG (return (RSingle (PSymb (NT ref))))
   -- r <- mfix $ \_ -> do
   --   rhs <- m

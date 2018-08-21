@@ -35,6 +35,7 @@ instance DocLike d => FliPprE Identity (Ppr d) where
 
 
   funpair (Identity (a,b)) f = f (coerce a) (coerce b)
+  fununit _                x = x 
 
   fbchoice x _ = x
 

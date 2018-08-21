@@ -29,7 +29,7 @@ module Text.FliPpr.Internal.Type (
 
   arg, app, (@@),
 
-  case_, unpair, share, local, 
+  case_, unpair, ununit, share, local, 
   
   line', space, spaces, nespaces, nespaces',
   (<?), hardcat, (<#>)  
@@ -39,7 +39,6 @@ module Text.FliPpr.Internal.Type (
 import Data.Kind 
 import Control.Monad.State
 
-import Data.Typeable
 import Data.Coerce
 import Data.Monoid    (Monoid(..))
 import Data.Semigroup (Semigroup(..))
@@ -58,7 +57,7 @@ import Text.FliPpr.Internal.Ref
 data FType = D | Type :~> FType 
 
 
-type In a = (Typeable a, Eq a)
+type In a = Eq a 
 
 -- | A type for partial bijections. The 'String'-typed field will be used in pretty-printing
 --   of FliPpr expressions. 
@@ -76,7 +75,9 @@ class FliPprE (arg :: * -> *) (exp :: FType -> *) | exp -> arg where
 
 
   fcase   :: In a => arg a -> [Branch arg exp a t] -> exp t 
+
   funpair :: (In a, In b) => arg (a,b) -> (arg a -> arg b -> exp t) -> exp t
+  fununit :: arg () -> exp t -> exp t 
 
   fbchoice :: exp D -> exp D -> exp D
 
@@ -255,6 +256,10 @@ case_ (A a) bs = E (fcase a (coerce bs))
 unpair :: (In a, In b, FliPprE arg exp) => A arg (a,b) -> (A arg a -> A arg b -> E exp r) -> E exp r
 unpair (A x) k = E $ funpair x (coerce k)
 
+{-# INLINABLE ununit #-}
+ununit :: FliPprE arg exp => A arg () -> E exp r -> E exp r
+ununit (A x) y = E $ fununit x (coerce y) 
+
 
 -- | Biased choice. @a <? b = a@ in parsing, but it accepts strings indicated by both @a@ and @b$ in parsing.
 
@@ -388,6 +393,13 @@ instance FliPprE (Printer s) (Printer s) where
       return $ parensIf (k > 0) $ D.align $ D.group $ 
          D.text "let" <+> parens (dx <> D.text "," <+> dy) <+> D.text "=" <+> D.align da </>
          D.text "in"  <+> D.align db
+
+  fununit a e = Printer $ \vn k -> do
+    da <- runPrinter a vn 10
+    de <- runPrinter e vn 0
+    return $ parensIf (k > 0) $ D.align $ D.group $
+      D.text "let () =" <+> D.align da </>
+      D.text "in"       <+> D.align de
 
   ftext s = Printer $ \_ k -> 
     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)

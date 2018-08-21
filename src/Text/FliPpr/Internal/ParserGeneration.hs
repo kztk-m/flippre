@@ -15,6 +15,9 @@
 
 {-# LANGUAGE RecursiveDo #-}
 
+{-|
+This module implements parser-generation interpretation of FliPpr. 
+-}
 module Text.FliPpr.Internal.ParserGeneration where
 
 import Data.Typeable 
@@ -104,11 +107,11 @@ fromP :: GU s a -> PExp s D
 fromP x = PExp $ \tenv -> G.constantResult (return $ RD (PE.undeterminedEnv tenv)) x
   -- return (RD PE.undeterminedEnv) <$ x 
 
-refineValue :: forall b. Typeable b => Maybe (EqI b) -> Maybe (EqI b)
-refineValue x =
-  case eqT :: Maybe (b :~: ()) of
-    Just Refl -> Just (EqI ())
-    _         -> x
+-- refineValue :: forall b. Typeable b => Maybe (EqI b) -> Maybe (EqI b)
+-- refineValue x =
+--   case eqT :: Maybe (b :~: ()) of
+--     Just Refl -> Just (EqI ())
+--     _         -> x
 
 
 instance FliPprE PArg (PExp s) where
@@ -136,12 +139,17 @@ instance FliPprE PArg (PExp s) where
       updateP v = mapToEnvA $
                 \eab -> let (b, ea) = PE.popEnv eab
                             (a, e)  = PE.popEnv ea
-                        in tryUpdateEnv v (liftA2 pair (refineValue a) (refineValue b)) e
+                        in tryUpdateEnv v (liftA2 pair a b) e
 
       pair :: EqI a -> EqI b -> EqI (a,b)
       pair (EqI a) (EqI b) = EqI (a,b) 
-    
 
+
+  fununit (PArg arg) exp = PExp $ \tenv ->
+    let pos = arg tenv
+    in (>>= mapToEnvA (tryUpdateEnv pos (Just (EqI ())))) <$> unPExp exp tenv 
+    
+    
   fcase _   [] = PExp $ const A.empty 
   fcase inp (Branch (PartialBij s f finv) k : bs) =
     branch inp (PartialBij s f finv) k
@@ -159,8 +167,8 @@ instance FliPprE PArg (PExp s) where
                  (b -> Maybe a) -> Var env a -> Result (b : env) r -> Err (Result env r) 
       updateB finv v = mapToEnvA $ \eb ->
         let (b, e) = PE.popEnv eb
-            a      = fmap EqI $ refineValue b >>= \b' -> case b' of
-                                                           EqI bb -> finv bb
+            a      = fmap EqI $  b >>= \b' -> case b' of
+                                                EqI bb -> finv bb
         in tryUpdateEnv v a e 
 
 
