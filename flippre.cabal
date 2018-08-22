@@ -35,7 +35,7 @@ library
   build-depends:       base >= 4.7 && < 5, 
                        mtl  >= 2.0 && < 3, 
                        containers >= 0.5 && < 0.6,
-                       template-haskell >= 2.11 && < 2.13, 
+                       template-haskell >= 2.11 && < 2.14, 
                        Earley >= 0.11 && < 0.13, 
                        range-set-list >= 0.1 && < 0.2, 
                        th-abstraction >= 0.2 && < 0.3
