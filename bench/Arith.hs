@@ -57,7 +57,7 @@ pExp = flippr $ do
           unSub $ \e1 e2 -> opPrinter (Fixity AssocL 0) subD (flip ppr e1) (flip ppr e2) k,
           unMul $ \e1 e2 -> opPrinter (Fixity AssocL 1) mulD (flip ppr e1) (flip ppr e2) k,
           unDiv $ \e1 e2 -> opPrinter (Fixity AssocL 1) divD (flip ppr e1) (flip ppr e2) k,
-          unNum $ \n -> pprNum n 
+          unNum $ \n -> pprNum n
           ]
 
   return $ fromFunction (ppr 0) 
