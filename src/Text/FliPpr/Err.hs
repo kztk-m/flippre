@@ -1,4 +1,10 @@
+{-# LANGUAGE CPP #-} 
+
 module Text.FliPpr.Err where
+
+#if !MIN_VERSION_base(4,11,0)
+import qualified Control.Monad.Fail as Fail
+#endif
 
 import Text.FliPpr.Doc as D 
 
@@ -20,8 +26,13 @@ instance Monad Err where
   Fail d >>= _ = Fail d
   Ok a >>= f   = f a 
 
-  fail = Fail . D.text 
+#if !MIN_VERSION_base(4,11,0)
+  fail = Fail.fail 
+#endif 
 
+instance MonadFail Err where
+  fail = Fail . D.text 
+  
 instance Show a => Show (Err a) where
   show (Ok a)   = "Ok " ++ show a
   show (Fail s) = show (D.text "Error: " <+> D.align s)
