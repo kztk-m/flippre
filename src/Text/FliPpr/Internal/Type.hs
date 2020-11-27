@@ -7,12 +7,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -54,12 +50,9 @@ where
 import Control.Applicative (Const (..))
 import Control.Monad.Fail
 import Control.Monad.Reader hiding (lift, local)
-import qualified Control.Monad.Reader as RM
 import Control.Monad.State hiding (lift)
 import Data.Coerce (coerce)
 import Data.Kind (Type)
-import qualified Data.Map as M
-import Data.Monoid (Monoid (..))
 import Data.Semigroup (Semigroup (..))
 import Text.FliPpr.Doc as D
 import Text.FliPpr.Internal.Defs as Defs
@@ -462,7 +455,7 @@ pprRPairD (RPairD d1 d2) = D.hcat [D.text "<", d1, D.text ",", d2, D.text ">"]
 pprRPairD (ROtherD d) = d
 
 instance Defs PrinterI where
-  newtype Rules PrinterI a = PRules {runPRules :: Prec -> State (RName, IName) RPairD}
+  newtype Rules PrinterI _a = PRules {runPRules :: Prec -> State (RName, IName) RPairD}
 
   lift a = PRules $ \k -> do
     d <- runPrinterI a 10

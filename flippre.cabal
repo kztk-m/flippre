@@ -24,9 +24,8 @@ library
                        Text.FliPpr.Internal.Type, 
                        Text.FliPpr.Internal.PrettyPrinting,
                        Text.FliPpr.Internal.ParserGeneration,
-                       Text.FliPpr.Internal.Ref, 
-                       Text.FliPpr.Internal.GrammarST, 
-                       Text.FliPpr.Internal.GrammarST.Core, 
+                       Text.FliPpr.Internal.Env, 
+                       Text.FliPpr.Internal.Grammar, 
                        Text.FliPpr.Internal.PartialEnv,
                        Data.Map2, 
                        Data.Container2
@@ -41,7 +40,7 @@ library
                        th-abstraction >= 0.2 && < 0.4
                        
   default-language:    Haskell2010
-  ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors
+  ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors -fwarn-incomplete-patterns 
 
 
 benchmark grammar-trans 
