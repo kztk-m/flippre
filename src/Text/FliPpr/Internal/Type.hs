@@ -48,7 +48,7 @@ module Text.FliPpr.Internal.Type
 where
 
 import Control.Applicative (Const (..))
-import Control.Monad.Fail
+
 import Control.Monad.Reader hiding (lift, local)
 import Control.Monad.State hiding (lift)
 import Data.Coerce (coerce)
