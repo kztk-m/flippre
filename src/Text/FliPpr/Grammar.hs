@@ -44,7 +44,9 @@ class (Applicative e, Alternative e) => Grammar c e | e -> c where
   symbI :: RSet c -> e c
 
   -- | Same as @fmap . const@ but this would be useful for further optimization.
+  --   TODO: Remove it, as it is not used.
   constantResult :: a -> e t -> e a
+  constantResult f e = f <$ e
 
 symbols :: Grammar c e => [c] -> e [c]
 symbols = foldr (\a r -> (:) <$> symb a <*> r) (pure [])
