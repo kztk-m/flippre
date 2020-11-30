@@ -132,7 +132,7 @@ vsep :: DocLike d => [d] -> d
 vsep = foldDoc (</>)
 
 hsep :: DocLike d => [d] -> d
-hsep = foldDoc (</>)
+hsep = foldDoc (<+>)
 
 sep :: DocLike d => [d] -> d
 sep = group . vsep
