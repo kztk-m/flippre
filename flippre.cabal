@@ -1,5 +1,5 @@
 name:                flippre
-version:             0.1.0
+version:             0.2.0
 synopsis:            FliPpr, embedded 
 -- description:
 homepage:            https://bitbucket.org/kztk/flippre/src/default/
@@ -7,7 +7,7 @@ license:             BSD3
 license-file:        LICENSE
 author:              Kazutaka Matsuda
 maintainer:          kztk@ecei.tohoku.ac.jp
-copyright:           2017 Kazutaka Matsuda
+copyright:           2017, 2018, 2020 Kazutaka Matsuda
 category:            Text 
 build-type:          Simple
 extra-source-files:  README.md
@@ -21,14 +21,13 @@ library
                        Text.FliPpr.TH, 
                        Text.FliPpr.Driver.Earley, 
                        Text.FliPpr.Err, 
+                       Text.FliPpr.Grammar, 
                        Text.FliPpr.Internal.Type, 
+                       Text.FliPpr.Internal.Defs, 
                        Text.FliPpr.Internal.PrettyPrinting,
                        Text.FliPpr.Internal.ParserGeneration,
                        Text.FliPpr.Internal.Env, 
-                       Text.FliPpr.Internal.Grammar, 
-                       Text.FliPpr.Internal.PartialEnv,
-                       Data.Map2, 
-                       Data.Container2
+                       Text.FliPpr.Internal.PartialEnv
 
                                  
   build-depends:       base >= 4.7 && < 5, 

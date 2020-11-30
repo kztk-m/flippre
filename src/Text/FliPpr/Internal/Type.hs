@@ -10,6 +10,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -48,7 +49,6 @@ module Text.FliPpr.Internal.Type
 where
 
 import Control.Applicative (Const (..))
-
 import Control.Monad.Reader hiding (lift, local)
 import Control.Monad.State hiding (lift)
 import Data.Coerce (coerce)
@@ -340,18 +340,25 @@ newtype RName = RName Int deriving (Num, Show, Enum)
 
 newtype IName = IName Int deriving (Num, Show, Enum)
 
-type Prec = Int -- precedence
+-- newtype PprDefs (a :: FType) = PprDefs {pprDefs :: Prec -> State (RName, IName) D.Doc}
 
-newtype PrinterI (a :: FType) = PrinterI {runPrinterI :: Prec -> State (RName, IName) D.Doc}
+newtype VarMFliPpr a = VarMFliPpr {runVarMFliPpr :: State (RName, IName) a}
+  deriving (Functor, Applicative, Monad, MonadState (RName, IName))
 
-newIName :: State (RName, IName) IName
+instance VarM VarMFliPpr where
+  newVar = do
+    rn <- newRName
+    return $ "f" ++ show rn
+  nestScope = id
+
+newIName :: VarMFliPpr IName
 newIName = do
   (i, v) <- get
   let !v' = v + 1
   put (i, v')
   return v
 
-newRName :: State (RName, IName) RName
+newRName :: VarMFliPpr RName
 newRName = do
   (i, v) <- get
   let !i' = i + 1
@@ -365,25 +372,24 @@ pprIName n
   where
     fancyNames = "xyzwsturabcdeijklmnpqv"
 
-pprRName :: RName -> D.Doc
-pprRName n = D.text ("f" ++ show n)
+type PrinterI = PprDefs VarMFliPpr
 
 instance FliPprE (Const IName) PrinterI where
-  fapp e1 e2 = PrinterI $ \k -> do
-    d1 <- runPrinterI e1 9
+  fapp e1 e2 = PprDefs $ \k -> do
+    d1 <- pprDefs e1 9
     let d2 = pprIName (getConst e2)
     return $ D.parensIf (k > 9) $ d1 D.<+> d2
 
-  farg h = PrinterI $ \k -> do
+  farg h = PprDefs $ \k -> do
     x <- newIName
-    d <- runPrinterI (h $ Const x) 0
+    d <- pprDefs (h $ Const x) 0
     return $ D.parensIf (k > 0) $ D.text "\\" <> pprIName x <+> D.text "->" </> d
 
-  fcase a bs = PrinterI $ \k -> do
+  fcase a bs = PprDefs $ \k -> do
     let da = pprIName $ getConst a
     ds <- forM bs $ \(Branch (PartialBij s _ _) f) -> do
       x <- newIName
-      df <- runPrinterI (f $ Const x) 0
+      df <- pprDefs (f $ Const x) 0
       return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprIName x <+> D.text "->" <+> df
     return $
       parensIf (k > 9) $
@@ -391,11 +397,11 @@ instance FliPprE (Const IName) PrinterI where
           D.text "case_" <+> da
             <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
 
-  funpair a f = PrinterI $ \k -> do
+  funpair a f = PprDefs $ \k -> do
     let da = pprIName (getConst a)
     x <- newIName
     y <- newIName
-    db <- runPrinterI (f (Const x) (Const y)) 0
+    db <- pprDefs (f (Const x) (Const y)) 0
     return $
       parensIf (k > 0) $
         D.align $
@@ -403,9 +409,9 @@ instance FliPprE (Const IName) PrinterI where
             D.text "let" <+> parens (pprIName x <> D.text "," <+> pprIName y) <+> D.text "=" <+> D.align da
               </> D.text "in" <+> D.align db
 
-  fununit a e = PrinterI $ \k -> do
+  fununit a e = PprDefs $ \k -> do
     let da = pprIName (getConst a)
-    de <- runPrinterI e 0
+    de <- pprDefs e 0
     return $
       D.parensIf (k > 0) $
         D.align $
@@ -413,92 +419,43 @@ instance FliPprE (Const IName) PrinterI where
             D.text "let () =" <+> D.align da
               </> D.text "in" <+> D.align de
 
-  ftext s = PrinterI $ \k ->
+  ftext s = PprDefs $ \k ->
     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
 
-  fcat a b = PrinterI $ \k -> do
-    da <- runPrinterI a 5
-    db <- runPrinterI b 5
+  fcat a b = PprDefs $ \k -> do
+    da <- pprDefs a 5
+    db <- pprDefs b 5
     return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
 
-  fbchoice a b = PrinterI $ \k -> do
-    da <- runPrinterI a 4
-    db <- runPrinterI b 4
+  fbchoice a b = PprDefs $ \k -> do
+    da <- pprDefs a 4
+    db <- pprDefs b 4
     return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
 
-  fempty = PrinterI $ const $ return $ D.text "empty"
-  fline = PrinterI $ const $ return $ D.text "line"
-  flinebreak = PrinterI $ const $ return $ D.text "linebreak"
+  fempty = PprDefs $ const $ return $ D.text "empty"
+  fline = PprDefs $ const $ return $ D.text "line"
+  flinebreak = PprDefs $ const $ return $ D.text "linebreak"
 
-  fspace = PrinterI $ const $ return $ D.text "space"
-  fspaces = PrinterI $ const $ return $ D.text "spaces"
+  fspace = PprDefs $ const $ return $ D.text "space"
+  fspaces = PprDefs $ const $ return $ D.text "spaces"
 
-  fline' = PrinterI $ const $ return $ D.text "line'"
-  fnespaces' = PrinterI $ const $ return $ D.text "nespaces'"
+  fline' = PprDefs $ const $ return $ D.text "line'"
+  fnespaces' = PprDefs $ const $ return $ D.text "nespaces'"
 
-  fgroup a = PrinterI $ \k -> do
-    da <- runPrinterI a 10
+  fgroup a = PprDefs $ \k -> do
+    da <- pprDefs a 10
     return $ parensIf (k > 9) $ D.text "group" <+> da
 
-  falign a = PrinterI $ \k -> do
-    da <- runPrinterI a 10
+  falign a = PprDefs $ \k -> do
+    da <- pprDefs a 10
     return $ parensIf (k > 9) $ D.text "align" <+> da
 
-  fnest n a = PrinterI $ \k -> do
-    da <- runPrinterI a 10
+  fnest n a = PprDefs $ \k -> do
+    da <- pprDefs a 10
     return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
 
-data RPairD = RPairD D.Doc D.Doc | ROtherD D.Doc
-
-pprRPairD :: RPairD -> D.Doc
-pprRPairD (RPairD d1 d2) = D.hcat [D.text "<", d1, D.text ",", d2, D.text ">"]
-pprRPairD (ROtherD d) = d
-
-instance Defs PrinterI where
-  newtype Rules PrinterI _a = PRules {runPRules :: Prec -> State (RName, IName) RPairD}
-
-  lift a = PRules $ \k -> do
-    d <- runPrinterI a 10
-    return $ ROtherD $ parensIf (k > 9) $ D.text "↑" D.<> d
-
-  unlift r = PrinterI $ \k -> do
-    d <- pprRPairD <$> runPRules r 10
-    return $ parensIf (k > 9) $ D.text "↓" D.<> d
-
-  pairRules r1 r2 = PRules $ \_ -> do
-    d1 <- pprRPairD <$> runPRules r1 0
-    d2 <- pprRPairD <$> runPRules r2 0
-    return $ RPairD d1 d2
-
-  unpairRules m f = PRules $ \k -> do
-    d <- pprRPairD <$> runPRules m 0
-    x <- newRName
-    y <- newRName
-    dr <- pprRPairD <$> runPRules (f (PRules $ const $ return $ ROtherD $ pprRName x) (PRules $ const $ return $ ROtherD $ pprRName y)) 0
-    return $
-      ROtherD $
-        parensIf (k > 0) $
-          D.align $
-            D.group $
-              D.text "let" <+> parens (pprRName x <> D.text "," <+> pprRName y) <+> D.text "=" <+> D.align d <+> D.text "in"
-                </> D.align dr
-
-  letr f = PRules $ \k -> do
-    x <- newRName
-    res <- runPRules (f (PrinterI $ \_ -> return $ pprRName x)) 0
-    return $
-      ROtherD $
-        parensIf (k > 0) $ case res of
-          RPairD d1 d2 ->
-            D.align $
-              D.group $
-                D.text "let rec" <+> pprRName x <+> D.text "=" <+> d1 <+> D.text "in"
-                  </> D.align d2
-          ROtherD d ->
-            D.align $ D.group $ D.text "letr" <+> pprRName x <> D.text "." </> D.nest 2 (D.align d)
-
 instance D.Pretty (FliPpr t) where
-  pprPrec _ (FliPpr m) = evalState (runPrinterI m 0) (0, 0)
+  pprPrec _ (FliPpr m) = evalState (runVarMFliPpr $ pprDefs m 0) (0, 0)
 
 -- type RName = Int
 
@@ -517,9 +474,9 @@ instance D.Pretty (FliPpr t) where
 --   = Printer (VCount -> Prec -> PrinterM s Doc)
 --   | Pointer (Ref s ())
 
--- runPrinterI ::inter s a -> VCount -> Prec -> PrinterM s Doc
--- runPrinterI (Pter f) vn k = f vn k
--- runPrinterI (Pter p) _ _ = return $ pprRef p
+-- pprDefs ::inter s a -> VCount -> Prec -> PrinterM s Doc
+-- pprDefs (Pter f) vn k = f vn k
+-- pprDefs (Pter p) _ _ = return $ pprRef p
 
 -- pprRef :: Ref s a -> Doc
 -- pprRef ref = D.text ("ppr" ++ show (refID ref))
@@ -548,20 +505,20 @@ instance D.Pretty (FliPpr t) where
 -- -- | An instance for pretty-printing FliPpr expressions themselves (not for pretty-printing interpretation).
 -- instance FliPprE (Printer s) (Printer s) where
 --   farg f = Printer $ \vn k -> do
---     df <- runPrinterI (foPrinter $ pprVName vn)) (vn + 1) 0
+--     df <- pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
 --     return $ D.group $ D.nest 2 $ parensIf (k > 0) $ D.text "\\" <> pprVName vn <+> D.text "->" </> df
 
 --   fapp f a = Printer $ \vn k -> do
---     df <- runPrinterI f 9
---     da <- runPrinterI a 10
+--     df <- pprDefs f 9
+--     da <- pprDefs a 10
 --     return $ parensIf (k > 9) $ df <+> da
 
 --   fcase a bs = Printer $ \vn k -> do
---     da <- runPrinterI a 10
+--     da <- pprDefs a 10
 --     ds <-
 --       mapM
 --         ( \(Branch (PartialBij s _ _) f) -> do
---             df <- runPrinterI (foPrinter $ pprVName vn)) (vn + 1) 0
+--             df <- pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
 --             return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprVName vn <+> D.text "->" <+> df
 --         )
 --         bs
@@ -572,10 +529,10 @@ instance D.Pretty (FliPpr t) where
 --             <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
 
 --   funpair a f = Printer $ \vn k -> do
---     da <- runPrinterI a 10
+--     da <- pprDefs a 10
 --     let dx = pprVName vn
 --     let dy = pprVName (vn + 1)
---     db <- runPrinterI (foPrinter dx) (toPrinter dy)) (vn + 2) 0
+--     db <- pprDefs (foPrinter dx) (toPrinter dy)) (vn + 2) 0
 --     return $
 --       parensIf (k > 0) $
 --         D.align $
@@ -584,8 +541,8 @@ instance D.Pretty (FliPpr t) where
 --               </> D.text "in" <+> D.align db
 
 --   fununit a e = Printer $ \vn k -> do
---     da <- runPrinterI a 10
---     de <- runPrinterI e 0
+--     da <- pprDefs a 10
+--     de <- pprDefs e 0
 --     return $
 --       parensIf (k > 0) $
 --         D.align $
@@ -597,13 +554,13 @@ instance D.Pretty (FliPpr t) where
 --     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
 
 --   fcat a b = Printer $ \vn k -> do
---     da <- runPrinterI a 5
---     db <- runPrinterI b 5
+--     da <- pprDefs a 5
+--     db <- pprDefs b 5
 --     return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
 
 --   fbchoice a b = Printer $ \vn k -> do
---     da <- runPrinterI a 4
---     db <- runPrinterI b 4
+--     da <- pprDefs a 4
+--     db <- pprDefs b 4
 --     return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
 
 --   fempty = toPrinter $ D.text "empty"
@@ -617,21 +574,21 @@ instance D.Pretty (FliPpr t) where
 --   fnespaces' = toPrinter $ D.text "nespaces'"
 
 --   fgroup a = Printer $ \vn k -> do
---     da <- runPrinterI a 10
+--     da <- pprDefs a 10
 --     return $ parensIf (k > 9) $ D.text "group" <+> da
 
 --   falign a = Printer $ \vn k -> do
---     da <- runPrinterI a 10
+--     da <- pprDefs a 10
 --     return $ parensIf (k > 9) $ D.text "align" <+> da
 
 --   fnest n a = Printer $ \vn k -> do
---     da <- runPrinterI a 10
+--     da <- pprDefs a 10
 --     return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
 
 -- -- | An instance for pretty-printing recursive defined FliPpr expressions.
 -- instance FliPprD (PrinterM s) (Printer s) (Printer s) where
 --   fshare e = do
---     let md = runPrinterI e
+--     let md = pprDefs e
 --     (tbRef : _) <- ask
 --     r <- newRef $ ()
 --     modifyRef tbRef (M.insert r md)
@@ -639,7 +596,7 @@ instance D.Pretty (FliPpr t) where
 
 --   flocal m = Printer $ \vn k -> do
 --     tbRef <- newRef $ M.empty
---     d <- RM.local (tbRef :) $ m >>= \e -> runPrinterI e 0
+--     d <- RM.local (tbRef :) $ m >>= \e -> pprDefs e 0
 --     list <- M.toList <$> readRef tbRef
 --     defs <-
 --       D.group . D.align . (D.text "rec" <+>)
@@ -661,7 +618,7 @@ instance D.Pretty (FliPpr t) where
 --     where
 --       pprFliPpr :: PrinterM s (Printer s (t :: FType)) -> Prec -> RefM s Doc
 --       pprFliPpr m k =
---         runReaderT (runPrinterM $ runPrinterI (fal m) 0 k) []
+--         runReaderT (runPrinterM $ pprDefs (fal m) 0 k) []
 
 -- instance Show (FliPpr t) where
 --   show = show . ppr

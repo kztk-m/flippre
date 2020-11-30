@@ -19,6 +19,7 @@ module Text.FliPpr.Internal.Defs where
 import Control.Applicative (Alternative (..))
 import Data.Kind (Type)
 import Data.Typeable ((:~:) (..))
+import qualified Text.FliPpr.Doc as D
 
 -- | A type for (mutually recursive) definitions
 data DType ft
@@ -28,6 +29,10 @@ data DType ft
     DType ft :*: DType ft
 
 infixr 4 :*:
+
+data DTypeVal (f :: ft -> Type) :: DType ft -> Type where
+  VT :: f ft -> DTypeVal f (T ft)
+  VProd :: DTypeVal f a -> DTypeVal f b -> DTypeVal f (a :*: b)
 
 class Defs (exp :: k -> Type) | exp -> k where
   data Rules exp :: DType k -> Type
@@ -226,3 +231,74 @@ instance
     return (s1, s2, s3, s4, s5, s6)
 
   toRules (s1, s2, s3, s4, s5, s6) = toRules (s1, (s2, (s3, (s4, (s5, s6)))))
+
+-- | Monads for managing variable names
+class Monad m => VarM m where
+  -- | A new variable name, which may or may not differ in calls.
+  --   For de Bruijn levels, use the Reader monad and define
+  --
+  --   @
+  --      newVar = do {i <- ask ; return ("x" ++ show i ) }
+  --   @
+  --
+  --   Just for using different names, use the State monad and define
+  --   @
+  --      newVar = do { i <- get ; put (i + 1) ; return ("x" ++ show i) }
+  --   @
+  --
+  --   This representation does not cover de Bruijn indices; we do not support them.
+  newVar :: m String
+
+  -- | +1 to the nesting level. This is just identity if ones to assign different names for different variables.
+  nestScope :: m a -> m a
+
+newtype PprDefs m _a = PprDefs {pprDefs :: D.Precedence -> m D.Doc}
+
+data RPairD = RPairD D.Doc D.Doc | ROtherD D.Doc
+
+pprRPairD :: RPairD -> D.Doc
+pprRPairD (RPairD d1 d2) = D.hcat [D.text "<", D.align d1 D.<$$> D.text ",", D.align d2, D.text ">"]
+pprRPairD (ROtherD d) = d
+
+instance VarM m => Defs (PprDefs m) where
+  newtype Rules (PprDefs m) _a = PRules {runPRules :: D.Precedence -> m RPairD}
+
+  lift a = PRules $ \k -> do
+    d <- pprDefs a 10
+    return $ ROtherD $ D.parensIf (k > 9) $ D.text "↑" D.<> D.align d
+
+  unlift r = PprDefs $ \k -> do
+    d <- pprRPairD <$> runPRules r 10
+    return $ D.parensIf (k > 9) $ D.text "↓" D.<> D.align d
+
+  pairRules r1 r2 = PRules $ \_ -> do
+    d1 <- pprRPairD <$> runPRules r1 0
+    d2 <- pprRPairD <$> runPRules r2 0
+    return $ RPairD d1 d2
+
+  unpairRules m f = PRules $ \k -> do
+    d <- pprRPairD <$> runPRules m 0
+    x <- newVar
+    y <- newVar
+    dr <- nestScope $ nestScope $ pprRPairD <$> runPRules (f (PRules $ const $ return $ ROtherD $ D.text x) (PRules $ const $ return $ ROtherD $ D.text y)) 0
+    return $
+      ROtherD $
+        D.parensIf (k > 0) $
+          D.align $
+            D.group $
+              D.hsep [D.text "let", D.text "<" <> D.text x <> D.text "," D.<+> D.text y <> D.text ">", D.text "=", D.align d, D.text "in"]
+                D.</> D.align dr
+
+  letr f = PRules $ \k -> do
+    x <- newVar
+    res <- nestScope $ runPRules (f (PprDefs $ \_ -> return $ D.text x)) 0
+    return $
+      ROtherD $
+        D.parensIf (k > 0) $ case res of
+          RPairD d1 d2 ->
+            D.align $
+              D.group $
+                D.hsep [D.text "let rec", D.text x, D.text "=", D.align d1, D.text "in"]
+                  D.</> D.align d2
+          ROtherD d ->
+            D.align $ D.group $ D.text "letr" D.<+> D.text x <> D.text "." D.</> D.nest 2 (D.align d)

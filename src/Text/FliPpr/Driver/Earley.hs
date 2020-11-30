@@ -26,10 +26,6 @@ import Text.FliPpr.Err
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Internal.Defs as Defs
 
-data V f a where
-  VT :: f t -> V f (Defs.T t)
-  VProd :: V f a -> V f b -> V f (a Defs.:*: b)
-
 newtype EarleyProd r c a = EarleyProd (E.Grammar r (E.Prod r c c a))
 
 instance Functor (EarleyProd r c) where
@@ -43,12 +39,15 @@ instance Alternative (EarleyProd r c) where
   empty = EarleyProd $ return A.empty
   EarleyProd f <|> EarleyProd g = EarleyProd $ (<|>) <$> f <*> g
 
+  many = Defs.manyD
+  some = Defs.someD
+
 instance Ord c => G.Grammar c (EarleyProd r c) where
   symb = EarleyProd . pure . E.namedToken
   symbI cs = EarleyProd $ pure $ E.satisfy (`RS.member` cs)
 
-instance Ord c => G.Defs (EarleyProd r c) where
-  newtype Rules (EarleyProd r c) a = EarleyG {unEarleyG :: E.Grammar r (V (EarleyProd r c) a)}
+instance G.Defs (EarleyProd r c) where
+  newtype Rules (EarleyProd r c) a = EarleyG {unEarleyG :: E.Grammar r (Defs.DTypeVal (EarleyProd r c) a)}
 
   lift e = EarleyG $ pure $ VT e
   unlift (EarleyG m) = EarleyProd $ do

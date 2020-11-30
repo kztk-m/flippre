@@ -56,19 +56,17 @@ instance DocLike d => FliPprE Identity (Ppr d) where
   fspaces = PD empty
 
 instance DocLike d => Defs (Ppr d) where
-  data Rules (Ppr d) _a where
-    VT :: Ppr d a -> Rules (Ppr d) (T a)
-    VP :: Rules (Ppr d) a -> Rules (Ppr d) b -> Rules (Ppr d) (a :*: b)
+  newtype Rules (Ppr d) a = PprRules {pprRules :: DTypeVal (Ppr d) a}
 
-  lift = VT
-  unlift (VT x) = x
+  lift = PprRules . VT
+  unlift (PprRules (VT x)) = x
 
-  pairRules = VP
-  unpairRules (VP x y) k = k x y
+  pairRules (PprRules x) (PprRules y) = PprRules (VProd x y)
+  unpairRules (PprRules (VProd x y)) k = k (PprRules x) (PprRules y)
 
   letr h =
-    let ~(VP ~(VT a) b) = h a
-     in b
+    let ~(VProd ~(VT a) b) = pprRules $ h a
+     in PprRules b
 
 -- instance DocLike d => FliPprD Identity Identity (Ppr d) where
 --   fshare = Identity
