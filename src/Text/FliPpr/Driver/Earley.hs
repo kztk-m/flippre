@@ -1,95 +1,159 @@
-{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralisedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
-module Text.FliPpr.Driver.Earley where
+module Text.FliPpr.Driver.Earley (EarleyProd, asEarley, parse) where
 
+import Control.Applicative as A (Alternative (..))
+-- import Text.FliPpr.Internal.GrammarST as G
+-- import Text.FliPpr.Internal.Ref
+
+-- import Control.Monad.Reader
+-- import Data.Container2
+-- import Data.Coerce (coerce)
+-- import qualified Data.Map2 as M2
+-- import Data.Maybe (fromJust)
+import qualified Data.RangeSet.List as RS
 import qualified Text.Earley as E
-import qualified Data.Map2 as M2
-import Control.Applicative as A (Alternative(..)) 
+import Text.FliPpr.Doc as D
+import Text.FliPpr.Err
+import qualified Text.FliPpr.Grammar as G
+import Text.FliPpr.Internal.Defs as Defs
 
-import Text.FliPpr.Internal.GrammarST as G
-import Text.FliPpr.Internal.Ref
-import Text.FliPpr.Err 
+data V f a where
+  VT :: f t -> V f (Defs.T t)
+  VProd :: V f a -> V f b -> V f (a Defs.:*: b)
 
-import Text.FliPpr.Doc as D 
+newtype EarleyProd r c a = EarleyProd (E.Grammar r (E.Prod r c c a))
 
-import Control.Monad.Reader
-import Data.Maybe (fromJust)
+instance Functor (EarleyProd r c) where
+  fmap f (EarleyProd e) = EarleyProd $ fmap (fmap f) e
 
-import Data.Container2 
-import Data.Coerce 
+instance Applicative (EarleyProd r c) where
+  pure a = EarleyProd $ pure $ pure a
+  EarleyProd f <*> EarleyProd a = EarleyProd $ (<*>) <$> f <*> a
 
-import qualified Data.RangeSet.List as RS 
+instance Alternative (EarleyProd r c) where
+  empty = EarleyProd $ return A.empty
+  EarleyProd f <|> EarleyProd g = EarleyProd $ (<|>) <$> f <*> g
 
-type GatherM s c
-  = ReaderT
-    (RawRef s (M2.Map2 (RefK s (RHS s c)) (RHS s c)))
-    (RefM s)
+instance Ord c => G.Grammar c (EarleyProd r c) where
+  symb = EarleyProd . pure . E.namedToken
+  symbI cs = EarleyProd $ pure $ E.satisfy (`RS.member` cs)
 
-type PTable s c r
-  = M2.Map2 (RefK s (RHS s c)) (E.Prod r [c] c)
+instance Ord c => G.Defs (EarleyProd r c) where
+  newtype Rules (EarleyProd r c) a = EarleyG {unEarleyG :: E.Grammar r (V (EarleyProd r c) a)}
 
-data Earley = Earley
+  lift e = EarleyG $ pure $ VT e
+  unlift (EarleyG m) = EarleyProd $ do
+    res <- m
+    case res of
+      VT (EarleyProd r) -> r
 
-instance Driver Earley where
-  parse _ = parseEarley
+  pairRules (EarleyG m1) (EarleyG m2) = EarleyG $ VProd <$> m1 <*> m2
 
-parseEarley :: (Pretty c, Ord c) => G.Grammar c (Err a) -> [c] -> Err [a]
-parseEarley g str =
-  case E.fullParses (E.parser (convert g)) str of
-    (as@(_:_),_)               -> sequence as
-    ([],E.Report i es v) ->
-      err $ D.text "Error: parse error"
-         D.<+> D.align (D.text "at position"  <+> ppr i </>
-                        D.text "expecting:"   <+> ppr es </>
-                        D.text "near:"        <+> ppr v)
+  unpairRules (EarleyG m) k = EarleyG $ do
+    res <- m
+    case res of
+      VProd v1 v2 -> unEarleyG $ k (EarleyG $ return v1) (EarleyG $ return v2)
 
-convert :: (Ord c) => G.Grammar c a -> E.Grammar r (E.Prod r [c] c a)
-convert (G.Grammar s) = runRefM $ do
-  ref <- s 
-  tbRef <- newRawRef $ M2.empty
-  runReaderT (gatherSymb (NT ref)) tbRef
-  tb <- readRawRef tbRef
-  return $ makeGrammar ref tb 
-    where
-      gatherSymb :: (Ord c) => G.Symb G.RHS s c a -> GatherM s c ()
-      gatherSymb (Term _) = return ()
-      gatherSymb (TermI _) = return () 
-      gatherSymb (NT r) = do
-        tbRef <- ask
-        tb <- readRawRef tbRef
-        case M2.lookup (RefK r) tb of
-          Just _ -> return () 
-          Nothing  -> do
-            rhs <- readRef r
-            modifyRawRef tbRef (M2.insert (coerce r) rhs)
-            gatherRHS rhs
+  letr f = EarleyG $ do
+    rec (a, r) <- do
+          res <- unEarleyG $ f a
+          case res of
+            VProd (VT b) r -> return (b, r)
+    return r
 
-      gatherRHS :: Ord c => G.RHS s c a -> GatherM s c ()
-      gatherRHS (RHS rs) = mapM_ gatherProd rs  
+asEarley :: EarleyProd r c t -> E.Grammar r (E.Prod r c c t)
+asEarley (EarleyProd m) = m
 
-      gatherProd :: Ord c => G.Prod s c a -> GatherM s c () 
-      gatherProd (PNil _) = return ()
-      gatherProd (PCons r s) = gatherSymb r >> gatherProd s 
-      
-      makeGrammar :: Ord c => Ref s (RHS s c a) -> M2.Map2 (RefK s (RHS s c)) (RHS s c) -> E.Grammar r (E.Prod r [c] c a)
-      makeGrammar ref table = do 
-        rec ptable <- traverse2 (E.rule . goRHS ptable) table
-        return $ fromJust $ M2.lookup (coerce ref) ptable
-          where
-            goRHS :: Ord c => PTable s c r -> G.RHS s c a -> E.Prod r [c] c a
-            goRHS ptable (RHS rs) = foldr (<|>) A.empty $ map (goProd ptable) rs
+parse :: (Show c, Ord c) => (forall g. G.GrammarD c g => g (Err a)) -> [c] -> Err [a]
+parse g str =
+  case E.fullParses (E.parser (asEarley g)) str of
+    (as@(_ : _), _) -> sequence as
+    ([], E.Report i es v) ->
+      err $
+        D.hsep
+          [ D.text "Error: parse error",
+            D.align $
+              D.vsep
+                [ D.text "at position" <+> ppr i,
+                  D.text "expecting:" <+> D.text (show es),
+                  D.text "near:" <+> D.text (show v)
+                ]
+          ]
 
-            goProd :: Ord c => PTable s c r -> G.Prod s c a -> E.Prod r [c] c a
-            goProd _      (PNil f) = pure f
-            goProd ptable (PCons s r) =
-              fmap (\a k -> k a) (goSymb ptable s) <*> goProd ptable r 
+-- type GatherM s c
+--   = ReaderT
+--     (RawRef s (M2.Map2 (RefK s (RHS s c)) (RHS s c)))
+--     (RefM s)
 
-            goSymb :: Ord c => PTable s c r -> G.Symb G.RHS s c a -> E.Prod r [c] c a
-            goSymb _      (Term c)   = E.token c
-            goSymb _      (TermI cs) = E.satisfy (\c -> RS.member c cs)
-            goSymb ptable (NT x)     = fromJust $ M2.lookup (coerce x) ptable
-  
+-- type PTable s c r
+--   = M2.Map2 (RefK s (RHS s c)) (E.Prod r [c] c)
 
+-- data Earley = Earley
 
-  
+-- instance Driver Earley where
+--   parse _ = parseEarley
+
+-- parseEarley :: (Pretty c, Ord c) => G.Grammar c (Err a) -> [c] -> Err [a]
+-- parseEarley g str =
+--   case E.fullParses (E.parser (convert g)) str of
+--     (as@(_:_),_)               -> sequence as
+--     ([],E.Report i es v) ->
+--       err $ D.text "Error: parse error"
+--          D.<+> D.align (D.text "at position"  <+> ppr i </>
+--                         D.text "expecting:"   <+> ppr es </>
+--                         D.text "near:"        <+> ppr v)
+
+-- convert :: (Ord c) => G.Grammar c a -> E.Grammar r (E.Prod r [c] c a)
+-- convert (G.Grammar s) = runRefM $ do
+--   ref <- s
+--   tbRef <- newRawRef $ M2.empty
+--   runReaderT (gatherSymb (NT ref)) tbRef
+--   tb <- readRawRef tbRef
+--   return $ makeGrammar ref tb
+--     where
+--       gatherSymb :: (Ord c) => G.Symb G.RHS s c a -> GatherM s c ()
+--       gatherSymb (Term _) = return ()
+--       gatherSymb (TermI _) = return ()
+--       gatherSymb (NT r) = do
+--         tbRef <- ask
+--         tb <- readRawRef tbRef
+--         case M2.lookup (RefK r) tb of
+--           Just _ -> return ()
+--           Nothing  -> do
+--             rhs <- readRef r
+--             modifyRawRef tbRef (M2.insert (coerce r) rhs)
+--             gatherRHS rhs
+
+--       gatherRHS :: Ord c => G.RHS s c a -> GatherM s c ()
+--       gatherRHS (RHS rs) = mapM_ gatherProd rs
+
+--       gatherProd :: Ord c => G.Prod s c a -> GatherM s c ()
+--       gatherProd (PNil _) = return ()
+--       gatherProd (PCons r s) = gatherSymb r >> gatherProd s
+
+--       makeGrammar :: Ord c => Ref s (RHS s c a) -> M2.Map2 (RefK s (RHS s c)) (RHS s c) -> E.Grammar r (E.Prod r [c] c a)
+--       makeGrammar ref table = do
+--         rec ptable <- traverse2 (E.rule . goRHS ptable) table
+--         return $ fromJust $ M2.lookup (coerce ref) ptable
+--           where
+--             goRHS :: Ord c => PTable s c r -> G.RHS s c a -> E.Prod r [c] c a
+--             goRHS ptable (RHS rs) = foldr (<|>) A.empty $ map (goProd ptable) rs
+
+--             goProd :: Ord c => PTable s c r -> G.Prod s c a -> E.Prod r [c] c a
+--             goProd _      (PNil f) = pure f
+--             goProd ptable (PCons s r) =
+--               fmap (\a k -> k a) (goSymb ptable s) <*> goProd ptable r
+
+--             goSymb :: Ord c => PTable s c r -> G.Symb G.RHS s c a -> E.Prod r [c] c a
+--             goSymb _      (Term c)   = E.token c
+--             goSymb _      (TermI cs) = E.satisfy (\c -> RS.member c cs)
+--             goSymb ptable (NT x)     = fromJust $ M2.lookup (coerce x) ptable
