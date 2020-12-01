@@ -1,0 +1,16 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "flippre:lib"
+
+    - path: "././bench/G.hs"
+      component: "flippre:bench:grammar-trans"
+
+    - path: "././bench/BoolList.hs"
+      component: "flippre:bench:bool-list"
+
+    - path: "././bench/Arith.hs"
+      component: "flippre:bench:arith"
+
+    - path: "././bench/Let.hs"
+      component: "flippre:bench:arithlet"
