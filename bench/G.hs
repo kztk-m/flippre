@@ -58,5 +58,5 @@ main = do
   putStrLn "--- after simplification ---"
   print $ G.pprAsFlat $ G.simplifyGrammar _example4
 
--- putStrLn "--- after manipulation of spaces ---"
--- print (G.pprAsFlat $ G.withSpace (simplifyGrammar $ () <$ asum (map G.symb " \t\r\n")) $ G.simplifyGrammar $ _example4)
+  putStrLn "--- after manipulation of spaces ---"
+  print (G.pprAsFlat $ G.withSpace (simplifyGrammar $ () <$ asum (map G.symb " \t\r\n")) $ G.simplifyGrammar $ _example4)

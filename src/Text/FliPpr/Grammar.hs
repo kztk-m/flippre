@@ -397,7 +397,9 @@ flatten g =
 -- checking productivity
 
 removeNonProductive :: Show c => FlatGrammar c a -> FlatGrammar c a
-removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) = trace (show $ D.text " " D.<> D.align (D.ppr $ FlatGrammar defs rhs)) $ FlatGrammar (E.mapEnv procRHS defs) (procRHS rhs)
+removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
+  -- trace (show $ D.text " " D.<> D.align (D.ppr $ FlatGrammar defs rhs)) $
+  FlatGrammar (E.mapEnv procRHS defs) (procRHS rhs)
   where
     prodTable = check initTable
 
@@ -422,8 +424,9 @@ removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) = trace (sh
 
     check mp =
       let mp' = checkDefs defs mp
-          flag = appEndo (getConst $ E.zipWithA (\(Const b1) (Const b2) -> Const $ Endo (\x -> trace (printf "x = %s, b1 = %s, b2 = %s" (show x) (show b1) (show b2)) $ x || (b1 /= b2))) mp mp') False
-       in trace (show $ D.text "  " D.<> D.align (pprMP mp D.</> pprMP mp' D.</> D.text "flag: " D.<> D.text (show flag))) $ if flag then check mp' else mp'
+          flag = appEndo (getConst $ E.zipWithA (\(Const b1) (Const b2) -> Const $ Endo (\x -> x || (b1 /= b2))) mp mp') False
+       in -- trace (show $ D.text "  " D.<> D.align (pprMP mp D.</> pprMP mp' D.</> D.text "flag: " D.<> D.text (show flag))) $
+          if flag then check mp' else mp'
 
     procRHS :: RHS c env0 a -> RHS c env0 a
     procRHS (RHS rs) = RHS $ mapMaybe procProd rs
