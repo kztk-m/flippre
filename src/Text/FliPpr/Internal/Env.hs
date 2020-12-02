@@ -52,6 +52,8 @@ class EnvImpl (i :: k -> Type) where
 
   traverseWithVar :: Applicative m => (forall a. Var i env a -> f a -> m (g a)) -> Env i f env -> m (Env i g env)
 
+  zipWithA :: Applicative m => (forall a. f a -> g a -> m (h a)) -> Env i f env -> Env i g env -> m (Env i h env)
+
   emptyEnv :: Env i f '[]
 
   -- | Extending environment. It returns a triple of a new environment, a
@@ -147,8 +149,13 @@ instance EnvImpl U where
 
   traverseWithVar f (EnvU k m) = EnvU k <$> IM.traverseWithKey (\i x -> Untype <$> f (VarU (k - i)) (unsafeCast x)) m
 
-  --   zipWithA f (EnvU k m1) (EnvU _ m2) =
-  --     EnvU k <$> sequenceA (IM.unionWith (\x y -> fmap Untype $ f <$> (unsafeCast <$> x) <*> (unsafeCast <$> y)) (fmap pure m1) (fmap pure m2))
+  zipWithA f (EnvU k m1) (EnvU _ m2) =
+    fmap (EnvU k) $
+      fmap IM.fromAscList $ traverse (\((i, x), (_, y)) -> (\r -> (i, Untype r)) <$> f (unsafeCast x) (unsafeCast y)) $ zip (IM.toList m1) (IM.toList m2)
+
+  -- fmap (EnvU k) $ sequenceA $ IM.intersectionWith (\x y -> fmap Untype $ f (unsafeCast x) (unsafeCast y)) m1 m2
+
+  --    EnvU k <$> sequenceA (IM.unionWith (\x y -> fmap Untype $ f <$> (unsafeCast <$> x) <*> (unsafeCast <$> y)) (fmap pure m1) (fmap pure m2))
 
   emptyEnv = EnvU (-1) IM.empty
   extendEnv (EnvU k m) v = (EnvU (k + 1) (IM.insert (k + 1) (Untype v) m), VarU 0, VarT f)
@@ -197,9 +204,9 @@ instance EnvImpl S where
       go f (EExtend e t') t sh =
         EExtend <$> go f e t' (sh . VarT VS) <*> f (runVarT sh VZ) t
 
-  --   zipWithA _ EEnd EEnd = pure EEnd
-  --   zipWithA f (EExtend e v) (EExtend e' v') =
-  --     EExtend <$> zipWithA f e e' <*> f v v'
+  zipWithA _ EEnd EEnd = pure EEnd
+  zipWithA f (EExtend e v) (EExtend e' v') =
+    EExtend <$> zipWithA f e e' <*> f v v'
 
   emptyEnv = EEnd
   extendEnv e v = (EExtend e v, VZ, VarT VS)

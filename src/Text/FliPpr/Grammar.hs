@@ -17,6 +17,8 @@ module Text.FliPpr.Grammar
     GrammarD,
     ExChar (..),
     CharLike (..),
+    Simplify,
+    ToFlatGrammar,
     char,
     symbols,
     text,
@@ -30,20 +32,24 @@ module Text.FliPpr.Grammar
   )
 where
 
-import Control.Applicative (Alternative (..))
+import Control.Applicative (Alternative (..), Const (..))
 import Control.Category (Category (..), id, (.))
 import Control.Monad (forM)
-import Control.Monad.State (MonadState, State, StateT (..), evalState, get, put)
+import Control.Monad.State (MonadState, State, StateT (..), evalState, evalStateT, get, put)
 import Data.Foldable (asum)
 import qualified Data.Map as Map
+--
+
+import Data.Maybe (mapMaybe)
+import Data.Monoid (Endo (..))
 import Data.RangeSet.List (RSet)
 import qualified Data.RangeSet.List as RS
 import Data.Typeable ((:~:) (..))
---
 import Debug.Trace (trace)
 import qualified Text.FliPpr.Doc as D
 import Text.FliPpr.Internal.Defs as Defs
 import qualified Text.FliPpr.Internal.Env as E
+import Text.Printf (printf)
 import Prelude hiding (id, (.))
 
 class (Applicative e, Alternative e) => Grammar c e | e -> c where
@@ -353,29 +359,29 @@ valueMap f (VProd x y) = VProd (valueMap f x) (valueMap f y)
 data Ress c env a = forall env'. Ress (Bindings c env' env') (Value (RHS c env') a) (Diff env env')
 
 instance Defs (ToFlatGrammar c) where
-  newtype Rules (ToFlatGrammar c) a = ToFlatGrammars {toFlatGrammars :: forall env. Bindings c env env -> Ress c env a}
+  newtype Fs (ToFlatGrammar c) a = ToFlatGrammars {toFlatGrammars :: forall env. Bindings c env env -> Ress c env a}
 
-  lift c = ToFlatGrammars $ \defs ->
+  liftDS c = ToFlatGrammars $ \defs ->
     case toFlatGrammar c defs of
       Res defs' r' diff' -> Ress defs' (VT r') diff'
 
-  unlift c = ToFlatGrammar $ \defs ->
+  unliftDS c = ToFlatGrammar $ \defs ->
     case toFlatGrammars c defs of
       Ress defs' (VT r') diff' -> Res defs' r' diff'
 
-  pairRules x y = ToFlatGrammars $ \defs -> case toFlatGrammars x defs of
+  pairDS x y = ToFlatGrammars $ \defs -> case toFlatGrammars x defs of
     Ress defs1 r1 diff1 -> case toFlatGrammars y defs1 of
       Ress defs2 r2 diff2 -> Ress defs2 (VProd (valueMap (E.shift diff2) r1) r2) (diff2 . diff1)
 
-  unpairRules xy k = ToFlatGrammars $ \defs ->
-    case toFlatGrammars xy defs of
-      Ress defs1 (VProd a b) diff1 ->
-        let argA = ToFlatGrammars $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Ress defs' (valueMap (E.shift diff') a) id
-            argB = ToFlatGrammars $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Ress defs' (valueMap (E.shift diff') b) id
-         in case toFlatGrammars (k argA argB) defs1 of
-              Ress defs2 r diff2 -> Ress defs2 r (diff2 . diff1)
+  -- unpairRules xy k = ToFlatGrammars $ \defs ->
+  --   case toFlatGrammars xy defs of
+  --     Ress defs1 (VProd a b) diff1 ->
+  --       let argA = ToFlatGrammars $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Ress defs' (valueMap (E.shift diff') a) id
+  --           argB = ToFlatGrammars $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Ress defs' (valueMap (E.shift diff') b) id
+  --        in case toFlatGrammars (k argA argB) defs1 of
+  --             Ress defs2 r diff2 -> Ress defs2 r (diff2 . diff1)
 
-  letr h = ToFlatGrammars $ \defs ->
+  letrDS h = ToFlatGrammars $ \defs ->
     let (defs1, x, diff) = E.extendEnv defs (RHS []) -- a placeholder
         argH = ToFlatGrammar $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Res defs' (E.shift diff' $ RHS [PCons (NT x) $ PNil id]) id
      in case toFlatGrammars (h argH) $ E.mapEnv (E.shift diff) defs1 of
@@ -387,6 +393,127 @@ flatten :: ToFlatGrammar c a -> FlatGrammar c a
 flatten g =
   case toFlatGrammar g E.emptyEnv of
     Res defs r _ -> FlatGrammar defs r
+
+-- checking productivity
+
+removeNonProductive :: Show c => FlatGrammar c a -> FlatGrammar c a
+removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) = trace (show $ D.text " " D.<> D.align (D.ppr $ FlatGrammar defs rhs)) $ FlatGrammar (E.mapEnv procRHS defs) (procRHS rhs)
+  where
+    prodTable = check initTable
+
+    initTable = E.mapEnv (const $ Const False) defs
+
+    checkRHS :: Env (Const Bool) env' -> RHS c env' a -> Bool
+    checkRHS env (RHS rs) = any (checkProd env) rs
+
+    checkProd :: Env (Const Bool) env' -> Prod c env' a -> Bool
+    checkProd _ (PNil _) = True
+    checkProd env (PCons s r) = checkSymb env s && checkProd env r
+
+    checkSymb :: Env (Const Bool) env' -> Symb c env' a -> Bool
+    checkSymb _ (Symb _) = True
+    checkSymb _ (SymbI cs) = not (RS.null cs)
+    checkSymb env (NT x) = getConst $ E.lookupEnv x env
+
+    checkDefs :: Env (RHS c env') env -> Env (Const Bool) env' -> Env (Const Bool) env
+    checkDefs es env = E.mapEnv (Const . checkRHS env) es
+
+    pprMP mp = E.pprEnv (\s d -> D.hsep [D.text s, D.text "=", D.text (show $ getConst d)]) mp :: D.Doc
+
+    check mp =
+      let mp' = checkDefs defs mp
+          flag = appEndo (getConst $ E.zipWithA (\(Const b1) (Const b2) -> Const $ Endo (\x -> trace (printf "x = %s, b1 = %s, b2 = %s" (show x) (show b1) (show b2)) $ x || (b1 /= b2))) mp mp') False
+       in trace (show $ D.text "  " D.<> D.align (pprMP mp D.</> pprMP mp' D.</> D.text "flag: " D.<> D.text (show flag))) $ if flag then check mp' else mp'
+
+    procRHS :: RHS c env0 a -> RHS c env0 a
+    procRHS (RHS rs) = RHS $ mapMaybe procProd rs
+
+    procProd :: Prod c env0 a -> Maybe (Prod c env0 a)
+    procProd (PNil a) = return (PNil a)
+    procProd (PCons s r) = PCons <$> procSymb s <*> procProd r
+
+    procSymb :: Symb c env0 a -> Maybe (Symb c env0 a)
+    procSymb (Symb c) = return (Symb c)
+    procSymb (SymbI cs) = if RS.null cs then Nothing else return (SymbI cs)
+    procSymb (NT x) = if getConst (E.lookupEnv x prodTable) then return (NT x) else Nothing
+
+newtype MemoS g env = MemoS {lookupMemoS :: forall a. Var env a -> Maybe (g a)}
+
+unFlatten :: forall c g r. GrammarD c g => FlatGrammar c r -> g r
+unFlatten (FlatGrammar (defs :: Bindings c env env) rhs) =
+  local $
+    evalStateT (procRHS rhs) initMemo
+  where
+    initMemo :: MemoS g env
+    initMemo = MemoS $ const Nothing
+
+    updateMemo :: MemoS g env -> Var env a -> g a -> MemoS g env
+    updateMemo (MemoS m) x v = MemoS $ \x' ->
+      case E.eqVar x x' of
+        Just Refl -> Just v
+        Nothing -> m x'
+
+    procRHS :: RHS c env a -> StateT (MemoS g env) (DefM g) (g a)
+    procRHS (RHS rs) = asum <$> mapM procProd rs
+
+    procProd :: Prod c env a -> StateT (MemoS g env) (DefM g) (g a)
+    procProd (PNil a) = return (pure a)
+    procProd (PCons s r) = do
+      s' <- procSymb s
+      r' <- procProd r
+      return $ (\a k -> k a) <$> s' <*> r'
+
+    -- (fmap $ \a k -> k a) <$> procSymb s <*> procProd r
+
+    procSymb :: Symb c env a -> StateT (MemoS g env) (DefM g) (g a)
+    procSymb (Symb c) = return (symb c)
+    procSymb (SymbI cs) = return (symbI cs)
+    procSymb (NT x) = do
+      memo <- get
+      case lookupMemoS memo x of
+        Just r -> return r
+        Nothing ->
+          StateT $ \memo -> DefM $ \k ->
+            let rhs = E.lookupEnv x defs
+             in letrDS $ \a ->
+                  unDefM (runStateT (procRHS rhs) (updateMemo memo x a)) $ \(res, memo') -> pairDS (liftDS res) (k (a, memo'))
+
+-- data CheckProd c g a = CheckProd Bool (g a)
+
+-- instance Functor g => Functor (CheckProd c g) where
+--   fmap f (CheckProd b a) = CheckProd b (fmap f a)
+
+-- instance Applicative g => Applicative (CheckProd c g) where
+--   pure a = CheckProd True (pure a)
+--   CheckProd b1 f1 <*> CheckProd b2 f2 = CheckProd (b1 && b2) (f1 <*> f2)
+
+-- instance (Defs g, Alternative g) => Alternative (CheckProd c g) where
+--   empty = CheckProd False empty
+--   CheckProd b1 f1 <|> CheckProd b2 f2 = CheckProd (b1 || b2) (f1 <|> f2)
+
+--   many = manyD
+--   some = someD
+
+-- instance (Defs g, Grammar c g) => Grammar c (CheckProd c g) where
+--   symb c = CheckProd True (symb c)
+--   symbI cs = if RS.null cs then CheckProd False empty else CheckProd True (symbI cs)
+
+-- instance (Alternative g, Defs g) => Defs (CheckProd c g) where
+--   data Fs (CheckProd c g) a = CFs (DTypeVal (Const Bool) a) (Fs g a)
+
+--   liftDS (CheckProd b f) = CFs (VT $ Const b) (liftDS f)
+--   unliftDS (CFs (VT (Const b)) r) = CheckProd b (unliftDS r)
+
+--   pairDS (CFs b1 r1) (CFs b2 r2) = CFs (VProd b1 b2) (pairDS r1 r2)
+
+--   letrDS h =
+--     case h (CheckProd False (empty :: g a)) of
+--       CFs (VProd (VT (Const False)) q) r -> CFs q (letrDS $ const r)
+--       _ -> case h (CheckProd True (empty :: g a)) of
+--         CFs (VProd _ q) _ -> CFs q $
+--           letrDS $ \a ->
+--             case h (CheckProd True a) of
+--               CFs _ r -> r
 
 -- a simple optimizing interpretation
 -- We use the property that
@@ -405,8 +532,11 @@ data Opt c g a where
   OptSimple :: g a -> Opt c g a -- inlinable
   OptOther :: g a -> Opt c g a
 
-simplifyGrammar :: Grammar c g => Opt c g a -> g a
-simplifyGrammar = unOpt
+-- type Simplify c g = CheckProd c (Opt c g)
+type Simplify c g = Opt c (ToFlatGrammar c)
+
+simplifyGrammar :: (Show c, Ord c, Enum c, GrammarD c g) => Simplify c g a -> g a
+simplifyGrammar g = unOpt $ unFlatten $ removeNonProductive $ flatten $ unOpt g
 
 unOpt :: Grammar c g => Opt c g a -> g a
 unOpt (OptSymb c) = symb c
@@ -454,41 +584,41 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Alternative (Opt c g) where
 
 instance (Defs g, Ord c, Enum c, Grammar c g) => Grammar c (Opt c g) where
   symb = OptSymb
-  symbI = OptSymbI
+  symbI cs = if RS.null cs then OptEmpty else OptSymbI cs
 
-unOptRules :: (Defs g, Grammar c g) => Rules (Opt c g) a -> Rules g a
+unOptRules :: (Defs g, Grammar c g) => Fs (Opt c g) a -> Fs g a
 -- unOptRules _ | trace "unOptRules" False = undefined
 unOptRules (OptRulesOther r) = r
-unOptRules (OptLifted p) = lift (unOpt p)
-unOptRules (OptRulesPair p1 p2) = pairRules (unOptRules p1) (unOptRules p2)
+unOptRules (OptLifted p) = liftDS (unOpt p)
+unOptRules (OptRulesPair p1 p2) = pairDS (unOptRules p1) (unOptRules p2)
 
 instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
-  data Rules (Opt c g) a where
-    OptRulesOther :: Rules g a -> Rules (Opt c g) a
-    OptLifted :: Opt c g a -> Rules (Opt c g) (T a)
-    OptRulesPair :: Rules (Opt c g) a -> Rules (Opt c g) b -> Rules (Opt c g) (a :*: b)
+  data Fs (Opt c g) a where
+    OptRulesOther :: Fs g a -> Fs (Opt c g) a
+    OptLifted :: Opt c g a -> Fs (Opt c g) (T a)
+    OptRulesPair :: Fs (Opt c g) a -> Fs (Opt c g) b -> Fs (Opt c g) (a :*: b)
 
   --  lift _ | trace "lift" False = undefined
-  lift p = OptLifted p
+  liftDS p = OptLifted p
 
   --  unlift _ | trace "unlift" False = undefined
-  unlift (OptLifted p) = p
-  unlift (OptRulesOther r) = OptOther $ unlift r
+  unliftDS (OptLifted p) = p
+  unliftDS (OptRulesOther r) = OptOther $ unliftDS r
 
   --  pairRules _ _ | trace "pairRules" False = undefined
-  pairRules p1 p2 = OptRulesPair p1 p2
+  pairDS p1 p2 = OptRulesPair p1 p2
 
-  --  unpairRules _ _ | trace "unpairRules" False = undefined
-  unpairRules (OptRulesPair p1 p2) k = k p1 p2
-  unpairRules p k = OptRulesOther $ unpairRules (unOptRules p) $ \x y -> unOptRules $ k (OptRulesOther x) (OptRulesOther y)
+  -- --  unpairRules _ _ | trace "unpairRules" False = undefined
+  -- unpairRules (OptRulesPair p1 p2) k = k p1 p2
+  -- unpairRules p k = OptRulesOther $ unpairRules (unOptRules p) $ \x y -> unOptRules $ k (OptRulesOther x) (OptRulesOther y)
 
   -- letr h = OptRulesOther $ letr $ \a -> unOptRules $ h (OptSimple a)
-  letr h =
+  letrDS h =
     case h (OptOther empty) of
       OptRulesPair (OptLifted res) _
         | isSimpleEnough res ->
           let ~(OptRulesPair _ r) = h res in r
-      _ -> OptRulesOther $ letr $ \a -> unOptRules $ h (OptSimple a)
+      _ -> OptRulesOther $ letrDS $ \a -> unOptRules $ h (OptSimple a)
 
 -- >>> pprGrammar $  unlift $ letr $ \a -> pairRules (lift $ symb 'c') (lift a)
 -- ↓(let rec N1 = ↑'c' in ↑N1)
@@ -527,20 +657,20 @@ instance (Defs g, Grammar Char g) => Grammar ExChar (ThawSpace g) where
   constantResult f a = ThawSpace $ \sp sps -> constantResult f (runThawSpace a sp sps)
 
 instance Defs g => Defs (ThawSpace g) where
-  newtype Rules (ThawSpace g) a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> Rules g a}
+  newtype Fs (ThawSpace g) a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> Rules g a}
 
-  lift a = ThawSpaces $ \sp sps -> lift (runThawSpace a sp sps)
-  unlift a = ThawSpace $ \sp sps -> unlift (runThawSpaces a sp sps)
+  liftDS a = ThawSpaces $ \sp sps -> lift (runThawSpace a sp sps)
+  unliftDS a = ThawSpace $ \sp sps -> unlift (runThawSpaces a sp sps)
 
-  pairRules x y = ThawSpaces $ \sp sps -> pairRules (runThawSpaces x sp sps) (runThawSpaces y sp sps)
+  pairDS x y = ThawSpaces $ \sp sps -> pairRules (runThawSpaces x sp sps) (runThawSpaces y sp sps)
 
-  unpairRules xy k = ThawSpaces $ \sp sps ->
-    unpairRules (runThawSpaces xy sp sps) $ \x y ->
-      let x' = ThawSpaces $ \_ _ -> x
-          y' = ThawSpaces $ \_ _ -> y
-       in runThawSpaces (k x' y') sp sps
+  -- unpairRules xy k = ThawSpaces $ \sp sps ->
+  --   unpairRules (runThawSpaces xy sp sps) $ \x y ->
+  --     let x' = ThawSpaces $ \_ _ -> x
+  --         y' = ThawSpaces $ \_ _ -> y
+  --      in runThawSpaces (k x' y') sp sps
 
-  letr k = ThawSpaces $ \sp sps ->
+  letrDS k = ThawSpaces $ \sp sps ->
     letr $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
 
 thawSpace :: (Defs exp, Alternative exp) => exp () -> ThawSpace exp a -> exp a
@@ -585,11 +715,11 @@ data Qsp = Qn | Qs | Qss deriving (Eq, Ord)
 
 optSpaces :: forall g t. (Defs g, Grammar ExChar g) => FlatGrammar ExChar t -> g t
 optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs) =
-  unlift $
+  unliftDS $
     let m = forM allStates $ \qf -> do
           g <- procRHS Qn qf rhs
           return $ nt g <* finalProd qf
-     in runM (asum <$> m) emptyMemo $ \a _ -> lift a
+     in runM (asum <$> m) emptyMemo $ \a _ -> liftDS a
   where
     allStates = [Qn, Qs, Qss]
 
@@ -607,10 +737,10 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs) =
     transTo Qss Spaces = (pure Spaces, Qss)
     transTo Qss (NormalChar c) = (symb Space *> char c, Qn)
 
-    toM :: (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Rules g r) -> Rules g r)) -> StateT (Memo env g) (DefM g) a
+    toM :: (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Fs g r) -> Fs g r)) -> StateT (Memo env g) (DefM g) a
     toM f = StateT $ \memo -> DefM $ \k -> f memo (curry k)
 
-    runM :: StateT (Memo env g) (DefM g) a -> (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Rules g r) -> Rules g r))
+    runM :: StateT (Memo env g) (DefM g) a -> (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Fs g r) -> Fs g r))
     runM m memo k = unDefM (runStateT m memo) $ uncurry k
 
     procRHS :: Qsp -> Qsp -> RHS inc env a -> StateT (Memo env g) (DefM g) (Rules g (T a))
@@ -657,15 +787,15 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs) =
 
     -- Memo env g -> ((Rules g (T a) -> Memo env g -> Rules g r) -> Rules g r) is nothing but
     -- StateT (Memo env v) (DefM g) (Rules g r) so we must be able define it using monad I/F
-    procVar :: DefType r => Qsp -> Qsp -> Var env a -> Memo env g -> ((Rules g (T a) -> Memo env g -> Rules g r) -> Rules g r)
+    procVar :: DefType r => Qsp -> Qsp -> Var env a -> Memo env g -> ((Rules g (T a) -> Memo env g -> Fs g r) -> Fs g r)
     procVar q1 q2 x memo k =
       case lookupMemo memo q1 q2 x of
         Just r -> k (lift r) memo
         Nothing -> do
           let rhs = E.lookupEnv x defs
-          letr $ \a ->
+          letrDS $ \a ->
             runM (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a) $ \r memo' ->
-              pairRules r (k r memo')
+              pairDS (unDefM r $ \(VT x) -> liftDS x) (k (lift a) memo')
 
 -- fuseWithTransducer :: forall g outc inc aaa. Enum inc => GrammarD outc g => FlatGrammar inc aaa -> Transducer inc outc -> g aaa
 -- fuseWithTransducer (FlatGrammar (defs :: Bindings inc env env) rhs) (Transducer qinit qstates qfinals trans) =

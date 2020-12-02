@@ -28,12 +28,14 @@ import Data.Functor.Compose (Compose (..))
 import Data.Functor.Identity (Identity (..))
 import qualified Data.RangeSet.List as RS
 import Data.Typeable (Proxy (..))
+-- Due to RebindableSyntax
+
+import Debug.Trace
 import qualified Text.FliPpr.Doc as D
 import Text.FliPpr.Err (Err (..), err)
 import qualified Text.FliPpr.Grammar as G
 import qualified Text.FliPpr.Internal.PartialEnv as PE
 import Text.FliPpr.Internal.Type
--- Due to RebindableSyntax
 import Prelude
 
 ifThenElse :: Bool -> p -> p -> p
@@ -241,27 +243,27 @@ instance FliPprE PArg (PExp s) where
 --   ResT r (a :*: b) = ResT r a :*: ResT r b
 
 instance (G.Grammar G.ExChar g, Defs g) => Defs (PExp g) where
-  newtype Rules (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Rules g (TransD (Compose Err (Result r)) a)}
+  newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Fs g (TransD (Compose Err (Result r)) a)}
 
-  lift x = RulesG $ \tenv -> lift (Compose <$> unPExp x tenv)
-  unlift (RulesG x) = PExp $ \tenv -> getCompose <$> unlift (x tenv)
+  liftDS x = RulesG $ \tenv -> liftDS (Compose <$> unPExp x tenv)
+  unliftDS (RulesG x) = PExp $ \tenv -> getCompose <$> unliftDS (x tenv)
 
-  pairRules x y = RulesG $ \tenv ->
-    pairRules (unRulesG x tenv) (unRulesG y tenv)
+  pairDS x y = RulesG $ \tenv ->
+    pairDS (unRulesG x tenv) (unRulesG y tenv)
 
-  unpairRules (x :: Rules (PExp g) (a :*: b)) k = RulesG $ \(tenv :: Rep r) ->
-    case propTransDPreservesDefType @a @(Compose Err (Result r)) of
-      Wit -> case propTransDPreservesDefType @b @(Compose Err (Result r)) of
-        Wit -> unpairRules (unRulesG x tenv) $ \a b ->
-          let a' = RulesG $ \tenv' -> rmap (fmap $ h tenv tenv') a
-              b' = RulesG $ \tenv' -> rmap (fmap $ h tenv tenv') b
-           in unRulesG (k a' b') tenv
-    where
-      h :: Rep r -> Rep r' -> Compose Err (Result r) t -> Compose Err (Result r') t
-      h tenv tenv' = Compose . fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose
+  -- unpairRules (x :: Rules (PExp g) (a :*: b)) k = RulesG $ \(tenv :: Rep r) ->
+  --   case propTransDPreservesDefType @a @(Compose Err (Result r)) of
+  --     Wit -> case propTransDPreservesDefType @b @(Compose Err (Result r)) of
+  --       Wit -> unpairRules (unRulesG x tenv) $ \a b ->
+  --         let a' = RulesG $ \tenv' -> rmap (fmap $ h tenv tenv') a
+  --             b' = RulesG $ \tenv' -> rmap (fmap $ h tenv tenv') b
+  --          in unRulesG (k a' b') tenv
+  --   where
+  --     h :: Rep r -> Rep r' -> Compose Err (Result r) t -> Compose Err (Result r') t
+  --     h tenv tenv' = Compose . fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose
 
-  letr h = RulesG $ \tenv ->
-    letr $ \a ->
+  letrDS h = RulesG $ \tenv ->
+    letrDS $ \a ->
       let arg = PExp $ \tenv' -> fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose <$> a
        in unRulesG (h arg) tenv
 
@@ -339,9 +341,9 @@ instance (G.Grammar G.ExChar g, Defs g) => Defs (PExp g) where
 -- --                             fmap (mapToEnv $ PE.embedEnv tenv tenv') <$> p))
 -- --                   tenv)
 
-parsingModeMono :: In a => G.Grammar G.ExChar g => PExp g (a :~> D) -> g (Err a)
+parsingModeMono :: In a => G.GrammarD G.ExChar g => PExp (G.Simplify G.ExChar g) (a :~> D) -> g (Err a)
 parsingModeMono e =
-  k <$> unPExp e PE.emptyRep
+  G.simplifyGrammar (k <$> unPExp e PE.emptyRep)
   where
     k :: In a => Err (Result '[] (a :~> D)) -> Err a
     k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s
@@ -480,9 +482,13 @@ parsingMode = parsingModeWith spec
 -- parsingModeWith :: In a => CommentSpec -> FliPpr (a :~> D) -> G.Grammar Char (Err a)
 -- parsingModeWith = parsingModeSP . fromCommentSpec
 
-parsingModeWith :: (G.GrammarD Char g, In a) => CommentSpec -> FliPpr (a :~> D) -> g (Err a)
+parsingModeWith :: forall g a. (G.GrammarD Char g, In a) => CommentSpec -> FliPpr (a :~> D) -> g (Err a)
 parsingModeWith spec (FliPpr e) =
-  G.withSpace (fromCommentSpec spec) (parsingModeMono e)
+  let g0 :: forall g. (G.GrammarD G.ExChar g, In a) => g (Err a)
+      g0 = parsingModeMono e
+      g1 :: forall g. (G.GrammarD Char g, In a) => g (Err a)
+      g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
+   in trace (show $ G.pprGrammar g0 D.</> D.text "---------" D.</> G.pprGrammar g1) g1
 
 -- parsingModeSP :: In a => G.Grammar Char () -> FliPpr (a :~> D) -> G.Grammar Char (Err a)
 -- parsingModeSP gsp (FliPpr m) =

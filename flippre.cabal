@@ -36,7 +36,8 @@ library
                        template-haskell >= 2.11 && < 2.16, 
                        Earley >= 0.11 && < 0.14, 
                        range-set-list >= 0.1 && < 0.2, 
-                       th-abstraction >= 0.2 && < 0.4
+                       th-abstraction >= 0.2 && < 0.4, 
+                       fin >= 0.1 && < 0.2 
                        
   default-language:    Haskell2010
   ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors -fwarn-incomplete-patterns 

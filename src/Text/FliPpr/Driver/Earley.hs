@@ -47,26 +47,26 @@ instance Ord c => G.Grammar c (EarleyProd r c) where
   symbI cs = EarleyProd $ pure $ E.satisfy (`RS.member` cs)
 
 instance G.Defs (EarleyProd r c) where
-  newtype Rules (EarleyProd r c) a = EarleyG {unEarleyG :: E.Grammar r (Defs.DTypeVal (EarleyProd r c) a)}
+  newtype Fs (EarleyProd r c) a = EarleyG {unEarleyG :: E.Grammar r (Defs.DTypeVal (EarleyProd r c) a)}
 
-  lift e = EarleyG $ pure $ VT e
-  unlift (EarleyG m) = EarleyProd $ do
+  liftDS e = EarleyG $ pure $ VT e
+  unliftDS (EarleyG m) = EarleyProd $ do
     res <- m
     case res of
       VT (EarleyProd r) -> r
 
-  pairRules (EarleyG m1) (EarleyG m2) = EarleyG $ VProd <$> m1 <*> m2
+  pairDS (EarleyG m1) (EarleyG m2) = EarleyG $ VProd <$> m1 <*> m2
 
-  unpairRules (EarleyG m) k = EarleyG $ do
-    res <- m
-    case res of
-      VProd v1 v2 -> unEarleyG $ k (EarleyG $ return v1) (EarleyG $ return v2)
+  -- unpairRules (EarleyG m) k = EarleyG $ do
+  --   res <- m
+  --   case res of
+  --     VProd v1 v2 -> unEarleyG $ k (EarleyG $ return v1) (EarleyG $ return v2)
 
-  letr f = EarleyG $ do
+  letrDS f = EarleyG $ do
     rec (a, r) <- do
           res <- unEarleyG $ f a
-          case res of
-            VProd (VT b) r -> return (b, r)
+          return $ case res of
+            VProd (VT b) r -> (b, r)
     return r
 
 asEarley :: EarleyProd r c t -> E.Grammar r (E.Prod r c c t)

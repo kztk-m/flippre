@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
 
 -- import Text.FliPpr.Internal.GrammarST as G
 
@@ -28,32 +29,34 @@ _example2 = G.local $ do
   where
     mfix = G.mfixDefM
 
--- _example3 :: Grammar ExChar g => g [ExChar]
--- _example3 = runDefM $ do
---   rec alphas <- do
---         alpha <- share $ foldr1 (<|>) $ map symb ['a' .. 'z']
---         alphaStar <- share $ pure [] <|> alphas
---         share $ (:) <$> alpha <*> alphaStar
---   return alphas
+_example3 :: GrammarD ExChar g => g [ExChar]
+_example3 = G.local $ do
+  rec alphas <- do
+        alpha <- G.rule $ foldr1 (<|>) $ map char ['a' .. 'z']
+        alphaStar <- G.rule $ pure [] <|> G.nt alphas
+        G.rule $ (:) <$> G.nt alpha <*> G.nt alphaStar
+  return $ G.nt alphas
+  where
+    mfix = G.mfixDefM
 
--- _example4 :: Grammar ExChar g => g ()
--- _example4 = runDefM $ do
---   rec alphas <- do
---         alpha <- share $ foldr1 (<|>) $ map symb ['a' .. 'z']
---         alphaStar <- share $ pure [] <|> alphas
---         share $ (:) <$> alpha <*> alphaStar
---   rec tree <- share $ pure () <* alphas <* spaces <* text "[" <* spaces <* forest <* spaces <* text "]"
---       forest <- share $ pure () <|> forest1
---       forest1 <-
---         share $
---           tree
---             <|> tree *> spaces <* text "," <* spaces <* forest1
---   return tree
+_example4 :: GrammarD ExChar g => g ()
+_example4 = G.local $ do
+  rec alphas <- do
+        alpha <- G.rule $ foldr1 (<|>) $ map char ['a' .. 'z']
+        alphaStar <- G.rule $ pure [] <|> G.nt alphas
+        G.rule $ (:) <$> G.nt alpha <*> G.nt alphaStar
+  rec tree <- G.rule $ pure () <* G.nt alphas <* spaces <* text "[" <* spaces <* G.nt forest <* spaces <* text "]"
+      forest <- G.rule $ pure () <|> G.nt forest1
+      forest1 <- G.rule $ G.nt tree <|> G.nt tree *> spaces <* text "," <* spaces <* G.nt forest1
+  return $ G.nt tree
+  where
+    mfix = G.mfixDefM
 
 main :: IO ()
 main = do
-  print $ G.pprGrammar _example2
+  print $ G.pprAsFlat _example4
   putStrLn "--- after simplification ---"
-  print $ G.pprGrammar $ G.simplifyGrammar _example2
-  putStrLn "--- after manipulation of spaces ---"
-  print (G.pprGrammar $ G.withSpace (simplifyGrammar $ () <$ asum (map G.symb " \t\r\n")) $ G.simplifyGrammar $ _example2)
+  print $ G.pprAsFlat $ G.simplifyGrammar _example4
+
+-- putStrLn "--- after manipulation of spaces ---"
+-- print (G.pprAsFlat $ G.withSpace (simplifyGrammar $ () <$ asum (map G.symb " \t\r\n")) $ G.simplifyGrammar $ _example4)

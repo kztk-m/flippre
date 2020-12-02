@@ -11,6 +11,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -42,6 +43,10 @@ module Text.FliPpr.Internal.Type
     (<?),
     hardcat,
     (<#>),
+    Repr (..),
+    FliPprM,
+    mfixF,
+    FinNE,
 
     -- * Making recursive definitions
     module Defs,
@@ -52,8 +57,11 @@ import Control.Applicative (Const (..))
 import Control.Monad.Reader hiding (lift, local)
 import Control.Monad.State hiding (lift)
 import Data.Coerce (coerce)
+import qualified Data.Fin as F
 import Data.Kind (Type)
 import Data.Semigroup (Semigroup (..))
+import qualified Data.Type.Nat as F
+import Data.Typeable (Proxy (..))
 import Text.FliPpr.Doc as D
 import Text.FliPpr.Internal.Defs as Defs
 
@@ -192,13 +200,15 @@ newtype FliPpr t = FliPpr (forall arg exp. FliPprD arg exp => exp t)
 -- flipprPure :: (forall arg exp. FliPprD arg exp => E exp t) -> FliPpr t
 -- flipprPure x = FliPpr (unE x)
 
+type FliPprM exp = DefM (E exp)
+
 -- | Make a closed FliPpr definition. A typical use is:
 --
 --   > flippr $ do
 --   >   rec ppr <- share $ arg $ \i -> ...
 --   >   return ppr
-flippr :: (forall arg exp. FliPprD arg exp => E exp t) -> FliPpr t
-flippr x = FliPpr (unE x) -- flipprPure (unC x)
+flippr :: (forall arg exp. FliPprD arg exp => FliPprM exp (E exp t)) -> FliPpr t
+flippr x = FliPpr (unE $ local x) -- flipprPure (unC x)
 
 -- | Indicating that there can be zero-or-more spaces in parsing.
 --   In pretty-printing, it is equivalent to @text ""@.
@@ -267,22 +277,170 @@ ununit (A x) y = E $ fununit x (coerce y)
 (<?) (E x) (E y) = E (fbchoice x y)
 
 instance Defs e => Defs (E e) where
-  newtype Rules (E e) a = RE (Rules e a)
+  newtype Fs (E e) a = RE (Fs e a)
 
-  lift (E x) = RE (lift x)
-  unlift (RE x) = E (unlift x)
+  liftDS (E x) = RE (liftDS x)
+  unliftDS (RE x) = E (unliftDS x)
 
-  pairRules (RE r1) (RE r2) = RE (pairRules r1 r2)
+  pairDS (RE r1) (RE r2) = RE (pairDS r1 r2)
 
-  unpairRules (RE e) k = RE $ unpairRules e (coerce k)
+  --  unpairRules (RE e) k = RE $ unpairRules e (coerce k)
 
-  letr h = RE $ letr (coerce h)
+  letrDS h = RE $ letrDS (coerce h)
 
 infixr 4 <?
 
-instance Defs exp => Convertible exp (T a) (E exp a) where
-  fromRules = return . E . unlift
-  toRules = lift . unE
+-- instance Defs exp => Convertible exp (T a) (E exp a) where
+--   toDTypeVal = return . VT . unE
+--   fromDTypeVal (VT x) = E x
+
+-- instance Defs exp => Convertible (E exp) (T a) (E exp a) where
+--   toDTypeVal = return . VT
+--   fromDTypeVal (VT x) = x
+
+-- |
+-- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction'.
+class Repr (arg :: * -> *) exp (t :: FType) r | exp -> arg, exp t -> r, r -> arg exp t where
+  toFunction :: E exp t -> r
+  -- ^ @toFunction :: E exp (a1 :~> ... :~> an :~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
+
+  fromFunction :: r -> E exp t
+  -- ^ @fromFunction :: A arg a1 -> ... -> A arg an -> E exp D -> E exp (a1 :~> ... :~> an :~> D)@
+
+instance FliPprE arg exp => Repr arg exp D (E exp D) where
+  toFunction = id
+  fromFunction = id
+
+instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a :~> t) (A arg a -> r) where
+  toFunction f = \a -> toFunction (f `app` a)
+  fromFunction k = arg (fromFunction . k)
+
+-- | A specialized version of 'mfixDefM'
+mfixF :: forall exp a d. (Defs exp, DefType d, Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
+mfixF = mfixDefM
+
+-- One-level unfolding to avoid overlapping instances.
+
+instance Convertible (E exp) (T D) (E exp D) where
+  fromDTypeVal (VT x) = x
+  toDTypeVal x = return $ VT x
+
+instance (FliPprE arg exp, In a, Repr arg exp t r) => Convertible (E exp) (T (a :~> t)) (A arg a -> r) where
+  toDTypeVal = return . VT . fromFunction
+  fromDTypeVal (VT x) = toFunction x
+
+instance Convertible (E exp) t r => Convertible (E exp) t (FinNE F.Z -> r) where
+  toDTypeVal x = toDTypeVal (x F.FZ)
+  fromDTypeVal n = const (fromDTypeVal n)
+
+instance (Convertible (E exp) t r, Convertible (E exp) ts (FinNE n -> r)) => Convertible (E exp) (t :*: ts) (FinNE (F.S n) -> r) where
+  toDTypeVal x = VProd <$> toDTypeVal (x F.FZ) <*> toDTypeVal (\n -> x (F.FS n))
+  fromDTypeVal (VProd v0 h) = \x -> case x of
+    F.FZ -> fromDTypeVal v0
+    F.FS n -> fromDTypeVal h n
+
+-- reifyNat :: Nat -> (forall (k :: Nat). SNat k -> r) -> r
+-- reifyNat Z k = k SZ
+-- reifyNat (S n) k = reifyNat n (k . SS)
+
+-- data Nat = Z | S Nat
+
+-- instance Num Nat where
+--   fromInteger n = go (abs n)
+--     where
+--       go 0 = Z
+--       go n = S (go (n -1))
+
+--   Z + r = r
+--   S n + r = S (n + r)
+
+--   Z * _ = Z
+--   S n * r = r + (n * r)
+
+--   Z - _ = Z
+--   S n - Z = S n
+--   S n - S m = n - m
+
+--   negate Z = Z
+--   negate _ = error "No negative numbers in Nat"
+
+--   abs = id
+
+--   signum Z = Z
+--   signum _ = S Z
+
+-- | FinNE n represents {0,..,n} (NB: n is included)
+type FinNE n = F.Fin (F.S n)
+
+-- data FinNE (n :: Nat) where
+--   FZ :: FinNE n
+--   FS :: FinNE n -> FinNE (S n)
+
+-- instance Eq (FinNE n) where
+--   FZ == FZ = True
+--   FS n == FS m = n == m
+--   _ == _ = False
+
+-- instance Ord (FinNE n) where
+--   compare FZ FZ = EQ
+--   compare FZ _ = LT
+--   compare _ FZ = GT
+--   compare (FS n) (FS m) = compare n m
+
+-- data SNat n where
+--   SZ :: SNat Z
+--   SS :: SNat n -> SNat (S n)
+
+-- snat0 :: SNat Z
+-- snat0 = SZ
+
+-- snat1 :: SNat (SS Z)
+-- snat1 = SS SZ
+
+-- toNum :: SNat n -> Num a => a
+-- toNum SZ = 0
+-- toNum (SS k) = toNum k + 1
+
+-- toNumF :: FinNE n -> Num a => a
+-- toNumF FZ = 0
+-- toNumF (FS n) = toNumF n + 1
+
+-- class NatLike n where
+--   snat :: SNat n
+
+-- instance NatLike Z where
+--   snat = SZ
+
+-- instance NatLike n => NatLike (S n) where
+--   snat = SS snat
+
+-- instance NatLike n => Num (FinNE n) where
+--   fromInteger i = go v (i `mod` toNum v)
+--     where
+--       v :: SNat n
+--       v = snat
+
+--       go :: SNat k -> Integer -> FinNE k
+--       go SZ 0 = FZ
+--       go SZ _ = error "Too large"
+--       go (SS n) i = FS (go n (i -1))
+
+--   x + y = fromInteger (toNumF x + toNumF y)
+--   x * y = fromInteger (toNumF x * toNumF y)
+--   x - y = fromInteger (toNumF x - toNumF y)
+
+--   abs = id
+
+--   signum FZ = FZ
+--   signum (FS _) = FS FZ
+
+-- instance NatLike n => Enum (FinNE n) where
+--   toEnum = fromInteger . fromIntegral
+--   fromEnum = toNumF
+
+-- instance NatLike n => Bounded (FinNE n) where
+--   minBound = FZ
+--   maxBound = toNum (snat @n)
 
 -- -- | Knot-tying operator. To guarantee that we generate CFGs, every recursive function must be
 -- --   defined via 'share'. Also, even for non-recursive function, 'share' ensures that its definition will be

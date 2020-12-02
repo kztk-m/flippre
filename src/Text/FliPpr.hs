@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -14,6 +15,7 @@ module Text.FliPpr
     FliPprE,
     FliPprD,
     FliPpr,
+    FliPprM,
     Branch (..),
     PartialBij (..),
     In,
@@ -43,6 +45,7 @@ module Text.FliPpr
     -- ** knot-tying
     share,
     local,
+    mfixF,
 
     -- ** Pretty-Printing Combinators and Datatypes
     spaces,
@@ -58,8 +61,24 @@ module Text.FliPpr
     -- ** Easy Definition
     define,
     Repr (..),
-    defineR,
+    --    defineR,
     defines,
+
+    -- * Finite natural numbers
+    FinNE,
+    F.Fin (..),
+    F.SNat (..),
+    F.SNatI (..),
+    F.Nat0,
+    F.Nat1,
+    F.Nat2,
+    F.Nat3,
+    F.Nat4,
+    F.Nat5,
+    F.Nat6,
+    F.Nat7,
+    F.Nat8,
+    F.Nat9,
 
     -- ** Template Haskell
     un,
@@ -92,7 +111,9 @@ module Text.FliPpr
   )
 where
 
+import qualified Data.Fin as F
 import qualified Data.Map as M
+import qualified Data.Type.Nat as F
 import Text.FliPpr.Doc
 import Text.FliPpr.Err
 import qualified Text.FliPpr.Grammar as G
@@ -115,57 +136,49 @@ infixr 4 <+>.
 
 infixr 4 </>.
 
--- |
--- @defineR (k1,k2)@ is the same as @defines [k1..k2]@, but a bit more efficient. x
-{-# SPECIALIZE defineR ::
-  (FliPprD arg exp, Repr arg exp t r) => (Int, Int) -> (Int -> r) -> DefM exp (Int -> r)
-  #-}
-defineR :: (Eq k, Ord k, Enum k, FliPprD arg exp, Repr arg exp t r) => (k, k) -> (k -> r) -> DefM exp (k -> r)
-defineR (k1, k2) f = do
-  let (m1, m2) = if k1 < k2 then (k1, k2) else (k2, k1)
-  let ks = [m1 .. m2]
-  rs <- mapM (define . f) ks
-  let table = M.fromAscList $ zip ks rs
-  return $ \k -> case M.lookup k table of
-    Just m -> m
-    Nothing -> error "defineR: out of bounds"
-
--- |
--- @defines [k1,...,kn] f@ is equivalent to:
---
--- @
---   do  fk1 <- define (f k1)
---       ...
---       fk2 <- define (f k2)
---       return $ \k -> lookup k [(k1,fk1),...,(k2,fk2)]
--- @
-{-# SPECIALIZE defines ::
-  (FliPprD arg exp, Repr arg exp t r) => [Int] -> (Int -> r) -> DefM exp (Int -> r)
-  #-}
-defines :: (Eq k, Ord k, FliPprD arg exp, Repr arg exp t r) => [k] -> (k -> r) -> DefM exp (k -> r)
-defines ks f = do
+defines :: (FliPprD arg exp, Repr arg exp t r, F.SNatI n) => F.SNat n -> (FinNE n -> r) -> FliPprM exp (FinNE n -> r)
+defines _ f = do
+  let ks = [minBound .. maxBound]
   rs <- mapM (define . f) ks
   let table = M.fromList $ zip ks rs
   return $ \k -> case M.lookup k table of
     Just m -> m
-    Nothing -> error "defines: out of bounds"
+    Nothing -> error "defines_: Cannot happen."
 
--- |
--- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction'.
-class Repr (arg :: * -> *) exp (t :: FType) r | exp -> arg, exp t -> r, r -> arg exp t where
-  toFunction :: E exp t -> r
-  -- ^ @toFunction :: E exp (a1 :~> ... :~> an :~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
+-- -- |
+-- -- @defineR (k1,k2)@ is the same as @defines [k1..k2]@, but a bit more efficient. x
+-- {-# SPECIALIZE defineR ::
+--   (FliPprD arg exp, Repr arg exp t r) => (Int, Int) -> (Int -> r) -> DefM (E exp) (Int -> r)
+--   #-}
+-- defineR :: (Eq k, Ord k, Enum k, FliPprD arg exp, Repr arg exp t r) => (k, k) -> (k -> r) -> DefM (E exp) (k -> r)
+-- defineR (k1, k2) f = do
+--   let (m1, m2) = if k1 < k2 then (k1, k2) else (k2, k1)
+--   let ks = [m1 .. m2]
+--   rs <- mapM (define . f) ks
+--   let table = M.fromAscList $ zip ks rs
+--   return $ \k -> case M.lookup k table of
+--     Just m -> m
+--     Nothing -> error "defineR: out of bounds"
 
-  fromFunction :: r -> E exp t
-  -- ^ @fromFunction :: A arg a1 -> ... -> A arg an -> E exp D -> E exp (a1 :~> ... :~> an :~> D)@
-
-instance FliPprE arg exp => Repr arg exp D (E exp D) where
-  toFunction = id
-  fromFunction = id
-
-instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a :~> t) (A arg a -> r) where
-  toFunction f = \a -> toFunction (f `app` a)
-  fromFunction k = arg (fromFunction . k)
+-- -- |
+-- -- @defines [k1,...,kn] f@ is equivalent to:
+-- --
+-- -- @
+-- --   do  fk1 <- define (f k1)
+-- --       ...
+-- --       fk2 <- define (f k2)
+-- --       return $ \k -> lookup k [(k1,fk1),...,(k2,fk2)]
+-- -- @
+-- {-# SPECIALIZE defines ::
+--   (FliPprD arg exp, Repr arg exp t r) => [Int] -> (Int -> r) -> DefM (E exp) (Int -> r)
+--   #-}
+-- defines :: (Eq k, Ord k, FliPprD arg exp, Repr arg exp t r) => [k] -> (k -> r) -> DefM (E exp) (k -> r)
+-- defines ks f = do
+--   rs <- mapM (define . f) ks
+--   let table = M.fromList $ zip ks rs
+--   return $ \k -> case M.lookup k table of
+--     Just m -> m
+--     Nothing -> error "defines: out of bounds"
 
 is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) c r
 is c f =
@@ -195,9 +208,9 @@ is c f =
 -- instead of:
 --
 -- >  rec f <- share $ arg $ \i -> ... f `app` a ...
-define :: (FliPprD arg exp, Repr arg exp t r) => r -> DefM exp r
+define :: (FliPprD arg exp, Repr arg exp t r) => r -> DefM (E exp) r
 define f = do
-  f' <- shareGen $ fromFunction f
+  f' <- share $ fromFunction f
   return $ toFunction f'
 
 type Prec = Int
@@ -210,18 +223,18 @@ data Assoc
   | AssocN
 
 opPrinter ::
-  DocLike d =>
+  (DocLike d, Ord n, Num n) =>
   Fixity ->
   (d -> d -> d) ->
-  (Prec -> d) ->
-  (Prec -> d) ->
-  (Prec -> d)
+  (n -> d) ->
+  (n -> d) ->
+  (n -> d)
 opPrinter (Fixity a opPrec) opD ppr1 ppr2 k =
   let (dl, dr) = case a of
         AssocL -> (0, 1)
         AssocR -> (1, 0)
         AssocN -> (0, 0)
-   in ifParens (k > opPrec) $ opD (ppr1 (opPrec + dl)) (ppr2 (opPrec + dr))
+   in ifParens (k > fromIntegral opPrec) $ opD (ppr1 (fromIntegral opPrec + dl)) (ppr2 (fromIntegral opPrec + dr))
   where
     ifParens b = if b then parens else id
 
