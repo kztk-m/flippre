@@ -97,6 +97,11 @@ parseExp' s = case parseExp s of
   Ok s -> Right s
   Fail s -> Left (show s)
 
+parseExpP :: [Char] -> IO ()
+parseExpP s = case parseExp s of
+  Ok s -> putStrLn (show s)
+  Fail s -> print s
+
 exp1 :: Exp
 exp1 = Add (Num 1) (Mul (Num 2) (Num 3))
 
@@ -116,18 +121,18 @@ countTime str comp = do
   s <- getCPUTime
   r <- comp
   e <- getCPUTime
-  let d = (fromIntegral $ e - s) / (1000000000 :: Double)
+  let d = fromIntegral (e - s) / (1000000000 :: Double)
   putStrLn $ "Elapsed: " ++ show d ++ " msec."
   return r
 
 main :: IO ()
 main = do
-  rnf s1 `seq` countTime "Exp1" $ do
-    print (parseExp' s1)
-  rnf s2 `seq` countTime "Exp2" $ do
-    print (parseExp' s2)
-  rnf s3 `seq` countTime "Exp3" $ do
-    print (parseExp' s3)
+  rnf s1 `seq` countTime "Exp1" $
+    parseExpP s1
+  rnf s2 `seq` countTime "Exp2" $
+    parseExpP s2
+  rnf s3 `seq` countTime "Exp3" $
+    parseExpP s3
   where
     s1 = show $ pprExp exp1
     s2 = show $ pprExp exp2
