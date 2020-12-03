@@ -8,7 +8,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Text.FliPpr.Driver.Earley (EarleyProd, asEarley, parse) where
+module Text.FliPpr.Driver.Earley (asEarley, parse) where
 
 import Control.Applicative as A (Alternative (..))
 -- import Text.FliPpr.Internal.GrammarST as G
@@ -19,58 +19,88 @@ import Control.Applicative as A (Alternative (..))
 -- import Data.Coerce (coerce)
 -- import qualified Data.Map2 as M2
 -- import Data.Maybe (fromJust)
+
+import Data.Foldable (asum)
 import qualified Data.RangeSet.List as RS
 import qualified Text.Earley as E
 import Text.FliPpr.Doc as D
 import Text.FliPpr.Err
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Internal.Defs as Defs
+import Text.FliPpr.Internal.Env as Env
 
-newtype EarleyProd r c a = EarleyProd (E.Grammar r (E.Prod r c c a))
+-- newtype EarleyProd r c a = EarleyProd (E.Grammar r (E.Prod r c c a))
 
-instance Functor (EarleyProd r c) where
-  fmap f (EarleyProd e) = EarleyProd $ fmap (fmap f) e
+-- instance Functor (EarleyProd r c) where
+--   fmap f (EarleyProd e) = EarleyProd $ fmap (fmap f) e
 
-instance Applicative (EarleyProd r c) where
-  pure a = EarleyProd $ pure $ pure a
-  EarleyProd f <*> EarleyProd a = EarleyProd $ (<*>) <$> f <*> a
+-- instance Applicative (EarleyProd r c) where
+--   pure a = EarleyProd $ pure $ pure a
+--   EarleyProd f <*> EarleyProd a = EarleyProd $ (<*>) <$> f <*> a
 
-instance Alternative (EarleyProd r c) where
-  empty = EarleyProd $ return A.empty
-  EarleyProd f <|> EarleyProd g = EarleyProd $ (<|>) <$> f <*> g
+-- instance Alternative (EarleyProd r c) where
+--   empty = EarleyProd $ return A.empty
+--   EarleyProd f <|> EarleyProd g = EarleyProd $ (<|>) <$> f <*> g
 
-  many = Defs.manyD
-  some = Defs.someD
+--   many = Defs.manyD
+--   some = Defs.someD
 
-instance Ord c => G.Grammar c (EarleyProd r c) where
-  symb = EarleyProd . pure . E.namedToken
-  symbI cs = EarleyProd $ pure $ E.satisfy (`RS.member` cs)
+-- instance Ord c => G.Grammar c (EarleyProd r c) where
+--   symb = EarleyProd . pure . E.namedToken
+--   symbI cs = EarleyProd $ pure $ E.satisfy (`RS.member` cs)
 
-instance G.Defs (EarleyProd r c) where
-  newtype Fs (EarleyProd r c) a = EarleyG {unEarleyG :: E.Grammar r (Defs.DTypeVal (EarleyProd r c) a)}
+-- instance G.Defs (EarleyProd r c) where
+--   newtype Fs (EarleyProd r c) a = EarleyG {unEarleyG :: E.Grammar r (Defs.DTypeVal (EarleyProd r c) a)}
 
-  liftDS e = EarleyG $ pure $ VT e
-  unliftDS (EarleyG m) = EarleyProd $ do
-    res <- m
-    case res of
-      VT (EarleyProd r) -> r
+--   liftDS e = EarleyG $ pure $ VT e
+--   unliftDS (EarleyG m) = EarleyProd $ do
+--     res <- m
+--     case res of
+--       VT (EarleyProd r) -> r
 
-  pairDS (EarleyG m1) (EarleyG m2) = EarleyG $ VProd <$> m1 <*> m2
+--   pairDS (EarleyG m1) (EarleyG m2) = EarleyG $ VProd <$> m1 <*> m2
 
-  -- unpairRules (EarleyG m) k = EarleyG $ do
-  --   res <- m
-  --   case res of
-  --     VProd v1 v2 -> unEarleyG $ k (EarleyG $ return v1) (EarleyG $ return v2)
+--   -- unpairRules (EarleyG m) k = EarleyG $ do
+--   --   res <- m
+--   --   case res of
+--   --     VProd v1 v2 -> unEarleyG $ k (EarleyG $ return v1) (EarleyG $ return v2)
 
-  letrDS f = EarleyG $ do
-    rec (a, r) <- do
-          res <- unEarleyG $ f a
-          return $ case res of
-            VProd (VT b) r -> (b, r)
-    return r
+--   letrDS f = EarleyG $ do
+--     rec (a, r) <- do
+--           res <- unEarleyG $ f a
+--           return $ case res of
+--             VProd (VT b) r -> (b, r)
+--     return r
 
-asEarley :: EarleyProd r c t -> E.Grammar r (E.Prod r c c t)
-asEarley (EarleyProd m) = m
+toEarley :: Ord c => G.FlatGrammar c a -> E.Grammar r (E.Prod r c c a)
+toEarley (G.FlatGrammar defs rhs) = do
+  env <- makeTable defs
+  procRHS env rhs
+  where
+    makeTable :: Ord c => Env.Env Env.U (G.RHS c env) env -> E.Grammar r (Env.Env Env.U (E.Prod r c c) env)
+    makeTable defs = do
+      rec tbl <- Env.traverseWithVar (const $ procRHS tbl) defs
+      return tbl
+
+    procRHS :: Ord c => Env.Env U (E.Prod r c c) env -> G.RHS c env t -> E.Grammar r (E.Prod r c c t)
+    procRHS env (G.RHS ps) = do
+      xs <- mapM (procProd env) ps
+      E.rule (asum xs)
+
+    procProd :: Ord c => Env.Env Env.U (E.Prod r c c) env -> G.Prod c env a -> E.Grammar r (E.Prod r c c a)
+    procProd _env (G.PNil a) = return (pure a)
+    procProd env (G.PCons s r) = do
+      s' <- procSymb env s
+      r' <- procProd env r
+      return $ (\a k -> k a) <$> s' <*> r'
+
+    procSymb :: Ord c => Env.Env Env.U (E.Prod r c c) env -> G.Symb c env a -> E.Grammar r (E.Prod r c c a)
+    procSymb _env (G.Symb c) = pure $ E.namedToken c
+    procSymb _env (G.SymbI cs) = pure $ E.satisfy (`RS.member` cs)
+    procSymb env (G.NT x) = pure $ Env.lookupEnv x env
+
+asEarley :: Ord c => G.ToFlatGrammar c t -> E.Grammar r (E.Prod r c c t)
+asEarley g = toEarley $ G.flatten g
 
 parse :: (Show c, Ord c) => (forall g. G.GrammarD c g => g (Err a)) -> [c] -> Err [a]
 parse g str =
