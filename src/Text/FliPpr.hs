@@ -79,6 +79,8 @@ module Text.FliPpr
     F.Nat7,
     F.Nat8,
     F.Nat9,
+    reifySNat,
+    Wit (..),
 
     -- ** Template Haskell
     un,
@@ -98,6 +100,7 @@ module Text.FliPpr
     pprMode,
     parsingMode,
     parsingModeWith,
+    parsingModeSP,
     CommentSpec (..),
     BlockCommentSpec (..),
     G.Grammar,

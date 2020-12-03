@@ -7,6 +7,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -47,6 +48,8 @@ module Text.FliPpr.Internal.Type
     FliPprM,
     mfixF,
     FinNE,
+    reifySNat,
+    Wit (..),
 
     -- * Making recursive definitions
     module Defs,
@@ -321,7 +324,7 @@ mfixF = mfixDefM
 
 -- One-level unfolding to avoid overlapping instances.
 
-instance Convertible (E exp) (T D) (E exp D) where
+instance Convertible (E exp) (T a) (E exp a) where
   fromDTypeVal (VT x) = x
   toDTypeVal x = return $ VT x
 
@@ -329,118 +332,66 @@ instance (FliPprE arg exp, In a, Repr arg exp t r) => Convertible (E exp) (T (a 
   toDTypeVal = return . VT . fromFunction
   fromDTypeVal (VT x) = toFunction x
 
-instance Convertible (E exp) t r => Convertible (E exp) t (FinNE F.Z -> r) where
-  toDTypeVal x = toDTypeVal (x F.FZ)
-  fromDTypeVal n = const (fromDTypeVal n)
+-- instance Convertible (E exp) t r => Convertible (E exp) t (FinNE F.Z -> r) where
+--   toDTypeVal x = toDTypeVal (x F.FZ)
+--   fromDTypeVal n = const (fromDTypeVal n)
 
-instance (Convertible (E exp) t r, Convertible (E exp) ts (FinNE n -> r)) => Convertible (E exp) (t :*: ts) (FinNE (F.S n) -> r) where
-  toDTypeVal x = VProd <$> toDTypeVal (x F.FZ) <*> toDTypeVal (\n -> x (F.FS n))
-  fromDTypeVal (VProd v0 h) = \x -> case x of
-    F.FZ -> fromDTypeVal v0
-    F.FS n -> fromDTypeVal h n
+-- instance (Convertible (E exp) t r, Convertible (E exp) ts (FinNE n -> r)) => Convertible (E exp) (t :*: ts) (FinNE (F.S n) -> r) where
+--   toDTypeVal x = VProd <$> toDTypeVal (x F.FZ) <*> toDTypeVal (\n -> x (F.FS n))
+--   fromDTypeVal (VProd v0 h) = \x -> case x of
+--     F.FZ -> fromDTypeVal v0
+--     F.FS n -> fromDTypeVal h n
 
--- reifyNat :: Nat -> (forall (k :: Nat). SNat k -> r) -> r
--- reifyNat Z k = k SZ
--- reifyNat (S n) k = reifyNat n (k . SS)
+type family Prods t (n :: F.Nat) = r where
+  Prods t F.Z = t
+  Prods t (F.S n) = t :*: Prods t n
 
--- data Nat = Z | S Nat
+newtype ToDTypeVal exp r t m = ToDTypeVal {runToDTypeVal :: (FinNE m -> r) -> DefM (E exp) (DTypeVal (E exp) (Prods t m))}
 
--- instance Num Nat where
---   fromInteger n = go (abs n)
---     where
---       go 0 = Z
---       go n = S (go (n -1))
+newtype FromDTypeVal exp r t m = FromDTypeVal {runFromDTypeVal :: DTypeVal (E exp) (Prods t m) -> FinNE m -> r}
 
---   Z + r = r
---   S n + r = S (n + r)
+instance (Convertible (E exp) t r, F.SNatI m, ts ~ Prods t m) => Convertible (E exp) ts (FinNE m -> r) where
+  toDTypeVal :: (FinNE m -> r) -> DefM (E exp) (DTypeVal (E exp) (Prods t m))
+  toDTypeVal = runToDTypeVal $ F.induction f0 fstep
+    where
+      f0 = ToDTypeVal $ \f -> toDTypeVal (f F.FZ)
 
---   Z * _ = Z
---   S n * r = r + (n * r)
+      fstep :: forall k. F.SNatI k => ToDTypeVal exp r t k -> ToDTypeVal exp r t (F.S k)
+      fstep pred = ToDTypeVal $ \f -> VProd <$> toDTypeVal (f F.FZ) <*> runToDTypeVal pred (\n -> f (F.FS n))
 
---   Z - _ = Z
---   S n - Z = S n
---   S n - S m = n - m
-
---   negate Z = Z
---   negate _ = error "No negative numbers in Nat"
-
---   abs = id
-
---   signum Z = Z
---   signum _ = S Z
+  fromDTypeVal :: DTypeVal (E exp) (Prods t m) -> FinNE m -> r
+  fromDTypeVal = runFromDTypeVal $ F.induction f0 fstep
+    where
+      f0 = FromDTypeVal $ \x _ -> fromDTypeVal x
+      fstep :: forall k. F.SNatI k => FromDTypeVal exp r t k -> FromDTypeVal exp r t (F.S k)
+      fstep pred = FromDTypeVal $ \(VProd v0 h) x -> case x of
+        F.FZ -> fromDTypeVal v0
+        F.FS n -> runFromDTypeVal pred h n
 
 -- | FinNE n represents {0,..,n} (NB: n is included)
 type FinNE n = F.Fin (F.S n)
 
--- data FinNE (n :: Nat) where
---   FZ :: FinNE n
---   FS :: FinNE n -> FinNE (S n)
+data Wit c where
+  Wit :: c => Wit c
 
--- instance Eq (FinNE n) where
---   FZ == FZ = True
---   FS n == FS m = n == m
---   _ == _ = False
+newtype Wit' t n = Wit' (Wit (DefType (Prods t n)))
 
--- instance Ord (FinNE n) where
---   compare FZ FZ = EQ
---   compare FZ _ = LT
---   compare _ FZ = GT
---   compare (FS n) (FS m) = compare n m
+propDefTypeProds :: forall n t. (DefType t, F.SNatI n) => Proxy n -> Proxy t -> Wit (DefType (Prods t n))
+propDefTypeProds _ _ = case F.induction @n f0 fstep of Wit' w -> w
+  where
+    f0 :: Wit' t 'F.Z
+    f0 = Wit' Wit
+    fstep :: forall k. Wit' t k -> Wit' t ( 'F.S k)
+    fstep (Wit' Wit) = Wit' Wit
 
--- data SNat n where
---   SZ :: SNat Z
---   SS :: SNat n -> SNat (S n)
+reifySNat :: forall n r. (Integral n) => n -> (forall m. F.SNatI m => F.SNat m -> (forall t. DefType t => Proxy t -> Wit (DefType (Prods t m))) -> r) -> r
+reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy k) -> k (F.snat @k) (\(_ :: Proxy t) -> propDefTypeProds @k Proxy (Proxy :: Proxy t))
 
--- snat0 :: SNat Z
--- snat0 = SZ
-
--- snat1 :: SNat (SS Z)
--- snat1 = SS SZ
-
--- toNum :: SNat n -> Num a => a
--- toNum SZ = 0
--- toNum (SS k) = toNum k + 1
-
--- toNumF :: FinNE n -> Num a => a
--- toNumF FZ = 0
--- toNumF (FS n) = toNumF n + 1
-
--- class NatLike n where
---   snat :: SNat n
-
--- instance NatLike Z where
---   snat = SZ
-
--- instance NatLike n => NatLike (S n) where
---   snat = SS snat
-
--- instance NatLike n => Num (FinNE n) where
---   fromInteger i = go v (i `mod` toNum v)
---     where
---       v :: SNat n
---       v = snat
-
---       go :: SNat k -> Integer -> FinNE k
---       go SZ 0 = FZ
---       go SZ _ = error "Too large"
---       go (SS n) i = FS (go n (i -1))
-
---   x + y = fromInteger (toNumF x + toNumF y)
---   x * y = fromInteger (toNumF x * toNumF y)
---   x - y = fromInteger (toNumF x - toNumF y)
-
---   abs = id
-
---   signum FZ = FZ
---   signum (FS _) = FS FZ
-
--- instance NatLike n => Enum (FinNE n) where
---   toEnum = fromInteger . fromIntegral
---   fromEnum = toNumF
-
--- instance NatLike n => Bounded (FinNE n) where
---   minBound = FZ
---   maxBound = toNum (snat @n)
+-- where
+--   makeWit :: forall n r. F.SNatI n => (forall a. DefType (Prods (T a) n) => Proxy a -> r) -> r
+--   makeWit = case F.snat :: F.SNat n of
+--     F.SZ -> k Proxy
+--     F.SS -> makeWit k
 
 -- -- | Knot-tying operator. To guarantee that we generate CFGs, every recursive function must be
 -- --   defined via 'share'. Also, even for non-recursive function, 'share' ensures that its definition will be

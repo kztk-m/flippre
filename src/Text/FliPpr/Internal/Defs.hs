@@ -282,14 +282,14 @@ unpairRulesM r = DefM $ \k -> unDefM r $ \(VProd a b) -> k (DefM $ \k1 -> k1 a, 
 
 -- unpairRules r $ curry k
 
-class DefType a => Convertible f a s | s -> a where
+class Convertible f a s | s -> a where
   fromDTypeVal :: DTypeVal f a -> s
   toDTypeVal :: s -> DefM f (DTypeVal f a)
 
 -- fromRules :: Rules f a -> DefM f b
 -- toRules :: b -> Rules f a
 
-mfixDefM :: (Defs f, Convertible f a s) => (s -> DefM f s) -> DefM f s
+mfixDefM :: (Defs f, DefType a, Convertible f a s) => (s -> DefM f s) -> DefM f s
 mfixDefM h = fmap fromDTypeVal $ fixDef $ (>>= toDTypeVal) . h . fromDTypeVal
 
 -- fromRules $ fixDef $ \a -> (fromRules a >>= h) >>= toRules
@@ -335,11 +335,11 @@ nt = unlift
 local :: Defs f => DefM f (f t) -> f t
 local m = unlift $ runDefM $ fmap lift m
 
-instance DefType a => Convertible f a (DTypeVal f a) where
+instance Convertible f a (DTypeVal f a) where
   fromDTypeVal = id
   toDTypeVal = return
 
-instance DefType a => Convertible f a (Rules f a) where
+instance Convertible f a (Rules f a) where
   fromDTypeVal = return
   toDTypeVal = id
 
