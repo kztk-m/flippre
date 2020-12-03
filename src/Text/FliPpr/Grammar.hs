@@ -13,19 +13,34 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Text.FliPpr.Grammar
-  ( Grammar (..),
+  ( -- * Type definitions
+    Grammar (..),
     GrammarD,
     ExChar (..),
     CharLike (..),
     Simplify,
-    ToFlatGrammar,
+
+    -- * Derived combinators
     char,
     symbols,
     text,
     space,
     spaces,
+
+    -- * Manipulation of Grammars
     simplifyGrammar,
     withSpace,
+
+    -- ** Flat Grammars
+    ToFlatGrammar,
+    flatten,
+    Prod (..),
+    Symb (..),
+    RHS (..),
+    FlatGrammar (..),
+    E.EnvImpl (..),
+
+    -- * Pretty-Printing
     pprGrammar,
     pprAsFlat,
     module Defs,
@@ -37,7 +52,6 @@ import Control.Category (Category (..), id, (.))
 import Control.Monad (forM)
 import Control.Monad.State (MonadState, State, StateT (..), evalState, evalStateT, get, put)
 import Data.Foldable (asum)
-import qualified Data.Map as Map
 --
 
 import Data.Maybe (mapMaybe)
@@ -738,7 +752,7 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs) =
     transTo Qs (NormalChar c) = (symb Space *> char c, Qn)
     transTo Qss Space = (symb Space, Qss)
     transTo Qss Spaces = (pure Spaces, Qss)
-    transTo Qss (NormalChar c) = (symb Space *> char c, Qn)
+    transTo Qss (NormalChar c) = (symb Spaces *> char c, Qn)
 
     toM :: (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Fs g r) -> Fs g r)) -> StateT (Memo env g) (DefM g) a
     toM f = StateT $ \memo -> DefM $ \k -> f memo (curry k)
