@@ -59,12 +59,13 @@ import Data.Monoid (Endo (..))
 import Data.RangeSet.List (RSet)
 import qualified Data.RangeSet.List as RS
 import Data.Typeable ((:~:) (..))
-import Debug.Trace (trace)
 import qualified Text.FliPpr.Doc as D
 import Text.FliPpr.Internal.Defs as Defs
 import qualified Text.FliPpr.Internal.Env as E
-import Text.Printf (printf)
 import Prelude hiding (id, (.))
+
+-- import Debug.Trace (trace)
+-- import Text.Printf (printf)
 
 class (Applicative e, Alternative e) => Grammar c e | e -> c where
   symb :: c -> e c
@@ -434,7 +435,7 @@ removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
     checkDefs :: Env (RHS c env') env -> Env (Const Bool) env' -> Env (Const Bool) env
     checkDefs es env = E.mapEnv (Const . checkRHS env) es
 
-    pprMP mp = E.pprEnv (\s d -> D.hsep [D.text s, D.text "=", D.text (show $ getConst d)]) mp :: D.Doc
+    -- pprMP mp = E.pprEnv (\s d -> D.hsep [D.text s, D.text "=", D.text (show $ getConst d)]) mp :: D.Doc
 
     check mp =
       let mp' = checkDefs defs mp
@@ -456,7 +457,7 @@ removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
 
 newtype MemoS g env = MemoS {lookupMemoS :: forall a. Var env a -> Maybe (g a)}
 
-unFlatten :: forall c g r. GrammarD c g => FlatGrammar c r -> g r
+unFlatten :: forall c g r. (Ord c, Enum c, GrammarD c g) => FlatGrammar c r -> g r
 unFlatten (FlatGrammar (defs :: Bindings c env env) rhs) =
   local $
     evalStateT (procRHS rhs) initMemo
@@ -471,7 +472,24 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs) =
         Nothing -> m x'
 
     procRHS :: RHS c env a -> StateT (MemoS g env) (DefM g) (g a)
+    -- procRHS (RHS rs) = do
+    --   pc <- asum <$> mapM procProd cont
+    --   let p1 = (\a k -> k a) <$> symbI cs <*> pc
+    --   p2 <- asum <$> mapM procProd others
+    --   return $ p1 <|> p2
+    --   where
+    --     (cs, cont, others) = gatherHeads rs
     procRHS (RHS rs) = asum <$> mapM procProd rs
+
+    -- gatherHeads :: [Prod c env a] -> (RSet c, [Prod c env (c -> a)], [Prod c env a])
+    -- gatherHeads [] = (RS.empty, [], [])
+    -- gatherHeads (p : ps) =
+    --   case p of
+    --     PCons (Symb c) r -> (RS.insert c cs, r : cont, others)
+    --     PCons (SymbI s) r -> (RS.union s cs, r : cont, others)
+    --     _ -> (cs, cont, p : others)
+    --   where
+    --     (cs, cont, others) = gatherHeads ps
 
     procProd :: Prod c env a -> StateT (MemoS g env) (DefM g) (g a)
     procProd (PNil a) = return (pure a)
@@ -481,6 +499,22 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs) =
       return $ (\a k -> k a) <$> s' <*> r'
 
     -- (fmap $ \a k -> k a) <$> procSymb s <*> procProd r
+
+    -- x = rhs is inlinable if rhs is small enouch and x does not appear in rhs
+    inlinable :: Var env a -> RHS c env a -> Bool
+    inlinable _ (RHS []) = True
+    inlinable x (RHS [p]) = smallEnough p && not (occur p)
+      where
+        smallEnough :: Prod c env b -> Bool
+        smallEnough (PNil _) = True
+        smallEnough (PCons _ (PNil _)) = True
+        smallEnough _ = False
+
+        occur :: Prod c env b -> Bool
+        occur (PNil _) = False
+        occur (PCons (NT y) _) | Just _ <- E.eqVar x y = True
+        occur (PCons _ r) = occur r
+    inlinable _ _ = False
 
     procSymb :: Symb c env a -> StateT (MemoS g env) (DefM g) (g a)
     procSymb (Symb c) = return (symb c)
@@ -492,8 +526,10 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs) =
         Nothing ->
           StateT $ \memo -> DefM $ \k ->
             let rhs = E.lookupEnv x defs
-             in letrDS $ \a ->
-                  unDefM (runStateT (procRHS rhs) (updateMemo memo x a)) $ \(res, memo') -> pairDS (liftDS res) (k (a, memo'))
+             in if inlinable x rhs
+                  then unDefM (runStateT (procRHS rhs) memo) $ \(res, memo') -> k (res, updateMemo memo' x res)
+                  else letrDS $ \a ->
+                    unDefM (runStateT (procRHS rhs) (updateMemo memo x a)) $ \(res, memo') -> pairDS (liftDS res) (k (a, memo'))
 
 -- data CheckProd c g a = CheckProd Bool (g a)
 
