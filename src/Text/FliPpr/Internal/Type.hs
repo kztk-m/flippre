@@ -303,7 +303,7 @@ infixr 4 <?
 
 -- |
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction'.
-class Repr (arg :: * -> *) exp (t :: FType) r | exp -> arg, exp t -> r, r -> arg exp t where
+class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, exp t -> r, r -> arg exp t where
   toFunction :: E exp t -> r
   -- ^ @toFunction :: E exp (a1 :~> ... :~> an :~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
 

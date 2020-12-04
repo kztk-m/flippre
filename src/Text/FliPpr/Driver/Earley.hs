@@ -1,24 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 
 module Text.FliPpr.Driver.Earley (asEarley, parse) where
-
-import Control.Applicative as A (Alternative (..))
--- import Text.FliPpr.Internal.GrammarST as G
--- import Text.FliPpr.Internal.Ref
-
--- import Control.Monad.Reader
--- import Data.Container2
--- import Data.Coerce (coerce)
--- import qualified Data.Map2 as M2
--- import Data.Maybe (fromJust)
 
 import Data.Foldable (asum)
 import qualified Data.RangeSet.List as RS
@@ -26,8 +14,7 @@ import qualified Text.Earley as E
 import Text.FliPpr.Doc as D
 import Text.FliPpr.Err
 import qualified Text.FliPpr.Grammar as G
-import Text.FliPpr.Internal.Defs as Defs
-import Text.FliPpr.Internal.Env as Env
+import qualified Text.FliPpr.Internal.Env as Env
 
 -- newtype EarleyProd r c a = EarleyProd (E.Grammar r (E.Prod r c c a))
 
@@ -82,7 +69,7 @@ toEarley (G.FlatGrammar defs rhs) = do
       rec tbl <- Env.traverseWithVar (const $ procRHS tbl) defs
       return tbl
 
-    procRHS :: Ord c => Env.Env U (E.Prod r c c) env -> G.RHS c env t -> E.Grammar r (E.Prod r c c t)
+    procRHS :: Ord c => Env.Env Env.U (E.Prod r c c) env -> G.RHS c env t -> E.Grammar r (E.Prod r c c t)
     procRHS env (G.RHS ps) = do
       xs <- mapM (procProd env) ps
       E.rule (asum xs)

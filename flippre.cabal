@@ -40,7 +40,7 @@ library
                        fin >= 0.1 && < 0.2 
                        
   default-language:    Haskell2010
-  ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors -fwarn-incomplete-patterns 
+  ghc-options:         -Wall -Wcompat -Wno-name-shadowing -Wno-unticked-promoted-constructors -fwarn-incomplete-patterns 
 
 flag build-examples
   description: wheather or not build examples
