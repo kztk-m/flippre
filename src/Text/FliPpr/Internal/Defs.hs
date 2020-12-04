@@ -18,6 +18,8 @@ module Text.FliPpr.Internal.Defs
     DTypeVal (..),
     Defs (..),
     DefM (..),
+    type (**),
+    type Lift,
 
     -- * Helper functions for defining 'Alternative' instances
     manyD,
@@ -72,43 +74,49 @@ data DType ft
   | -- | Expressions that may share some definitions
     DType ft :*: DType ft
 
+type a ** b = a ':*: b
+
+type Lift a = 'T a
+
+infixr 4 **
+
 infixr 4 :*:
 
 data DTypeVal (f :: ft -> Type) :: DType ft -> Type where
-  VT :: f ft -> DTypeVal f (T ft)
-  VProd :: DTypeVal f a -> DTypeVal f b -> DTypeVal f (a :*: b)
+  VT :: f ft -> DTypeVal f ( 'T ft)
+  VProd :: DTypeVal f a -> DTypeVal f b -> DTypeVal f (a ** b)
 
 class Defs (f :: k -> Type) | f -> k where
   data Fs f :: DType k -> Type
 
   -- By kztk @ 2020-11-26
   -- We will use the following methods for recursive definitions
-  liftDS :: f a -> Fs f (T a)
-  unliftDS :: Fs f (T a) -> f a
+  liftDS :: f a -> Fs f ( 'T a)
+  unliftDS :: Fs f ( 'T a) -> f a
 
-  pairDS :: Fs f a -> Fs f b -> Fs f (a :*: b)
+  pairDS :: Fs f a -> Fs f b -> Fs f (a ** b)
 
   --   unpairRules :: (DefType a, DefType b) => Rules exp (a :*: b) -> (Rules exp a -> Rules exp b -> Rules exp r) -> Rules exp r
 
   -- A method inspired by the trace operator in category theory.
   -- This method serves as a bulding block of mutual recursions
-  letrDS :: (f a -> Fs f (T a :*: r)) -> Fs f r
+  letrDS :: (f a -> Fs f ( 'T a ** r)) -> Fs f r
 
 -- In implementation, it is a specialized version of a codensity monad.
 newtype DefM f a = DefM {unDefM :: forall r. DefType r => (a -> Fs f r) -> Fs f r}
 
 type Rules f a = DefM f (DTypeVal f a)
 
-lift :: f a -> Rules f (T a)
+lift :: f a -> Rules f ( 'T a)
 lift x = DefM $ \k -> k (VT x)
 
-unlift :: Defs f => Rules f (T a) -> f a
+unlift :: Defs f => Rules f ( 'T a) -> f a
 unlift x = unliftDS $ unDefM x $ \(VT y) -> liftDS y
 
-pairRules :: Rules f a -> Rules f b -> Rules f (a :*: b)
+pairRules :: Rules f a -> Rules f b -> Rules f (a ** b)
 pairRules x y = DefM $ \k -> unDefM x $ \a -> unDefM y $ \b -> k (VProd a b)
 
-letr :: Defs f => (f a -> Rules f (T a :*: r)) -> Rules f r
+letr :: Defs f => (f a -> Rules f ( 'T a ** r)) -> Rules f r
 letr h = DefM $ \k -> letrDS $ \a -> unDefM (h a) $ \(VProd (VT b) r) -> pairDS (liftDS b) (k r)
 
 -- | A variant of 'many' defined without Haskell-level recursion.
@@ -120,20 +128,20 @@ someD :: (Defs f, Alternative f) => f a -> f [a]
 someD d = unlift $ letr $ \a -> pairRules (lift d) $ lift $ (:) <$> a <*> manyD a
 
 type family TransD f a = b | b -> a f where
-  TransD f (T a) = T (f a)
-  TransD f (a :*: b) = TransD f a :*: TransD f b
+  TransD f ( 'T a) = 'T (f a)
+  TransD f (a ** b) = TransD f a ** TransD f b
 
-class DefType (a :: DType k) where
+class DefType (r :: DType k) where
   indDType ::
     forall f.
-    (forall a. f (T a)) ->
-    (forall a b. (DefType a, DefType b) => f (a :*: b)) ->
-    f a
+    (forall a. f ( 'T a)) ->
+    (forall a b. (DefType a, DefType b) => f (a ** b)) ->
+    f r
 
-instance DefType (T a) where
+instance DefType ( 'T a) where
   indDType f _ = f
 
-instance (DefType a, DefType b) => DefType (a :*: b) where
+instance (DefType a, DefType b) => DefType (a ** b) where
   indDType _ step = step
 
 -- newtype PropTransD f a = PropTransD (Wit (DefType (TransD f a)))
@@ -178,19 +186,19 @@ instance (DefType a, DefType b) => DefType (a :*: b) where
 
 -- newtype FS2V f a = FS2V (Fs f a -> DefM f (DTypeVal f a))
 
-newtype LetRGen f a = LetRGen (forall r. (DTypeVal f a -> Rules f (a :*: r)) -> Rules f r)
+newtype LetRGen f a = LetRGen (forall r. (DTypeVal f a -> Rules f (a ** r)) -> Rules f r)
 
-letrGen :: (Defs f, DefType a) => (DTypeVal f a -> Rules f (a :*: r)) -> Rules f r
+letrGen :: (Defs f, DefType a) => (DTypeVal f a -> Rules f (a ** r)) -> Rules f r
 letrGen =
   let LetRGen f = indDType letrGen0 letrGenStep in f
   where
-    letrGen0 :: Defs f => LetRGen f (T t)
+    letrGen0 :: Defs f => LetRGen f ( 'T t)
     letrGen0 = LetRGen $ \h -> letr (h . VT)
 
-    letrGenStep :: (DefType a, DefType b, Defs f) => LetRGen f (a :*: b)
+    letrGenStep :: (DefType a, DefType b, Defs f) => LetRGen f (a ** b)
     letrGenStep = LetRGen $ \h -> letrGen $ \b -> letrGen $ \a -> assocr $ h (VProd a b)
       where
-        assocr :: Rules f ((a :*: b) :*: r) -> Rules f (a :*: (b :*: r))
+        assocr :: Rules f ((a ** b) ** r) -> Rules f (a ** (b ** r))
         assocr x = DefM $ \k -> unDefM x $ \(VProd (VProd a b) r) -> k (VProd a (VProd b r))
 
 -- newtype LetRGen exp a = LetRGen (forall r. DefType r => (Rules exp a -> Rules exp (a :*: r)) -> Rules exp r)
@@ -214,13 +222,13 @@ letrGen =
 
 newtype VMap f k1 k2 a = VMap ((forall t. f (k1 t) -> f (k2 t)) -> DTypeVal f (TransD k1 a) -> DTypeVal f (TransD k2 a))
 
-vmap :: forall f k1 k2 a. (Defs f, DefType a) => (forall t. f (k1 t) -> f (k2 t)) -> DTypeVal f (TransD k1 a) -> DTypeVal f (TransD k2 a)
+vmap :: forall f k1 k2 r. (Defs f, DefType r) => (forall t. f (k1 t) -> f (k2 t)) -> DTypeVal f (TransD k1 r) -> DTypeVal f (TransD k2 r)
 vmap = let VMap f = indDType vmap0 vmapStep in f
   where
-    vmap0 :: Defs f => VMap f k1 k2 (T t)
+    vmap0 :: Defs f => VMap f k1 k2 ( 'T t)
     vmap0 = VMap $ \f (VT x) -> VT (f x)
 
-    vmapStep :: forall a b. (Defs f, DefType a, DefType b) => VMap f k1 k2 (a :*: b)
+    vmapStep :: forall a b. (Defs f, DefType a, DefType b) => VMap f k1 k2 (a ** b)
     vmapStep = VMap $ \f (VProd a b) -> VProd (vmap f a) (vmap f b)
 
 rmap :: forall f k1 k2 a. (DefType a, Defs f) => (forall t. f (k1 t) -> f (k2 t)) -> Rules f (TransD k1 a) -> Rules f (TransD k2 a)
@@ -274,7 +282,7 @@ instance Monad (DefM exp) where
 runDefM :: DefType r => DefM exp (Rules exp r) -> Rules exp r
 runDefM = Control.Monad.join -- unDefM m id
 
-unpairRulesM :: (Defs exp, DefType a, DefType b) => Rules exp (a :*: b) -> DefM exp (Rules exp a, Rules exp b)
+unpairRulesM :: (Defs exp, DefType a, DefType b) => Rules exp (a ** b) -> DefM exp (Rules exp a, Rules exp b)
 unpairRulesM r = DefM $ \k -> unDefM r $ \(VProd a b) -> k (DefM $ \k1 -> k1 a, DefM $ \k2 -> k2 b)
 
 -- unpairRules r $ curry k
@@ -311,10 +319,10 @@ newtype ShareM f a = ShareM (DTypeVal f a -> DefM f (DTypeVal f a))
 shareM :: (Defs f, DefType a) => DTypeVal f a -> DefM f (DTypeVal f a)
 shareM = let ShareM f = indDType shareM0 shareMStep in f
   where
-    shareM0 :: Defs f => ShareM f (T t)
+    shareM0 :: Defs f => ShareM f ( 'T t)
     shareM0 = ShareM $ \(VT x) -> fmap VT (share x)
 
-    shareMStep :: (Defs f, DefType a, DefType b) => ShareM f (a :*: b)
+    shareMStep :: (Defs f, DefType a, DefType b) => ShareM f (a ** b)
     shareMStep =
       ShareM $ \(VProd a b) -> shareM a >>= \va -> shareM b >>= \vb -> return (VProd va vb)
 
@@ -323,10 +331,10 @@ shareGen comp = fromDTypeVal <$> (shareM =<< toDTypeVal comp)
 
 -- DefM $ \k -> shareDef (toRules @exp @a @s s) $ \a -> unDefM (fromRules @exp @a @s a) k
 
-rule :: Defs f => f a -> DefM f (Rules f (T a))
+rule :: Defs f => f a -> DefM f (Rules f ( 'T a))
 rule = shareGen . lift
 
-nt :: Defs f => Rules f (T a) -> f a
+nt :: Defs f => Rules f ( 'T a) -> f a
 nt = unlift
 
 local :: Defs f => DefM f (f t) -> f t
@@ -340,25 +348,25 @@ instance Convertible f a (Rules f a) where
   fromDTypeVal = return
   toDTypeVal = id
 
-instance (Defs f, Convertible f a s, Convertible f b t) => Convertible f (a :*: b) (s, t) where
+instance (Defs f, Convertible f a s, Convertible f b t) => Convertible f (a ** b) (s, t) where
   fromDTypeVal (VProd a b) = (fromDTypeVal a, fromDTypeVal b)
   toDTypeVal (s, t) = VProd <$> toDTypeVal s <*> toDTypeVal t
 
-instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3) => Convertible f (a1 :*: a2 :*: a3) (s1, s2, s3) where
+instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3) => Convertible f (a1 ** a2 ** a3) (s1, s2, s3) where
   fromDTypeVal x = let (s1, (s2, s3)) = fromDTypeVal x in (s1, s2, s3)
   toDTypeVal (s1, s2, s3) = toDTypeVal (s1, (s2, s3))
 
-instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4) => Convertible f (a1 :*: a2 :*: a3 :*: a4) (s1, s2, s3, s4) where
+instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4) => Convertible f (a1 ** a2 ** a3 ** a4) (s1, s2, s3, s4) where
   fromDTypeVal x = let (s1, (s2, (s3, s4))) = fromDTypeVal x in (s1, s2, s3, s4)
   toDTypeVal (s1, s2, s3, s4) = toDTypeVal (s1, (s2, (s3, s4)))
 
-instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4, Convertible f a5 s5) => Convertible f (a1 :*: a2 :*: a3 :*: a4 :*: a5) (s1, s2, s3, s4, s5) where
+instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4, Convertible f a5 s5) => Convertible f (a1 ** a2 ** a3 ** a4 ** a5) (s1, s2, s3, s4, s5) where
   fromDTypeVal x = let (s1, (s2, (s3, (s4, s5)))) = fromDTypeVal x in (s1, s2, s3, s4, s5)
   toDTypeVal (s1, s2, s3, s4, s5) = toDTypeVal (s1, (s2, (s3, (s4, s5))))
 
 instance
   (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4, Convertible f a5 s5, Convertible f a6 s6) =>
-  Convertible f (a1 :*: a2 :*: a3 :*: a4 :*: a5 :*: a6) (s1, s2, s3, s4, s5, s6)
+  Convertible f (a1 ** a2 ** a3 ** a4 ** a5 ** a6) (s1, s2, s3, s4, s5, s6)
   where
   fromDTypeVal x = let (s1, (s2, (s3, (s4, (s5, s6))))) = fromDTypeVal x in (s1, s2, s3, s4, s5, s6)
   toDTypeVal (s1, s2, s3, s4, s5, s6) = toDTypeVal (s1, (s2, (s3, (s4, (s5, s6)))))
@@ -367,28 +375,28 @@ instance
 --   fromRules = return
 --   toRules = id
 
--- instance (Defs exp, Convertible exp a s, Convertible exp b t) => Convertible exp (a :*: b) (s, t) where
+-- instance (Defs exp, Convertible exp a s, Convertible exp b t) => Convertible exp (a ** b) (s, t) where
 --   fromRules ab = do
 --     (a, b) <- unpairRulesM ab
 --     (,) <$> fromRules a <*> fromRules b
 
 --   toRules (x, y) = pairRules (toRules x) (toRules y)
 
--- instance (Defs exp, Convertible exp a1 s1, Convertible exp a2 s2, Convertible exp a3 s3) => Convertible exp (a1 :*: a2 :*: a3) (s1, s2, s3) where
+-- instance (Defs exp, Convertible exp a1 s1, Convertible exp a2 s2, Convertible exp a3 s3) => Convertible exp (a1 ** a2 ** a3) (s1, s2, s3) where
 --   fromRules a = do
 --     (s1, (s2, s3)) <- fromRules a
 --     return (s1, s2, s3)
 
 --   toRules (s1, s2, s3) = toRules (s1, (s2, s3))
 
--- instance (Defs exp, Convertible exp a1 s1, Convertible exp a2 s2, Convertible exp a3 s3, Convertible exp a4 s4) => Convertible exp (a1 :*: a2 :*: a3 :*: a4) (s1, s2, s3, s4) where
+-- instance (Defs exp, Convertible exp a1 s1, Convertible exp a2 s2, Convertible exp a3 s3, Convertible exp a4 s4) => Convertible exp (a1 ** a2 ** a3 ** a4) (s1, s2, s3, s4) where
 --   fromRules a = do
 --     (s1, (s2, (s3, s4))) <- fromRules a
 --     return (s1, s2, s3, s4)
 
 --   toRules (s1, s2, s3, s4) = toRules (s1, (s2, (s3, s4)))
 
--- instance (Defs exp, Convertible exp a1 s1, Convertible exp a2 s2, Convertible exp a3 s3, Convertible exp a4 s4, Convertible exp a5 s5) => Convertible exp (a1 :*: a2 :*: a3 :*: a4 :*: a5) (s1, s2, s3, s4, s5) where
+-- instance (Defs exp, Convertible exp a1 s1, Convertible exp a2 s2, Convertible exp a3 s3, Convertible exp a4 s4, Convertible exp a5 s5) => Convertible exp (a1 ** a2 ** a3 ** a4 ** a5) (s1, s2, s3, s4, s5) where
 --   fromRules a = do
 --     (s1, (s2, (s3, (s4, s5)))) <- fromRules a
 --     return (s1, s2, s3, s4, s5)
@@ -397,7 +405,7 @@ instance
 
 -- instance
 --   (Defs exp, Convertible exp a1 s1, Convertible exp a2 s2, Convertible exp a3 s3, Convertible exp a4 s4, Convertible exp a5 s5, Convertible exp a6 s6) =>
---   Convertible exp (a1 :*: a2 :*: a3 :*: a4 :*: a5 :*: a6) (s1, s2, s3, s4, s5, s6)
+--   Convertible exp (a1 ** a2 ** a3 ** a4 ** a5 ** a6) (s1, s2, s3, s4, s5, s6)
 --   where
 --   fromRules a = do
 --     (s1, (s2, (s3, (s4, (s5, s6))))) <- fromRules a

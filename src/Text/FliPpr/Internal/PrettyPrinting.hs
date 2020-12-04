@@ -16,14 +16,14 @@ import Text.FliPpr.Internal.Type
 
 data Ppr d (t :: FType) where
   PD :: d -> Ppr d D
-  PF :: (a -> Ppr d r) -> Ppr d (a :~> r)
+  PF :: (a -> Ppr d r) -> Ppr d (a ~> r)
 
 instance DocLike d => FliPprE Identity (Ppr d) where
   fapp (PF f) a = f (coerce a)
 
   farg f = PF (coerce f)
 
-  fcase a = go (coerce a)
+  fcase e0 = go (coerce e0)
     where
       go _ [] = error "Pattern matching failure"
       go a (Branch (PartialBij _ f _) h : bs) =
@@ -77,10 +77,10 @@ instance DocLike d => Defs (Ppr d) where
 --   let x = fmap2 (\k -> runRec k x) defs
 --   in k x
 
-pprModeMono :: Ppr Doc (a :~> D) -> a -> Doc
+pprModeMono :: Ppr Doc (a ~> D) -> a -> Doc
 pprModeMono (PF h) a =
   case h a of
     PD d -> d
 
-pprMode :: FliPpr (a :~> D) -> a -> Doc
+pprMode :: FliPpr (a ~> D) -> a -> Doc
 pprMode (FliPpr e) = pprModeMono e

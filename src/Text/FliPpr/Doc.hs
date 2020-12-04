@@ -42,9 +42,9 @@ class Pretty a where
   ppr = pprPrec 0
 
   pprList :: [a] -> Doc
-  pprList = brackets . punctuate (text ",") . map ppr
+  pprList = brackets' . punctuate (text ",") . map ppr
     where
-      brackets d = group (text "[" <> align (d </> text "]"))
+      brackets' d = group (text "[" <> align (d </> text "]"))
 
 instance Pretty a => Pretty [a] where
   ppr = pprList
@@ -151,9 +151,9 @@ parensIf True = parens
 parensIf False = id
 
 punctuate :: DocLike d => d -> [d] -> d
-punctuate _sep [] = empty
-punctuate _sep [d] = d
-punctuate sep (d : ds) = d <> sep <> punctuate sep ds
+punctuate _op [] = empty
+punctuate _op [d] = d
+punctuate op (d : ds) = d <> op <> punctuate op ds
 
 class DocLike d => Renderable d where
   render :: Width -> d -> String

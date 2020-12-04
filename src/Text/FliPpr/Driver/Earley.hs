@@ -61,14 +61,9 @@ import qualified Text.FliPpr.Internal.Env as Env
 
 toEarley :: Ord c => G.FlatGrammar c a -> E.Grammar r (E.Prod r c c a)
 toEarley (G.FlatGrammar defs rhs) = do
-  env <- makeTable defs
+  rec env <- Env.traverseWithVar (const $ procRHS env) defs
   procRHS env rhs
   where
-    makeTable :: Ord c => Env.Env Env.U (G.RHS c env) env -> E.Grammar r (Env.Env Env.U (E.Prod r c c) env)
-    makeTable defs = do
-      rec tbl <- Env.traverseWithVar (const $ procRHS tbl) defs
-      return tbl
-
     procRHS :: Ord c => Env.Env Env.U (E.Prod r c c) env -> G.RHS c env t -> E.Grammar r (E.Prod r c c t)
     procRHS env (G.RHS ps) = do
       xs <- mapM (procProd env) ps

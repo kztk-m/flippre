@@ -25,6 +25,8 @@ module Text.FliPpr
 
     -- ** Types
     FType (..),
+    type D,
+    type (~>),
 
     -- ** To wrap-up
     flippr,

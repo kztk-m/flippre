@@ -29,7 +29,7 @@ data Exp
 
 $(mkUn ''Exp)
 
-pExp :: FliPpr (Exp :~> D)
+pExp :: FliPpr (Exp ~> D)
 pExp = flippr $ do
   let addD x y = align $ group (x </>. text "+" <+>. y)
   let mulD x y = x <+>. text "*" <+>. align y

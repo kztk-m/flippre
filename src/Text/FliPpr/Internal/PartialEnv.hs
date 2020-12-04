@@ -29,8 +29,8 @@ class PartialEnvImpl i where
   lookupEnv :: Var i env a -> Env i t env -> Maybe (t a)
   updateEnv ::
     (forall a. t a -> t a -> Maybe (t a)) ->
-    Var i env a ->
-    t a ->
+    Var i env b ->
+    t b ->
     Env i t env ->
     Maybe (Env i t env)
 
@@ -99,15 +99,15 @@ instance PartialEnvImpl U where
       go n (EExt _ e) = go (n -1) e
       go _ _ = Nothing
 
-  updateEnv mg (VarU i) v (EnvU es) = EnvU <$> go i v es
+  updateEnv mg (VarU i) v (EnvU es) = EnvU <$> go i es
     where
-      go 0 v (EExt Nothing e) = Just (EExt (Just (Untype v)) e)
-      go 0 v (EExt (Just v') e)
+      go 0 (EExt Nothing e) = Just (EExt (Just (Untype v)) e)
+      go 0 (EExt (Just v') e)
         | Just r <- mg v (unsafeCast v') = Just (EExt (Just (Untype r)) e)
-      go 0 v EUndet = Just $ EExt (Just (Untype v)) EUndet
-      go n v (EExt v' e) = EExt v' <$> go (n -1) v e
-      go n v EUndet = EExt Nothing <$> go (n -1) v EUndet
-      go _ _ _ = Nothing
+      go 0 EUndet = Just $ EExt (Just (Untype v)) EUndet
+      go n (EExt v' e) = EExt v' <$> go (n -1) e
+      go n EUndet = EExt Nothing <$> go (n -1) EUndet
+      go _ _ = Nothing
 
   mergeEnv mg (EnvU es) (EnvU es') = EnvU <$> go es es'
     where
@@ -151,10 +151,10 @@ instance PartialEnvImpl U where
       go EEmp = error "Cannot happen"
 
   embedVar (RepU k) (RepU k') (VarU i) = VarU (i + (k' - k))
-  embedEnv (RepU k) (RepU k') (EnvU env) = EnvU (go (k' - k) env)
+  embedEnv (RepU k) (RepU k') (EnvU env) = EnvU (go (k' - k))
     where
-      go 0 env = env
-      go n env = EExt Nothing (go (n -1) env)
+      go 0 = env
+      go n = EExt Nothing (go (n -1))
 
   toIndex (VarU i) = i
   pprEnv (EnvU impl) = D.group $ D.text "<" D.<> go (0 :: Int) impl D.<> D.text ">"
@@ -194,15 +194,15 @@ instance PartialEnvImpl UB where
         let kk = min n m
          in go (n - kk) (bskip' (m - kk) e)
 
-  updateEnv mg (VarUB i) v (EnvUB es) = EnvUB <$> go i v es
+  updateEnv mg (VarUB i) v (EnvUB es) = EnvUB <$> go i es
     where
-      go 0 v (BExt u e) | Just r <- mg v (unsafeCast u) = pure $ BExt (Untype r) e
-      go 0 v (BSkip m e) = pure $ BExt (Untype v) (bskip' (m -1) e)
-      go n v (BExt u e) = BExt u <$> go (n -1) v e
-      go n v (BSkip m e) =
+      go 0 (BExt u e) | Just r <- mg v (unsafeCast u) = pure $ BExt (Untype r) e
+      go 0 (BSkip m e) = pure $ BExt (Untype v) (bskip' (m -1) e)
+      go n (BExt u e) = BExt u <$> go (n -1) e
+      go n (BSkip m e) =
         let kk = min n m
-         in bskip kk <$> go (n - kk) v (bskip' (m - kk) e)
-      go _ _ _ = Nothing
+         in bskip kk <$> go (n - kk) (bskip' (m - kk) e)
+      go _ _ = Nothing
 
   mergeEnv mg (EnvUB es) (EnvUB es') = EnvUB <$> go es es'
     where

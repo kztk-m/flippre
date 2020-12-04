@@ -56,7 +56,7 @@ fromDFA dfa@(DFA init tr fs) = do
   let s2i q = let Just i = elemIndex q qs in i
   -- The following code does not work when length qs = 0
   reifySNat (length qs - 1) $ \sn w ->
-    case w (Proxy :: Proxy (G.T (String ':~> D))) of
+    case w (Proxy :: Proxy (G.T (String ~> D))) of
       Wit -> do
         rec f <- defines sn $ \i s ->
               let q = qs `safeIndex` fromIntegral i
@@ -124,7 +124,7 @@ manyParens d = local $ do
   rec x <- define $ d <? parens x
   return x
 
-pExp :: FliPprD arg exp => FliPprM exp (A arg Exp -> E exp 'D)
+pExp :: FliPprD arg exp => FliPprM exp (A arg Exp -> E exp D)
 pExp = do
   pprInt <- mkPprInt
   pprVar <- mkPprVar

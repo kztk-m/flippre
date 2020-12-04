@@ -198,12 +198,12 @@ instance EnvImpl S where
   modifyEnv (VS n) f (EExtend e v) = EExtend (modifyEnv n f e) v
 
   traverseWithVar _ EEnd = pure EEnd
-  traverseWithVar f (EExtend e v) = go f e v (VarT id)
+  traverseWithVar fn (EExtend e v) = go fn e v (VarT id)
     where
-      go :: Applicative m => (forall a. Var S env a -> f a -> m (g a)) -> Env S f def -> f a -> VarT S (a : def) env -> m (Env S g (a : def))
+      go :: Applicative m => (forall t. Var S env t -> f t -> m (g t)) -> Env S f def -> f a -> VarT S (a : def) env -> m (Env S g (a : def))
       go f EEnd t sh = EExtend EEnd <$> f (runVarT sh VZ) t
-      go f (EExtend e t') t sh =
-        EExtend <$> go f e t' (sh . VarT VS) <*> f (runVarT sh VZ) t
+      go f (EExtend rest t') t sh =
+        EExtend <$> go f rest t' (sh . VarT VS) <*> f (runVarT sh VZ) t
 
   zipWithA _ EEnd EEnd = pure EEnd
   zipWithA f (EExtend e v) (EExtend e' v') =
@@ -220,7 +220,7 @@ instance EnvImpl S where
   --   repOf EEnd          = REnd
   --   repOf (EExtend e _) = RExtend (repOf e) Proxy
 
-  diffRep (SRep r1) (SRep r2) = go (len r2 - len r1) r1 r2
+  diffRep (SRep rep1) (SRep rep2) = go (len rep2 - len rep1) rep1 rep2
     where
       len :: Env S f env -> Int
       len EEnd = 0

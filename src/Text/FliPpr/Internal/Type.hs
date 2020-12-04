@@ -21,6 +21,8 @@
 
 module Text.FliPpr.Internal.Type
   ( FType (..),
+    type D,
+    type (~>),
     In,
     FliPprE (..),
     FliPprD,
@@ -69,7 +71,13 @@ import Text.FliPpr.Doc as D
 import Text.FliPpr.Internal.Defs as Defs
 
 -- | A kind for datatypes in FliPpr.
-data FType = D | Type :~> FType
+data FType = FTypeD | Type :~> FType
+
+-- | Unticked synonym for :~>
+type a ~> b = a ':~> b
+
+-- | Unticked synonym for FTypeD
+type D = 'FTypeD
 
 type In a = Eq a
 
@@ -84,8 +92,8 @@ data Branch arg exp a (t :: FType)
 -- | A finally-tagless implementation of FliPpr expressions.
 --   The APIs are only for internal use.
 class FliPprE (arg :: Type -> Type) (exp :: FType -> Type) | exp -> arg where
-  fapp :: In a => exp (a :~> t) -> arg a -> exp t
-  farg :: In a => (arg a -> exp t) -> exp (a :~> t)
+  fapp :: In a => exp (a ~> t) -> arg a -> exp t
+  farg :: In a => (arg a -> exp t) -> exp (a ~> t)
 
   fcase :: In a => arg a -> [Branch arg exp a t] -> exp t
 
@@ -242,17 +250,17 @@ line' = E fline'
 
 -- | A wrapper for 'farg'.
 {-# INLINEABLE arg #-}
-arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a :~> t)
+arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
 arg f = E (farg (coerce f))
 
 -- | A wrapper for 'fapp'.
 {-# INLINEABLE app #-}
-app :: (In a, FliPprE arg exp) => E exp (a :~> t) -> A arg a -> E exp t
+app :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
 app (E f) (A a) = E (fapp f a)
 
 -- | FliPpr version of '$'.
 {-# INLINE (@@) #-}
-(@@) :: (In a, FliPprE arg exp) => E exp (a :~> t) -> A arg a -> E exp t
+(@@) :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
 (@@) = app
 
 infixr 0 @@
@@ -305,16 +313,16 @@ infixr 4 <?
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction'.
 class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, exp t -> r, r -> arg exp t where
   toFunction :: E exp t -> r
-  -- ^ @toFunction :: E exp (a1 :~> ... :~> an :~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
+  -- ^ @toFunction :: E exp (a1 ~> ... ~> an ~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
 
   fromFunction :: r -> E exp t
-  -- ^ @fromFunction :: A arg a1 -> ... -> A arg an -> E exp D -> E exp (a1 :~> ... :~> an :~> D)@
+  -- ^ @fromFunction :: A arg a1 -> ... -> A arg an -> E exp D -> E exp (a1 ~> ... ~> an ~> D)@
 
 instance FliPprE arg exp => Repr arg exp D (E exp D) where
   toFunction = id
   fromFunction = id
 
-instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a :~> t) (A arg a -> r) where
+instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A arg a -> r) where
   toFunction f = \a -> toFunction (f `app` a)
   fromFunction k = arg (fromFunction . k)
 
@@ -324,11 +332,11 @@ mfixF = mfixDefM
 
 -- One-level unfolding to avoid overlapping instances.
 
-instance Convertible (E exp) (T a) (E exp a) where
+instance Convertible (E exp) (Lift a) (E exp a) where
   fromDTypeVal (VT x) = x
   toDTypeVal x = return $ VT x
 
-instance (FliPprE arg exp, In a, Repr arg exp t r) => Convertible (E exp) (T (a :~> t)) (A arg a -> r) where
+instance (FliPprE arg exp, In a, Repr arg exp t r) => Convertible (E exp) (Lift (a ~> t)) (A arg a -> r) where
   toDTypeVal = return . VT . fromFunction
   fromDTypeVal (VT x) = toFunction x
 
@@ -343,8 +351,8 @@ instance (FliPprE arg exp, In a, Repr arg exp t r) => Convertible (E exp) (T (a 
 --     F.FS n -> fromDTypeVal h n
 
 type family Prods t (n :: F.Nat) = r where
-  Prods t F.Z = t
-  Prods t (F.S n) = t :*: Prods t n
+  Prods t 'F.Z = t
+  Prods t ( 'F.S n) = t ** Prods t n
 
 newtype ToDTypeVal exp r t m = ToDTypeVal {runToDTypeVal :: (FinNE m -> r) -> DefM (E exp) (DTypeVal (E exp) (Prods t m))}
 
@@ -356,20 +364,20 @@ instance (Convertible (E exp) t r, F.SNatI m, ts ~ Prods t m) => Convertible (E 
     where
       f0 = ToDTypeVal $ \f -> toDTypeVal (f F.FZ)
 
-      fstep :: forall k. F.SNatI k => ToDTypeVal exp r t k -> ToDTypeVal exp r t (F.S k)
-      fstep pred = ToDTypeVal $ \f -> VProd <$> toDTypeVal (f F.FZ) <*> runToDTypeVal pred (\n -> f (F.FS n))
+      fstep :: forall k. F.SNatI k => ToDTypeVal exp r t k -> ToDTypeVal exp r t ( 'F.S k)
+      fstep p = ToDTypeVal $ \f -> VProd <$> toDTypeVal (f F.FZ) <*> runToDTypeVal p (f . F.FS)
 
   fromDTypeVal :: DTypeVal (E exp) (Prods t m) -> FinNE m -> r
   fromDTypeVal = runFromDTypeVal $ F.induction f0 fstep
     where
       f0 = FromDTypeVal $ \x _ -> fromDTypeVal x
-      fstep :: forall k. F.SNatI k => FromDTypeVal exp r t k -> FromDTypeVal exp r t (F.S k)
-      fstep pred = FromDTypeVal $ \(VProd v0 h) x -> case x of
+      fstep :: forall k. F.SNatI k => FromDTypeVal exp r t k -> FromDTypeVal exp r t ( 'F.S k)
+      fstep p = FromDTypeVal $ \(VProd v0 h) x -> case x of
         F.FZ -> fromDTypeVal v0
-        F.FS n -> runFromDTypeVal pred h n
+        F.FS n -> runFromDTypeVal p h n
 
 -- | FinNE n represents {0,..,n} (NB: n is included)
-type FinNE n = F.Fin (F.S n)
+type FinNE n = F.Fin ( 'F.S n)
 
 data Wit c where
   Wit :: c => Wit c
