@@ -1,9 +1,10 @@
+cabal-version:       2.2
 name:                flippre
 version:             0.2.0
 synopsis:            FliPpr, embedded 
 -- description:
-homepage:            https://bitbucket.org/kztk/flippre/src/default/
-license:             BSD3
+homepage:            https://github.com/kztk-m/flippre
+license:             BSD-3-Clause 
 license-file:        LICENSE
 author:              Kazutaka Matsuda
 maintainer:          kztk@ecei.tohoku.ac.jp
@@ -11,7 +12,6 @@ copyright:           2017, 2018, 2020 Kazutaka Matsuda
 category:            Text 
 build-type:          Simple
 extra-source-files:  README.md
-cabal-version:       >=1.10
 
 
 library
@@ -42,36 +42,39 @@ library
   default-language:    Haskell2010
   ghc-options:         -Wall -Wno-name-shadowing -Wno-unticked-promoted-constructors -fwarn-incomplete-patterns 
 
+flag build-examples
+  description: wheather or not build examples
+  default: False
+  manual:  True  
 
-benchmark grammar-trans 
-  type: exitcode-stdio-1.0 
-  main-is: bench/G.hs
-  build-depends: base, flippre                         
-  default-language:    Haskell2010
-  ghc-options: -rtsopts 
-
-benchmark bool-list
-  type: exitcode-stdio-1.0 
-  main-is: bench/BoolList.hs
+common common-examples
+  hs-source-dirs: examples 
+  if flag(build-examples) 
+    buildable: True
+  else
+    buildable: False
+  default-language: Haskell2010
   build-depends: base, flippre
-  default-language:    Haskell2010
-  ghc-options: -rtsopts
+  ghc-options: -rtsopts  
 
-benchmark arith
-  type: exitcode-stdio-1.0 
-  main-is: bench/Arith.hs
-  build-depends: base, flippre, deepseq 
-  default-language:    Haskell2010
-  ghc-options: -rtsopts 
+executable grammar-trans 
+  import: common-examples 
+  main-is: G.hs
 
-benchmark arithlet
-  type: exitcode-stdio-1.0 
-  main-is: bench/Let.hs
-  build-depends: base, flippre, deepseq 
-  default-language:    Haskell2010
-  ghc-options: -rtsopts 
+executable bool-list
+  import: common-examples
+  main-is: BoolList.hs  
 
+executable arith
+  import: common-examples 
+  build-depends: deepseq 
+  main-is: Arith.hs
+
+executable arithlet
+  import: common-examples
+  build-depends: deepseq 
+  main-is: Let.hs
 
 source-repository head
-  type:     mercurial
-  location: https://bitbucket.org/kztk/flippre
+  type:     git 
+  location: https://github.com/kztk-m/flippre
