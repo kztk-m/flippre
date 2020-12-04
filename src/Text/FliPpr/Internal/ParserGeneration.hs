@@ -1,45 +1,46 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RebindableSyntax #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE InstanceSigs              #-}
+{-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE PolyKinds                 #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE RebindableSyntax          #-}
+{-# LANGUAGE RecursiveDo               #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TypeApplications          #-}
+{-# LANGUAGE TypeFamilyDependencies    #-}
+{-# LANGUAGE TypeOperators             #-}
 
 -- |
 -- This module implements parser-generation interpretation of FliPpr.
 module Text.FliPpr.Internal.ParserGeneration where
 
-import Control.Applicative (liftA2, (<|>))
-import qualified Control.Applicative as A (empty)
-import Control.Monad.Reader hiding (lift, mfix)
-import Data.Foldable (asum)
+import           Control.Applicative             (liftA2, (<|>))
+import qualified Control.Applicative             as A (empty)
+import           Control.Monad.Reader            hiding (lift, mfix)
+import           Data.Foldable                   (asum)
 -- import qualified Text.FliPpr.Internal.GrammarST as G
 
-import Data.Functor.Compose (Compose (..))
-import Data.Functor.Identity (Identity (..))
-import qualified Data.RangeSet.List as RS
-import Data.Typeable (Proxy (..))
+import           Data.Functor.Compose            (Compose (..))
+import           Data.Functor.Identity           (Identity (..))
+import qualified Data.RangeSet.List              as RS
+import           Data.Typeable                   (Proxy (..))
 -- Due to RebindableSyntax
 
-import Debug.Trace
-import qualified Text.FliPpr.Doc as D
-import Text.FliPpr.Err (Err (..), err)
-import qualified Text.FliPpr.Grammar as G
+import           Debug.Trace
+import           Prelude
+import qualified Text.FliPpr.Doc                 as D
+import           Text.FliPpr.Err                 (Err (..), err)
+import qualified Text.FliPpr.Grammar             as G
+import qualified Text.FliPpr.Internal.Defs       as Defs
 import qualified Text.FliPpr.Internal.PartialEnv as PE
-import Text.FliPpr.Internal.Type
-import Prelude
+import           Text.FliPpr.Internal.Type
 
 ifThenElse :: Bool -> p -> p -> p
-ifThenElse True x _ = x
+ifThenElse True x _  = x
 ifThenElse False _ y = y
 
 -- import Debug.Trace
@@ -240,14 +241,14 @@ instance FliPprE PArg (PExp s) where
 --   ResT r (T t) = T (Err (Result r t))
 --   ResT r (a :*: b) = ResT r a :*: ResT r b
 
-instance (G.Grammar G.ExChar g, Defs g) => Defs (PExp g) where
-  newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Fs g (TransD (Compose Err (Result r)) a)}
+instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
+  newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Defs.Fs g (Defs.TransD (Compose Err (Result r)) a)}
 
-  liftDS x = RulesG $ \tenv -> liftDS (Compose <$> unPExp x tenv)
-  unliftDS (RulesG x) = PExp $ \tenv -> getCompose <$> unliftDS (x tenv)
+  liftDS x = RulesG $ \tenv -> Defs.liftDS (Compose <$> unPExp x tenv)
+  unliftDS (RulesG x) = PExp $ \tenv -> getCompose <$> Defs.unliftDS (x tenv)
 
   pairDS x y = RulesG $ \tenv ->
-    pairDS (unRulesG x tenv) (unRulesG y tenv)
+    Defs.pairDS (unRulesG x tenv) (unRulesG y tenv)
 
   -- unpairRules (x :: Rules (PExp g) (a :*: b)) k = RulesG $ \(tenv :: Rep r) ->
   --   case propTransDPreservesDefType @a @(Compose Err (Result r)) of
@@ -261,7 +262,7 @@ instance (G.Grammar G.ExChar g, Defs g) => Defs (PExp g) where
   --     h tenv tenv' = Compose . fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose
 
   letrDS h = RulesG $ \tenv ->
-    letrDS $ \a ->
+    Defs.letrDS $ \a ->
       let harg = PExp $ \tenv' -> fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose <$> a
        in unRulesG (h harg) tenv
 
@@ -341,7 +342,7 @@ instance (G.Grammar G.ExChar g, Defs g) => Defs (PExp g) where
 
 parsingModeMono :: In a => G.GrammarD G.ExChar g => PExp (G.Simplify G.ExChar g) (a ~> D) -> g (Err a)
 parsingModeMono e =
-  G.simplifyGrammar (k <$> unPExp e PE.emptyRep)
+  G.simplifyGrammar $ k <$> unPExp e PE.emptyRep
   where
     k :: In a => Err (Result '[] (a ~> D)) -> Err a
     k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s
@@ -350,7 +351,7 @@ parsingModeMono e =
         let (v, _) = PE.popEnv env
          in case v of
               Just (EqI u) -> return u
-              Nothing -> err $ D.text "Input is unused in evaluation."
+              Nothing      -> err $ D.text "Input is unused in evaluation."
 
 -- parsingModeMono :: In a => (forall s. PM s (PExp s (a ~> D))) -> G.Grammar G.ExChar (Err a)
 -- parsingModeMono m = G.finalize $ do
@@ -370,9 +371,9 @@ parsingModeMono e =
 
 data BlockCommentSpec = BlockCommentSpec
   { -- | The opening string for block comments
-    bcOpen :: String,
+    bcOpen     :: String,
     -- | The closing string for block comments
-    bcClose :: String,
+    bcClose    :: String,
     -- | Nestable or not
     bcNestable :: Bool
   }
@@ -390,7 +391,7 @@ fromCommentSpec :: G.GrammarD Char g => CommentSpec -> g ()
 fromCommentSpec (CommentSpec lc bc) = G.local $ do
   lineComment <- G.rule $ case lc of
     Nothing -> A.empty
-    Just s -> () <$ G.text s <* many (G.symbI nb) <* G.symbI br
+    Just s  -> () <$ G.text s <* many (G.symbI nb) <* G.symbI br
 
   rec blockComment <- case bc of
         Nothing -> G.rule A.empty
@@ -410,11 +411,11 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
 
     many :: G.GrammarD c g => g a -> g [a]
     many g = G.local $ do
-      g' <- share g
+      g' <- Defs.share g
       rec a <- G.rule $ pure [] <|> (:) <$> g' <*> G.nt a
       return (G.unlift a)
 
-    non :: G.GrammarD Char g => [String] -> DefM g (Rules g (Lift ()))
+    non :: G.GrammarD Char g => [String] -> Defs.DefM g (Defs.Rules g (Defs.Lift ()))
     non strings = G.rule $ () <$ many (go strings)
       where
         go :: G.Grammar Char g => [String] -> g Char

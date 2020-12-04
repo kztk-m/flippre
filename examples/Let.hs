@@ -1,29 +1,29 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RebindableSyntax #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE PolyKinds                 #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE RebindableSyntax          #-}
+{-# LANGUAGE RecursiveDo               #-}
+{-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE TypeOperators             #-}
 
-import qualified Control.Applicative as A
-import Control.DeepSeq
-import Data.List (elemIndex, sort, (\\))
-import qualified Data.List as L (group)
-import Data.Maybe (fromJust)
-import Data.Typeable (Proxy (..))
-import Debug.Trace
-import System.CPUTime
-import Text.FliPpr
-import Text.FliPpr.Driver.Earley as Earley
-import qualified Text.FliPpr.Grammar as G
-import Prelude
+import qualified Control.Applicative       as A
+import           Control.DeepSeq
+import           Data.List                 (elemIndex, sort, (\\))
+import qualified Data.List                 as L (group)
+import           Data.Maybe                (fromJust)
+import           Data.Typeable             (Proxy (..))
+import           Debug.Trace
+import           Prelude
+import           System.CPUTime
+import           Text.FliPpr
+import           Text.FliPpr.Driver.Earley as Earley
+import qualified Text.FliPpr.Grammar       as G
 
 mfix = mfixF
 
-ifThenElse True t _ = t
+ifThenElse True t _  = t
 ifThenElse False _ f = f
 
 type Name = String
@@ -47,37 +47,46 @@ data DFA = DFA {init :: Q, trans :: [(Q, [(Char, Q)])], finals :: [Q]}
 allStates :: DFA -> [Q]
 allStates (DFA init trans finals) =
   let qs0 = init : finals ++ concat [q : map snd cqs | (q, cqs) <- trans]
-   in map head $ L.group $ sort qs0
+  in map head $ L.group $ sort qs0
 
 fromDFA :: FliPprD a e => DFA -> FliPprM e (A a String -> E e D)
 fromDFA dfa@(DFA init tr fs) = do
   rec abort <- define abort
   let qs = allStates dfa
-  let s2i q = let Just i = elemIndex q qs in i
-  -- The following code does not work when length qs = 0
-  reifySNat (length qs - 1) $ \sn w ->
-    case w (Proxy :: Proxy (G.T (String ~> D))) of
-      Wit -> do
-        rec f <- defines sn $ \i s ->
-              let q = qs `safeIndex` fromIntegral i
-               in case_
-                    s
-                    --        [unNil $ (if elem q fs then text " " else abort),
-                    --        (if elem q fs then ((unNil $ text ""):) else id)
-                    [ unNil (if q `elem` fs then text " " else abort),
-                      unCons $ \a r ->
-                        case_
-                          a
-                          [ is c $ text [c] <#> f (fromIntegral $ s2i q') r
-                            | (c, q') <- fromJust (lookup q tr)
-                          ]
-                    ]
-        return (f $ fromIntegral $ s2i init)
-  where
-    safeIndex :: [Q] -> Int -> Q
-    safeIndex as i
-      | i >= length as = error $ "safeIndex: index too large." ++ show (as, i)
-      | otherwise = as !! i
+  letrs qs $ \f ->
+    def (\q s -> case_ s [ unNil $ if q `elem` fs then text "" else abort,
+                           unCons $ \a r ->
+                              case_ a [ is c $ text [c] <#> f q' r | (c, q') <- fromJust (lookup q tr) ] ]) $
+    return (f init)
+
+-- fromDFA dfa@(DFA init tr fs) = do
+--   rec abort <- define abort
+--   let qs = allStates dfa
+--   let s2i q = let Just i = elemIndex q qs in i
+--   -- The following code does not work when length qs = 0
+--   reifySNat (length qs - 1) $ \sn w ->
+--     case w (Proxy :: Proxy (G.T (String ~> D))) of
+--       Wit -> do
+--         rec f <- defines sn $ \i s ->
+--               let q = qs `safeIndex` fromIntegral i
+--                in case_
+--                     s
+--                     --        [unNil $ (if elem q fs then text " " else abort),
+--                     --        (if elem q fs then ((unNil $ text ""):) else id)
+--                     [ unNil (if q `elem` fs then text " " else abort),
+--                       unCons $ \a r ->
+--                         case_
+--                           a
+--                           [ is c $ text [c] <#> f (fromIntegral $ s2i q') r
+--                             | (c, q') <- fromJust (lookup q tr)
+--                           ]
+--                     ]
+--         return (f $ fromIntegral $ s2i init)
+--   where
+--     safeIndex :: [Q] -> Int -> Q
+--     safeIndex as i
+--       | i >= length as = error $ "safeIndex: index too large." ++ show (as, i)
+--       | otherwise = as !! i
 
 dfaNum :: DFA
 dfaNum =
@@ -167,7 +176,7 @@ parseExp =
 
 parseExp' :: [Char] -> [Exp]
 parseExp' s = case parseExp s of
-  Ok s -> s
+  Ok s   -> s
   Fail s -> error (show s)
 
 exp1 :: Exp
@@ -199,6 +208,7 @@ countTime str comp = do
 
 main :: IO ()
 main = do
+  -- print $ G.pprAsFlat $ parsingMode $ flippr $ fmap fromFunction $ fromDFA dfaVar
   rnf s1 `seq` countTime "Exp1" $ do
     print (parseExp' s1)
   where

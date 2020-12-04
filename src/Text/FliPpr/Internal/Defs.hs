@@ -1,16 +1,18 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds           #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE FunctionalDependencies    #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE PolyKinds                 #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TupleSections             #-}
+{-# LANGUAGE TypeFamilyDependencies    #-}
+{-# LANGUAGE TypeOperators             #-}
+{-# LANGUAGE UndecidableInstances      #-}
 
 module Text.FliPpr.Internal.Defs
   ( -- * Definitions
@@ -30,6 +32,7 @@ module Text.FliPpr.Internal.Defs
     shareM,
     shareDef,
     letrGen,
+    letrG,
 
     -- * Manipulation of rules
     Rules,
@@ -45,7 +48,7 @@ module Text.FliPpr.Internal.Defs
     Convertible (..),
 
     -- ** Low-level primitives
-    letr,
+    letr, letrs, letrR,
     lift,
     unlift,
     pairRules,
@@ -62,10 +65,11 @@ module Text.FliPpr.Internal.Defs
   )
 where
 
-import Control.Applicative (Alternative (..))
+import           Control.Applicative (Alternative (..))
+import           Control.Monad       ((>=>))
 import qualified Control.Monad
-import Data.Kind (Type)
-import qualified Text.FliPpr.Doc as D
+import           Data.Kind           (Type)
+import qualified Text.FliPpr.Doc     as D
 
 -- | A type for (mutually recursive) definitions
 data DType ft
@@ -116,16 +120,33 @@ unlift x = unliftDS $ unDefM x $ \(VT y) -> liftDS y
 pairRules :: Rules f a -> Rules f b -> Rules f (a ** b)
 pairRules x y = DefM $ \k -> unDefM x $ \a -> unDefM y $ \b -> k (VProd a b)
 
-letr :: Defs f => (f a -> Rules f ( 'T a ** r)) -> Rules f r
-letr h = DefM $ \k -> letrDS $ \a -> unDefM (h a) $ \(VProd (VT b) r) -> pairDS (liftDS b) (k r)
+-- letr :: Defs f => (f a -> Rules f ( 'T a ** r)) -> Rules f r
+letr :: Defs f => (f a -> DefM f (f a, r)) -> DefM f r
+letr h = DefM $ \k -> letrDS $ \a -> unDefM (h a) $ \(b, r) -> pairDS (liftDS b) (k r)
+
+letrs :: (Defs f, Eq k) => [k] -> ((k -> f a) -> DefM f (k -> f a, r)) -> DefM f r
+letrs [] h = fmap snd $ h (const $ error "Text.FliPpr.Internal.Defs.letrs: out of bounds")
+letrs (k:ks) h = letr $ \fk -> letrs ks $ \h' -> do
+  (dh'', r) <- h $ \x -> if x == k then fk else h' x
+  return (dh'', (dh'' k, r))
+
+letrR :: Defs f => (f a -> Rules f ( 'T a ** r)) -> Rules f r
+letrR h = letr $ h >=> \case { VProd (VT a) r -> return (a, r) }
 
 -- | A variant of 'many' defined without Haskell-level recursion.
 manyD :: (Defs f, Alternative f) => f a -> f [a]
-manyD d = unlift $ letr $ \a -> pairRules (lift $ pure [] <|> (:) <$> d <*> a) (lift a)
+manyD d = unlift $ letr $ \a -> return (pure [] <|> (:) <$> d <*> a, VT a)
 
 -- | A variant of 'some' defined without Haskell-level recursion.
 someD :: (Defs f, Alternative f) => f a -> f [a]
-someD d = unlift $ letr $ \a -> pairRules (lift d) $ lift $ (:) <$> a <*> manyD a
+someD d = unlift $ letr $ \m -> letr $ \s ->
+   p ((:) <$> d <*> m) $
+   p (pure [] <|> s) $
+   return (VT s)
+   where
+     p a = fmap (a,)
+   -- letr $ \x -> return (d, VT $ (:) <$> x <*> manyD x)
+  -- pairRules (lift d) $ lift $ (:) <$> a <*> manyD a
 
 type family TransD f a = b | b -> a f where
   TransD f ( 'T a) = 'T (f a)
@@ -186,6 +207,21 @@ instance (DefType a, DefType b) => DefType (a ** b) where
 
 -- newtype FS2V f a = FS2V (Fs f a -> DefM f (DTypeVal f a))
 
+newtype LetG f a = LetG (forall r. (DTypeVal f a -> DefM f (DTypeVal f a,r)) -> DefM f r)
+
+letrG :: (Defs f, DefType a) => (DTypeVal f a -> DefM f (DTypeVal f a, r)) -> DefM f r
+letrG = let LetG f = indDType letrG1 letrGStep in f
+  where
+    letrG1 :: Defs f => LetG f ('T t)
+    letrG1 = LetG $ \h -> letr $ \x -> h (VT x) >>= \case { (VT a, r) -> return (a, r) }
+
+    letrGStep :: (DefType a, DefType b, Defs f) => LetG f (a ** b)
+    letrGStep = LetG $ \h -> letrG $ \b -> letrG $ \a -> arr <$> h (VProd a b)
+
+    arr :: (DTypeVal f (a ** b), r) -> (DTypeVal f a, (DTypeVal f b, r))
+    arr (VProd a b, r) = (a, (b, r))
+
+
 newtype LetRGen f a = LetRGen (forall r. (DTypeVal f a -> Rules f (a ** r)) -> Rules f r)
 
 letrGen :: (Defs f, DefType a) => (DTypeVal f a -> Rules f (a ** r)) -> Rules f r
@@ -193,7 +229,7 @@ letrGen =
   let LetRGen f = indDType letrGen0 letrGenStep in f
   where
     letrGen0 :: Defs f => LetRGen f ( 'T t)
-    letrGen0 = LetRGen $ \h -> letr (h . VT)
+    letrGen0 = LetRGen $ \h -> letrR (h . VT)
 
     letrGenStep :: (DefType a, DefType b, Defs f) => LetRGen f (a ** b)
     letrGenStep = LetRGen $ \h -> letrGen $ \b -> letrGen $ \a -> assocr $ h (VProd a b)

@@ -1,18 +1,20 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs                 #-}
+{-# LANGUAGE KindSignatures        #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE TypeOperators         #-}
 
 module Text.FliPpr.Internal.PrettyPrinting where
 
-import Data.Coerce
-import Data.Functor.Identity
-import Text.FliPpr.Doc
-import Text.FliPpr.Internal.Type
+import           Data.Coerce
+import           Data.Functor.Identity
+import           Text.FliPpr.Doc
+import           Text.FliPpr.Internal.Type
+
+import qualified Text.FliPpr.Internal.Defs as Defs
 
 data Ppr d (t :: FType) where
   PD :: d -> Ppr d D
@@ -29,7 +31,7 @@ instance DocLike d => FliPprE Identity (Ppr d) where
       go a (Branch (PartialBij _ f _) h : bs) =
         case f a of
           Nothing -> go a bs
-          Just b -> h (Identity b)
+          Just b  -> h (Identity b)
 
   funpair (Identity (a, b)) f = f (coerce a) (coerce b)
   fununit _ x = x
@@ -55,18 +57,18 @@ instance DocLike d => FliPprE Identity (Ppr d) where
   fspace = PD (text " ")
   fspaces = PD empty
 
-instance DocLike d => Defs (Ppr d) where
-  newtype Fs (Ppr d) a = PprRules {pprRules :: DTypeVal (Ppr d) a}
+instance DocLike d => Defs.Defs (Ppr d) where
+  newtype Fs (Ppr d) a = PprRules {pprRules :: Defs.DTypeVal (Ppr d) a}
 
-  liftDS = PprRules . VT
-  unliftDS (PprRules (VT x)) = x
+  liftDS = PprRules . Defs.VT
+  unliftDS (PprRules (Defs.VT x)) = x
 
-  pairDS (PprRules x) (PprRules y) = PprRules (VProd x y)
+  pairDS (PprRules x) (PprRules y) = PprRules (Defs.VProd x y)
 
   --   unpairRules (PprRules (VProd x y)) k = k (PprRules x) (PprRules y)
 
   letrDS h =
-    let ~(VProd ~(VT a) b) = pprRules $ h a
+    let ~(Defs.VProd ~(Defs.VT a) b) = pprRules $ h a
      in PprRules b
 
 -- instance DocLike d => FliPprD Identity Identity (Ppr d) where

@@ -144,7 +144,7 @@ instance PartialEnvImpl U where
 
   popEnv (EnvU env) =
     let (v, e) = go env
-     in (unsafeCast <$> v, EnvU e)
+    in (unsafeCast <$> v, EnvU e)
     where
       go (EExt v e) = (v, e)
       go EUndet = (Nothing, EUndet)
@@ -192,7 +192,7 @@ instance PartialEnvImpl UB where
       go _ BEnd = Nothing
       go n (BSkip m e) =
         let kk = min n m
-         in go (n - kk) (bskip' (m - kk) e)
+        in go (n - kk) (bskip' (m - kk) e)
 
   updateEnv mg (VarUB i) v (EnvUB es) = EnvUB <$> go i es
     where
@@ -201,8 +201,9 @@ instance PartialEnvImpl UB where
       go n (BExt u e) = BExt u <$> go (n -1) e
       go n (BSkip m e) =
         let kk = min n m
-         in bskip kk <$> go (n - kk) (bskip' (m - kk) e)
+        in bskip kk <$> go (n - kk) (bskip' (m - kk) e)
       go _ _ = Nothing
+
 
   mergeEnv mg (EnvUB es) (EnvUB es') = EnvUB <$> go es es'
     where
@@ -230,7 +231,7 @@ instance PartialEnvImpl UB where
     let newenv = case v of
           Just val -> EnvUB (BExt (Untype val) env)
           Nothing -> EnvUB (bskip 1 env)
-     in (newenv, VarUB 0, VarT (\(VarUB i) -> VarUB (i + 1)))
+    in (newenv, VarUB 0, VarT (\(VarUB i) -> VarUB (i + 1)))
 
   emptyRep = RepUB 0
   isEmptyRep (RepUB k) =
@@ -243,7 +244,7 @@ instance PartialEnvImpl UB where
 
   popEnv (EnvUB env) =
     let (v, e) = go env
-     in (unsafeCast <$> v, EnvUB e)
+    in (unsafeCast <$> v, EnvUB e)
     where
       go (BExt v e) = (Just v, e)
       go (BSkip n e) = (Nothing, bskip' (n -1) e)

@@ -1,22 +1,23 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
+{-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE InstanceSigs               #-}
+{-# LANGUAGE NoMonomorphismRestriction  #-}
+{-# LANGUAGE PolyKinds                  #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE UndecidableInstances       #-}
 {-# OPTIONS_GHC -fwarn-unused-imports -fwarn-incomplete-patterns #-}
 
 module Text.FliPpr.Internal.Type
@@ -49,26 +50,30 @@ module Text.FliPpr.Internal.Type
     Repr (..),
     FliPprM,
     mfixF,
+    letr, letrs,
+    def,
+    share,
+    local,
     FinNE,
     reifySNat,
     Wit (..),
 
-    -- * Making recursive definitions
-    module Defs,
+    type Lift, type (**), Defs.Convertible, Defs.DefType, Defs, DefsF,
   )
 where
 
-import Control.Applicative (Const (..))
-import Control.Monad.Reader hiding (lift, local)
-import Control.Monad.State hiding (lift)
-import Data.Coerce (coerce)
-import qualified Data.Fin as F
-import Data.Kind (Type)
-import Data.Semigroup (Semigroup (..))
-import qualified Data.Type.Nat as F
-import Data.Typeable (Proxy (..))
-import Text.FliPpr.Doc as D
-import Text.FliPpr.Internal.Defs as Defs
+import           Control.Applicative       (Const (..))
+import           Control.Monad.Reader      hiding (lift, local)
+import           Control.Monad.State       hiding (lift)
+import           Data.Coerce               (coerce)
+import qualified Data.Fin                  as F
+import           Data.Kind                 (Type)
+import           Data.Semigroup            (Semigroup (..))
+import qualified Data.Type.Nat             as F
+import           Data.Typeable             (Proxy (..))
+import           Text.FliPpr.Doc           as D
+import           Text.FliPpr.Internal.Defs (Defs, type (**), type Lift)
+import qualified Text.FliPpr.Internal.Defs as Defs
 
 -- | A kind for datatypes in FliPpr.
 data FType = FTypeD | Type :~> FType
@@ -211,7 +216,7 @@ newtype FliPpr t = FliPpr (forall arg exp. FliPprD arg exp => exp t)
 -- flipprPure :: (forall arg exp. FliPprD arg exp => E exp t) -> FliPpr t
 -- flipprPure x = FliPpr (unE x)
 
-type FliPprM exp = DefM (E exp)
+type FliPprM exp = Defs.DefM (E exp)
 
 -- | Make a closed FliPpr definition. A typical use is:
 --
@@ -219,7 +224,7 @@ type FliPprM exp = DefM (E exp)
 --   >   rec ppr <- share $ arg $ \i -> ...
 --   >   return ppr
 flippr :: (forall arg exp. FliPprD arg exp => FliPprM exp (E exp t)) -> FliPpr t
-flippr x = FliPpr (unE $ local x) -- flipprPure (unC x)
+flippr x = FliPpr (unE $ Defs.local x) -- flipprPure (unC x)
 
 -- | Indicating that there can be zero-or-more spaces in parsing.
 --   In pretty-printing, it is equivalent to @text ""@.
@@ -287,17 +292,17 @@ ununit (A x) y = E $ fununit x (coerce y)
 (<?) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
 (<?) (E x) (E y) = E (fbchoice x y)
 
-instance Defs e => Defs (E e) where
-  newtype Fs (E e) a = RE (Fs e a)
+instance Defs.Defs e => Defs.Defs (E e) where
+  newtype Fs (E e) a = RE (Defs.Fs e a)
 
-  liftDS (E x) = RE (liftDS x)
-  unliftDS (RE x) = E (unliftDS x)
+  liftDS (E x) = RE (Defs.liftDS x)
+  unliftDS (RE x) = E (Defs.unliftDS x)
 
-  pairDS (RE r1) (RE r2) = RE (pairDS r1 r2)
+  pairDS (RE r1) (RE r2) = RE (Defs.pairDS r1 r2)
 
   --  unpairRules (RE e) k = RE $ unpairRules e (coerce k)
 
-  letrDS h = RE $ letrDS (coerce h)
+  letrDS h = RE $ Defs.letrDS (coerce h)
 
 infixr 4 <?
 
@@ -311,14 +316,14 @@ infixr 4 <?
 
 -- |
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction'.
-class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, exp t -> r, r -> arg exp t where
+class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, r -> arg exp t where
   toFunction :: E exp t -> r
   -- ^ @toFunction :: E exp (a1 ~> ... ~> an ~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
 
   fromFunction :: r -> E exp t
   -- ^ @fromFunction :: A arg a1 -> ... -> A arg an -> E exp D -> E exp (a1 ~> ... ~> an ~> D)@
 
-instance FliPprE arg exp => Repr arg exp D (E exp D) where
+instance FliPprE arg exp => Repr arg exp t (E exp t) where
   toFunction = id
   fromFunction = id
 
@@ -327,18 +332,67 @@ instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A a
   fromFunction k = arg (fromFunction . k)
 
 -- | A specialized version of 'mfixDefM'
-mfixF :: forall exp a d. (Defs exp, DefType d, Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
-mfixF = mfixDefM
+mfixF :: forall exp a d. (Defs exp, Defs.DefType d, Defs.Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
+mfixF = Defs.mfixDefM
+
+type DefsF exp = Defs.DTypeVal (E exp)
+
+-- | A specialized version of 'letr', which would be useful for defining mutual recursions.
+--
+--- Typical usage:
+--  @
+--  letr $ \f -> def fdef $
+--  letr $ \g -> def gdef $
+--    code_using_f_and_g
+--  @
+--
+--  @
+--  letr $ \f -> letr $ \g ->
+--    -- f and g can be mutualy dependent
+--    def fdeF >>>
+--    def gdef $
+--    code_using_f_and_g
+--  @
+--
+letr :: (Repr arg exp ft rep, FliPprD arg exp) => (rep -> FliPprM exp (rep, r)) -> FliPprM exp r
+letr h = Defs.letr $ \x -> do
+  (d, r) <- h (toFunction x)
+  return (fromFunction d, r)
+
+-- not efficient for large list
+letrs :: (Repr arg exp ft rep, FliPprD arg exp, Eq k) => [k] -> ((k -> rep) -> FliPprM exp (k -> rep, r)) -> FliPprM exp r
+letrs [] f = snd <$> f (const $ error "letrs: out of bounds")
+letrs (k:ks) f = letr $ \f1 -> letrs ks $ \frest -> do
+  (rf, rest) <- f $ \k' -> if k' == k then f1 else frest k'
+  return (rf, (rf k, rest))
+
+-- letrs = go []
+--   where
+--     unJust (Just x) = x
+--     unJust Nothing  = "letrs: out of bounds"
+
+
+-- | Useful combinator that can be used with 'letr'.
+def :: Monad m => a -> m b -> m (a, b)
+def a b = (a,) <$> b
+
+-- | Spacilized version of 'Defs.share'
+share ::(Repr arg exp ft rep,  FliPprD arg exp) => rep -> FliPprM exp rep
+share = fmap toFunction . Defs.share . fromFunction
+
+-- | Specialized version of 'Defs.local'
+local :: (Repr arg exp ft rep, FliPprD arg exp) => FliPprM exp rep -> rep
+local = toFunction . Defs.local . fmap fromFunction
 
 -- One-level unfolding to avoid overlapping instances.
 
-instance Convertible (E exp) (Lift a) (E exp a) where
-  fromDTypeVal (VT x) = x
-  toDTypeVal x = return $ VT x
+instance Defs.Convertible (E exp) (Defs.Lift a) (E exp a) where
+  fromDTypeVal (Defs.VT x) = x
+  toDTypeVal x = return $ Defs.VT x
 
-instance (FliPprE arg exp, In a, Repr arg exp t r) => Convertible (E exp) (Lift (a ~> t)) (A arg a -> r) where
-  toDTypeVal = return . VT . fromFunction
-  fromDTypeVal (VT x) = toFunction x
+instance (FliPprE arg exp, In a, Repr arg exp t r) => Defs.Convertible (E exp) (Defs.Lift (a ~> t)) (A arg a -> r) where
+  toDTypeVal = return . Defs.VT . fromFunction
+  fromDTypeVal (Defs.VT x) = toFunction x
 
 -- instance Convertible (E exp) t r => Convertible (E exp) t (FinNE F.Z -> r) where
 --   toDTypeVal x = toDTypeVal (x F.FZ)
@@ -354,26 +408,26 @@ type family Prods t (n :: F.Nat) = r where
   Prods t 'F.Z = t
   Prods t ( 'F.S n) = t ** Prods t n
 
-newtype ToDTypeVal exp r t m = ToDTypeVal {runToDTypeVal :: (FinNE m -> r) -> DefM (E exp) (DTypeVal (E exp) (Prods t m))}
+newtype ToDTypeVal exp r t m = ToDTypeVal {runToDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))}
 
-newtype FromDTypeVal exp r t m = FromDTypeVal {runFromDTypeVal :: DTypeVal (E exp) (Prods t m) -> FinNE m -> r}
+newtype FromDTypeVal exp r t m = FromDTypeVal {runFromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r}
 
-instance (Convertible (E exp) t r, F.SNatI m, ts ~ Prods t m) => Convertible (E exp) ts (FinNE m -> r) where
-  toDTypeVal :: (FinNE m -> r) -> DefM (E exp) (DTypeVal (E exp) (Prods t m))
+instance (Defs.Convertible (E exp) t r, F.SNatI m, ts ~ Prods t m) => Defs.Convertible (E exp) ts (FinNE m -> r) where
+  toDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))
   toDTypeVal = runToDTypeVal $ F.induction f0 fstep
     where
-      f0 = ToDTypeVal $ \f -> toDTypeVal (f F.FZ)
+      f0 = ToDTypeVal $ \f -> Defs.toDTypeVal (f F.FZ)
 
       fstep :: forall k. F.SNatI k => ToDTypeVal exp r t k -> ToDTypeVal exp r t ( 'F.S k)
-      fstep p = ToDTypeVal $ \f -> VProd <$> toDTypeVal (f F.FZ) <*> runToDTypeVal p (f . F.FS)
+      fstep p = ToDTypeVal $ \f -> Defs.VProd <$> Defs.toDTypeVal (f F.FZ) <*> runToDTypeVal p (f . F.FS)
 
-  fromDTypeVal :: DTypeVal (E exp) (Prods t m) -> FinNE m -> r
+  fromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r
   fromDTypeVal = runFromDTypeVal $ F.induction f0 fstep
     where
-      f0 = FromDTypeVal $ \x _ -> fromDTypeVal x
+      f0 = FromDTypeVal $ \x _ -> Defs.fromDTypeVal x
       fstep :: forall k. F.SNatI k => FromDTypeVal exp r t k -> FromDTypeVal exp r t ( 'F.S k)
-      fstep p = FromDTypeVal $ \(VProd v0 h) x -> case x of
-        F.FZ -> fromDTypeVal v0
+      fstep p = FromDTypeVal $ \(Defs.VProd v0 h) x -> case x of
+        F.FZ   -> Defs.fromDTypeVal v0
         F.FS n -> runFromDTypeVal p h n
 
 -- | FinNE n represents {0,..,n} (NB: n is included)
@@ -382,9 +436,9 @@ type FinNE n = F.Fin ( 'F.S n)
 data Wit c where
   Wit :: c => Wit c
 
-newtype Wit' t n = Wit' (Wit (DefType (Prods t n)))
+newtype Wit' t n = Wit' (Wit (Defs.DefType (Prods t n)))
 
-propDefTypeProds :: forall n t. (DefType t, F.SNatI n) => Proxy n -> Proxy t -> Wit (DefType (Prods t n))
+propDefTypeProds :: forall n t. (Defs.DefType t, F.SNatI n) => Proxy n -> Proxy t -> Wit (Defs.DefType (Prods t n))
 propDefTypeProds _ _ = case F.induction @n f0 fstep of Wit' w -> w
   where
     f0 :: Wit' t 'F.Z
@@ -392,7 +446,7 @@ propDefTypeProds _ _ = case F.induction @n f0 fstep of Wit' w -> w
     fstep :: forall k. Wit' t k -> Wit' t ( 'F.S k)
     fstep (Wit' Wit) = Wit' Wit
 
-reifySNat :: forall n r. (Integral n) => n -> (forall m. F.SNatI m => F.SNat m -> (forall t. DefType t => Proxy t -> Wit (DefType (Prods t m))) -> r) -> r
+reifySNat :: forall n r. (Integral n) => n -> (forall m. F.SNatI m => F.SNat m -> (forall t. Defs.DefType t => Proxy t -> Wit (Defs.DefType (Prods t m))) -> r) -> r
 reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy k) -> k (F.snat @k) (\(_ :: Proxy t) -> propDefTypeProds @k Proxy (Proxy :: Proxy t))
 
 -- where
@@ -457,12 +511,12 @@ newtype RName = RName Int deriving (Num, Show, Enum)
 
 newtype IName = IName Int deriving (Num, Show, Enum)
 
--- newtype PprDefs (a :: FType) = PprDefs {pprDefs :: Prec -> State (RName, IName) D.Doc}
+-- newtype Defs.PprDefs (a :: FType) = Defs.PprDefs {Defs.pprDefs :: Prec -> State (RName, IName) D.Doc}
 
 newtype VarMFliPpr a = VarMFliPpr {runVarMFliPpr :: State (RName, IName) a}
   deriving (Functor, Applicative, Monad, MonadState (RName, IName))
 
-instance VarM VarMFliPpr where
+instance Defs.VarM VarMFliPpr where
   newVar = do
     rn <- newRName
     return $ "f" ++ show rn
@@ -489,24 +543,24 @@ pprIName n
   where
     fancyNames = "xyzwsturabcdeijklmnpqv"
 
-type PrinterI = PprDefs VarMFliPpr
+type PrinterI = Defs.PprDefs VarMFliPpr
 
 instance FliPprE (Const IName) PrinterI where
-  fapp e1 e2 = PprDefs $ \k -> do
-    d1 <- pprDefs e1 9
+  fapp e1 e2 = Defs.PprDefs $ \k -> do
+    d1 <- Defs.pprDefs e1 9
     let d2 = pprIName (getConst e2)
     return $ D.parensIf (k > 9) $ d1 D.<+> d2
 
-  farg h = PprDefs $ \k -> do
+  farg h = Defs.PprDefs $ \k -> do
     x <- newIName
-    d <- pprDefs (h $ Const x) 0
+    d <- Defs.pprDefs (h $ Const x) 0
     return $ D.parensIf (k > 0) $ D.text "\\" <> pprIName x <+> D.text "->" </> d
 
-  fcase a bs = PprDefs $ \k -> do
+  fcase a bs = Defs.PprDefs $ \k -> do
     let da = pprIName $ getConst a
     ds <- forM bs $ \(Branch (PartialBij s _ _) f) -> do
       x <- newIName
-      df <- pprDefs (f $ Const x) 0
+      df <- Defs.pprDefs (f $ Const x) 0
       return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprIName x <+> D.text "->" <+> df
     return $
       parensIf (k > 9) $
@@ -514,11 +568,11 @@ instance FliPprE (Const IName) PrinterI where
           D.text "case_" <+> da
             <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
 
-  funpair a f = PprDefs $ \k -> do
+  funpair a f = Defs.PprDefs $ \k -> do
     let da = pprIName (getConst a)
     x <- newIName
     y <- newIName
-    db <- pprDefs (f (Const x) (Const y)) 0
+    db <- Defs.pprDefs (f (Const x) (Const y)) 0
     return $
       parensIf (k > 0) $
         D.align $
@@ -526,9 +580,9 @@ instance FliPprE (Const IName) PrinterI where
             D.text "let" <+> parens (pprIName x <> D.text "," <+> pprIName y) <+> D.text "=" <+> D.align da
               </> D.text "in" <+> D.align db
 
-  fununit a e = PprDefs $ \k -> do
+  fununit a e = Defs.PprDefs $ \k -> do
     let da = pprIName (getConst a)
-    de <- pprDefs e 0
+    de <- Defs.pprDefs e 0
     return $
       D.parensIf (k > 0) $
         D.align $
@@ -536,43 +590,43 @@ instance FliPprE (Const IName) PrinterI where
             D.text "let () =" <+> D.align da
               </> D.text "in" <+> D.align de
 
-  ftext s = PprDefs $ \k ->
+  ftext s = Defs.PprDefs $ \k ->
     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
 
-  fcat a b = PprDefs $ \k -> do
-    da <- pprDefs a 5
-    db <- pprDefs b 5
+  fcat a b = Defs.PprDefs $ \k -> do
+    da <- Defs.pprDefs a 5
+    db <- Defs.pprDefs b 5
     return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
 
-  fbchoice a b = PprDefs $ \k -> do
-    da <- pprDefs a 4
-    db <- pprDefs b 4
+  fbchoice a b = Defs.PprDefs $ \k -> do
+    da <- Defs.pprDefs a 4
+    db <- Defs.pprDefs b 4
     return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
 
-  fempty = PprDefs $ const $ return $ D.text "empty"
-  fline = PprDefs $ const $ return $ D.text "line"
-  flinebreak = PprDefs $ const $ return $ D.text "linebreak"
+  fempty = Defs.PprDefs $ const $ return $ D.text "empty"
+  fline = Defs.PprDefs $ const $ return $ D.text "line"
+  flinebreak = Defs.PprDefs $ const $ return $ D.text "linebreak"
 
-  fspace = PprDefs $ const $ return $ D.text "space"
-  fspaces = PprDefs $ const $ return $ D.text "spaces"
+  fspace = Defs.PprDefs $ const $ return $ D.text "space"
+  fspaces = Defs.PprDefs $ const $ return $ D.text "spaces"
 
-  fline' = PprDefs $ const $ return $ D.text "line'"
-  fnespaces' = PprDefs $ const $ return $ D.text "nespaces'"
+  fline' = Defs.PprDefs $ const $ return $ D.text "line'"
+  fnespaces' = Defs.PprDefs $ const $ return $ D.text "nespaces'"
 
-  fgroup a = PprDefs $ \k -> do
-    da <- pprDefs a 10
+  fgroup a = Defs.PprDefs $ \k -> do
+    da <- Defs.pprDefs a 10
     return $ parensIf (k > 9) $ D.text "group" <+> da
 
-  falign a = PprDefs $ \k -> do
-    da <- pprDefs a 10
+  falign a = Defs.PprDefs $ \k -> do
+    da <- Defs.pprDefs a 10
     return $ parensIf (k > 9) $ D.text "align" <+> da
 
-  fnest n a = PprDefs $ \k -> do
-    da <- pprDefs a 10
+  fnest n a = Defs.PprDefs $ \k -> do
+    da <- Defs.pprDefs a 10
     return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
 
 instance D.Pretty (FliPpr t) where
-  pprPrec _ (FliPpr m) = evalState (runVarMFliPpr $ pprDefs m 0) (0, 0)
+  pprPrec _ (FliPpr m) = evalState (runVarMFliPpr $ Defs.pprDefs m 0) (0, 0)
 
 -- type RName = Int
 
@@ -591,9 +645,9 @@ instance D.Pretty (FliPpr t) where
 --   = Printer (VCount -> Prec -> PrinterM s Doc)
 --   | Pointer (Ref s ())
 
--- pprDefs ::inter s a -> VCount -> Prec -> PrinterM s Doc
--- pprDefs (Pter f) vn k = f vn k
--- pprDefs (Pter p) _ _ = return $ pprRef p
+-- Defs.pprDefs ::inter s a -> VCount -> Prec -> PrinterM s Doc
+-- Defs.pprDefs (Pter f) vn k = f vn k
+-- Defs.pprDefs (Pter p) _ _ = return $ pprRef p
 
 -- pprRef :: Ref s a -> Doc
 -- pprRef ref = D.text ("ppr" ++ show (refID ref))
@@ -622,20 +676,20 @@ instance D.Pretty (FliPpr t) where
 -- -- | An instance for pretty-printing FliPpr expressions themselves (not for pretty-printing interpretation).
 -- instance FliPprE (Printer s) (Printer s) where
 --   farg f = Printer $ \vn k -> do
---     df <- pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
+--     df <- Defs.pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
 --     return $ D.group $ D.nest 2 $ parensIf (k > 0) $ D.text "\\" <> pprVName vn <+> D.text "->" </> df
 
 --   fapp f a = Printer $ \vn k -> do
---     df <- pprDefs f 9
---     da <- pprDefs a 10
+--     df <- Defs.pprDefs f 9
+--     da <- Defs.pprDefs a 10
 --     return $ parensIf (k > 9) $ df <+> da
 
 --   fcase a bs = Printer $ \vn k -> do
---     da <- pprDefs a 10
+--     da <- Defs.pprDefs a 10
 --     ds <-
 --       mapM
 --         ( \(Branch (PartialBij s _ _) f) -> do
---             df <- pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
+--             df <- Defs.pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
 --             return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprVName vn <+> D.text "->" <+> df
 --         )
 --         bs
@@ -646,10 +700,10 @@ instance D.Pretty (FliPpr t) where
 --             <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
 
 --   funpair a f = Printer $ \vn k -> do
---     da <- pprDefs a 10
+--     da <- Defs.pprDefs a 10
 --     let dx = pprVName vn
 --     let dy = pprVName (vn + 1)
---     db <- pprDefs (foPrinter dx) (toPrinter dy)) (vn + 2) 0
+--     db <- Defs.pprDefs (foPrinter dx) (toPrinter dy)) (vn + 2) 0
 --     return $
 --       parensIf (k > 0) $
 --         D.align $
@@ -658,8 +712,8 @@ instance D.Pretty (FliPpr t) where
 --               </> D.text "in" <+> D.align db
 
 --   fununit a e = Printer $ \vn k -> do
---     da <- pprDefs a 10
---     de <- pprDefs e 0
+--     da <- Defs.pprDefs a 10
+--     de <- Defs.pprDefs e 0
 --     return $
 --       parensIf (k > 0) $
 --         D.align $
@@ -671,13 +725,13 @@ instance D.Pretty (FliPpr t) where
 --     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
 
 --   fcat a b = Printer $ \vn k -> do
---     da <- pprDefs a 5
---     db <- pprDefs b 5
+--     da <- Defs.pprDefs a 5
+--     db <- Defs.pprDefs b 5
 --     return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
 
 --   fbchoice a b = Printer $ \vn k -> do
---     da <- pprDefs a 4
---     db <- pprDefs b 4
+--     da <- Defs.pprDefs a 4
+--     db <- Defs.pprDefs b 4
 --     return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
 
 --   fempty = toPrinter $ D.text "empty"
@@ -691,21 +745,21 @@ instance D.Pretty (FliPpr t) where
 --   fnespaces' = toPrinter $ D.text "nespaces'"
 
 --   fgroup a = Printer $ \vn k -> do
---     da <- pprDefs a 10
+--     da <- Defs.pprDefs a 10
 --     return $ parensIf (k > 9) $ D.text "group" <+> da
 
 --   falign a = Printer $ \vn k -> do
---     da <- pprDefs a 10
+--     da <- Defs.pprDefs a 10
 --     return $ parensIf (k > 9) $ D.text "align" <+> da
 
 --   fnest n a = Printer $ \vn k -> do
---     da <- pprDefs a 10
+--     da <- Defs.pprDefs a 10
 --     return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
 
 -- -- | An instance for pretty-printing recursive defined FliPpr expressions.
 -- instance FliPprD (PrinterM s) (Printer s) (Printer s) where
 --   fshare e = do
---     let md = pprDefs e
+--     let md = Defs.pprDefs e
 --     (tbRef : _) <- ask
 --     r <- newRef $ ()
 --     modifyRef tbRef (M.insert r md)
@@ -713,7 +767,7 @@ instance D.Pretty (FliPpr t) where
 
 --   flocal m = Printer $ \vn k -> do
 --     tbRef <- newRef $ M.empty
---     d <- RM.local (tbRef :) $ m >>= \e -> pprDefs e 0
+--     d <- RM.local (tbRef :) $ m >>= \e -> Defs.pprDefs e 0
 --     list <- M.toList <$> readRef tbRef
 --     defs <-
 --       D.group . D.align . (D.text "rec" <+>)
@@ -735,7 +789,7 @@ instance D.Pretty (FliPpr t) where
 --     where
 --       pprFliPpr :: PrinterM s (Printer s (t :: FType)) -> Prec -> RefM s Doc
 --       pprFliPpr m k =
---         runReaderT (runPrinterM $ pprDefs (fal m) 0 k) []
+--         runReaderT (runPrinterM $ Defs.pprDefs (fal m) 0 k) []
 
 -- instance Show (FliPpr t) where
 --   show = show . ppr

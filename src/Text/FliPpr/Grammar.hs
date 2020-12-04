@@ -1,16 +1,16 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FunctionalDependencies     #-}
+{-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE PolyKinds                  #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
 
 module Text.FliPpr.Grammar
   ( -- * Type definitions
@@ -47,22 +47,23 @@ module Text.FliPpr.Grammar
   )
 where
 
-import Control.Applicative (Alternative (..), Const (..))
-import Control.Category (Category (..), id, (.))
-import Control.Monad (forM)
-import Control.Monad.State (MonadState, State, StateT (..), evalState, evalStateT, get, put)
-import Data.Foldable (asum)
+import           Control.Applicative       (Alternative (..), Const (..))
+import           Control.Category          (Category (..), id, (.))
+import           Control.Monad             (forM)
+import           Control.Monad.State       (MonadState, State, StateT (..),
+                                            evalState, evalStateT, get, put)
+import           Data.Foldable             (asum)
 --
 
-import Data.Maybe (mapMaybe)
-import Data.Monoid (Endo (..))
-import Data.RangeSet.List (RSet)
-import qualified Data.RangeSet.List as RS
-import Data.Typeable ((:~:) (..))
-import qualified Text.FliPpr.Doc as D
-import Text.FliPpr.Internal.Defs as Defs
-import qualified Text.FliPpr.Internal.Env as E
-import Prelude hiding (id, (.))
+import           Data.Maybe                (mapMaybe)
+import           Data.Monoid               (Endo (..))
+import           Data.RangeSet.List        (RSet)
+import qualified Data.RangeSet.List        as RS
+import           Data.Typeable             ((:~:) (..))
+import           Prelude                   hiding (id, (.))
+import qualified Text.FliPpr.Doc           as D
+import           Text.FliPpr.Internal.Defs as Defs
+import qualified Text.FliPpr.Internal.Env  as E
 
 -- import Debug.Trace (trace)
 -- import Text.Printf (printf)
@@ -125,12 +126,12 @@ instance Enum ExChar where
   toEnum 1 = Spaces
   toEnum n = NormalChar (toEnum (n -2))
 
-  fromEnum Space = 0
-  fromEnum Spaces = 1
+  fromEnum Space          = 0
+  fromEnum Spaces         = 1
   fromEnum (NormalChar c) = fromEnum c + 2
 
-  succ Space = Spaces
-  succ Spaces = NormalChar minBound
+  succ Space          = Spaces
+  succ Spaces         = NormalChar minBound
   succ (NormalChar c) = NormalChar (succ c)
 
   pred Spaces = Space
@@ -141,13 +142,13 @@ instance Enum ExChar where
 
 instance D.Pretty ExChar where
   ppr (NormalChar c) = D.ppr c
-  ppr Space = D.text "_"
-  ppr Spaces = D.text "<spaces>"
+  ppr Space          = D.text "_"
+  ppr Spaces         = D.text "<spaces>"
 
   pprList = uncurry pprList' . chars []
     where
       chars s (NormalChar c : cs) = chars (c : s) cs
-      chars s r = (reverse s, r)
+      chars s r                   = (reverse s, r)
 
       pprList' [] [] = D.text ""
       pprList' [] (c : cs) = case cs of [] -> D.ppr c; _ -> D.ppr c D.<+> D.pprList cs
@@ -248,11 +249,11 @@ instance Show c => D.Pretty (Prod c env a) where
   ppr (PCons s r) = go (D.ppr s) r
     where
       go :: forall b. D.Doc -> Prod c env b -> D.Doc
-      go d (PNil _) = d
+      go d (PNil _)      = d
       go d (PCons ss rr) = d D.<+> go (D.ppr ss) rr
 
 instance Functor (Prod c env) where
-  fmap f (PNil a) = PNil (f a)
+  fmap f (PNil a)    = PNil (f a)
   fmap f (PCons s r) = PCons s (fmap (f .) r)
 
 -- data Var env a where
@@ -271,8 +272,8 @@ data Symb c env a where
   SymbI :: !(RSet c) -> Symb c env c
 
 instance Show c => D.Pretty (Symb c env a) where
-  ppr (NT x) = D.text ("N" ++ E.showVar x)
-  ppr (Symb c) = D.text (show c)
+  ppr (NT x)     = D.text ("N" ++ E.showVar x)
+  ppr (Symb c)   = D.text (show c)
   ppr (SymbI cs) = D.text (show cs)
 
 -- newtype VarT env env' = VarT {runVarT :: forall a. Var env a -> Var env' a}
@@ -291,12 +292,12 @@ instance Show c => D.Pretty (Symb c env a) where
 --   shift = runVarT
 
 instance E.Shiftable E.U (Symb c) where
-  shift diff (NT x) = NT (E.shift diff x)
-  shift _ (Symb c) = Symb c
+  shift diff (NT x)  = NT (E.shift diff x)
+  shift _ (Symb c)   = Symb c
   shift _ (SymbI cs) = SymbI cs
 
 instance E.Shiftable E.U (Prod c) where
-  shift _ (PNil a) = PNil a
+  shift _ (PNil a)       = PNil a
   shift diff (PCons s r) = PCons (E.shift diff s) $ E.shift diff r
 
 instance E.Shiftable E.U (RHS c) where
@@ -324,7 +325,7 @@ instance Applicative (Prod c env) where
       -- PNil a <*> f = fmap a f
       -- PCons a as <*> r = PCons a (flip <$> as <*> r)
       go :: (a -> b -> r) -> Prod c env a -> Prod c env b -> Prod c env r
-      go f (PNil a) r = fmap (f a) r
+      go f (PNil a) r     = fmap (f a) r
       go f (PCons a as) r = PCons a (go (flip . (f .)) as r)
 
 instance Applicative (ToFlatGrammar c) where
@@ -368,7 +369,7 @@ instance Grammar c (ToFlatGrammar c) where
 type Value = Defs.DTypeVal
 
 valueMap :: (forall b. f b -> g b) -> Value f a -> Value g a
-valueMap f (VT a) = VT (f a)
+valueMap f (VT a)      = VT (f a)
 valueMap f (VProd x y) = VProd (valueMap f x) (valueMap f y)
 
 data Ress c env a = forall env'. Ress (Bindings c env' env') (Value (RHS c env') a) (Diff env env')
@@ -424,13 +425,13 @@ removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
     checkRHS env (RHS rs) = any (checkProd env) rs
 
     checkProd :: Env (Const Bool) env' -> Prod c env' a -> Bool
-    checkProd _ (PNil _) = True
+    checkProd _ (PNil _)      = True
     checkProd env (PCons s r) = checkSymb env s && checkProd env r
 
     checkSymb :: Env (Const Bool) env' -> Symb c env' a -> Bool
-    checkSymb _ (Symb _) = True
+    checkSymb _ (Symb _)   = True
     checkSymb _ (SymbI cs) = not (RS.null cs)
-    checkSymb env (NT x) = getConst $ E.lookupEnv x env
+    checkSymb env (NT x)   = getConst $ E.lookupEnv x env
 
     checkDefs :: Env (RHS c env') env -> Env (Const Bool) env' -> Env (Const Bool) env
     checkDefs es env = E.mapEnv (Const . checkRHS env) es
@@ -447,7 +448,7 @@ removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
     procRHS (RHS rs) = RHS $ mapMaybe procProd rs
 
     procProd :: Prod c env0 a -> Maybe (Prod c env0 a)
-    procProd (PNil a) = return (PNil a)
+    procProd (PNil a)    = return (PNil a)
     procProd (PCons s r) = PCons <$> procSymb s <*> procProd r
 
     procSymb :: Symb c env0 a -> Maybe (Symb c env0 a)
@@ -468,7 +469,7 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs0) =
     updateMemoS (MemoS m) x v = MemoS $ \x' ->
       case E.eqVar x x' of
         Just Refl -> Just v
-        Nothing -> m x'
+        Nothing   -> m x'
 
     procRHS :: RHS c env a -> StateT (MemoS g env) (DefM g) (g a)
     -- procRHS (RHS rs) = do
@@ -505,9 +506,9 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs0) =
     inlinable x (RHS [p]) = smallEnough p && not (occur p)
       where
         smallEnough :: Prod c env b -> Bool
-        smallEnough (PNil _) = True
+        smallEnough (PNil _)           = True
         smallEnough (PCons _ (PNil _)) = True
-        smallEnough _ = False
+        smallEnough _                  = False
 
         occur :: Prod c env b -> Bool
         occur (PNil _) = False
@@ -590,16 +591,16 @@ simplifyGrammar :: (Show c, Ord c, Enum c, GrammarD c g) => Simplify c g a -> g 
 simplifyGrammar g = unOpt $ unFlatten $ removeNonProductive $ flatten $ unOpt g
 
 unOpt :: Grammar c g => Opt c g a -> g a
-unOpt (OptSymb c) = symb c
+unOpt (OptSymb c)   = symb c
 unOpt (OptSymbI cs) = symbI cs
-unOpt OptEmpty = empty
-unOpt (OptPure a) = pure a
+unOpt OptEmpty      = empty
+unOpt (OptPure a)   = pure a
 unOpt (OptSimple p) = p
-unOpt (OptOther p) = p
+unOpt (OptOther p)  = p
 
 isSimpleEnough :: Opt c g a -> Bool
 isSimpleEnough (OptOther _) = False
-isSimpleEnough _ = True
+isSimpleEnough _            = True
 
 instance Grammar c g => Functor (Opt c g) where
   fmap f (OptPure a) = OptPure (f a)
@@ -612,23 +613,23 @@ instance Grammar c g => Applicative (Opt c g) where
   pure a = OptPure a
 
   --  _ <*> _ | trace "<*>" False = undefined
-  OptEmpty <*> _ = OptEmpty
-  _ <*> OptEmpty = OptEmpty
+  OptEmpty <*> _  = OptEmpty
+  _ <*> OptEmpty  = OptEmpty
   OptPure f <*> g = fmap f g
   f <*> OptPure g = fmap ($ g) f
-  f <*> g = OptOther $ unOpt f <*> unOpt g
+  f <*> g         = OptOther $ unOpt f <*> unOpt g
 
 instance (Defs g, Ord c, Enum c, Grammar c g) => Alternative (Opt c g) where
   empty = OptEmpty
 
   --  _ <|> _ | trace "<|>" False = undefined
-  OptEmpty <|> e = e
-  OptSymb a <|> OptSymb b = OptSymbI (RS.fromList [a, b])
-  OptSymb a <|> OptSymbI bs = OptSymbI (RS.insert a bs)
-  OptSymbI as <|> OptSymb b = OptSymbI (RS.insert b as)
+  OptEmpty <|> e              = e
+  OptSymb a <|> OptSymb b     = OptSymbI (RS.fromList [a, b])
+  OptSymb a <|> OptSymbI bs   = OptSymbI (RS.insert a bs)
+  OptSymbI as <|> OptSymb b   = OptSymbI (RS.insert b as)
   OptSymbI as <|> OptSymbI bs = OptSymbI (RS.union as bs)
-  e <|> OptEmpty = e
-  g1 <|> g2 = OptOther (unOpt g1 <|> unOpt g2)
+  e <|> OptEmpty              = e
+  g1 <|> g2                   = OptOther (unOpt g1 <|> unOpt g2)
 
   many = Defs.manyD
   some = Defs.someD
@@ -639,12 +640,12 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Grammar c (Opt c g) where
 
 unOptRules :: (Defs g, Grammar c g) => Fs (Opt c g) a -> Fs g a
 -- unOptRules _ | trace "unOptRules" False = undefined
-unOptRules (OptRulesOther r) = r
-unOptRules (OptLifted p) = liftDS (unOpt p)
+unOptRules (OptRulesOther r)    = r
+unOptRules (OptLifted p)        = liftDS (unOpt p)
 unOptRules (OptRulesPair p1 p2) = pairDS (unOptRules p1) (unOptRules p2)
 
 instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
-  data Fs (Opt c g) a where
+  data Fs (Opt c g) _a where
     OptRulesOther :: Fs g a -> Fs (Opt c g) a
     OptLifted :: Opt c g a -> Fs (Opt c g) (Lift a)
     OptRulesPair :: Fs (Opt c g) a -> Fs (Opt c g) b -> Fs (Opt c g) (a ** b)
@@ -653,7 +654,7 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
   liftDS p = OptLifted p
 
   --  unlift _ | trace "unlift" False = undefined
-  unliftDS (OptLifted p) = p
+  unliftDS (OptLifted p)     = p
   unliftDS (OptRulesOther r) = OptOther $ unliftDS r
 
   --  pairRules _ _ | trace "pairRules" False = undefined
@@ -691,8 +692,8 @@ instance (Defs g, Alternative g) => Alternative (ThawSpace g) where
   some = Defs.someD
 
 instance (Defs g, Grammar Char g) => Grammar ExChar (ThawSpace g) where
-  symb Space = ThawSpace $ \sp _ -> sp
-  symb Spaces = ThawSpace $ \_ sps -> sps
+  symb Space          = ThawSpace $ \sp _ -> sp
+  symb Spaces         = ThawSpace $ \_ sps -> sps
   symb (NormalChar c) = ThawSpace $ \_ _ -> NormalChar <$> symb c
 
   symbI cs = ThawSpace $ \sp sps ->
@@ -722,12 +723,12 @@ instance Defs g => Defs (ThawSpace g) where
   --      in runThawSpaces (k x' y') sp sps
 
   letrDS k = ThawSpaces $ \sp sps ->
-    letr $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
+    letrR $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
 
 thawSpace :: (Defs exp, Alternative exp) => exp () -> ThawSpace exp a -> exp a
 thawSpace sp0 g = unlift $
-  letr $ \sp -> pairRules (lift $ Space <$ sp0) $
-    letr $ \sps -> pairRules (lift $ Spaces <$ many sp) $ lift $ runThawSpace g sp sps
+  letrR $ \sp -> pairRules (lift $ Space <$ sp0) $
+    letrR $ \sps -> pairRules (lift $ Spaces <$ many sp) $ lift $ runThawSpace g sp sps
 
 -- type Q = Int
 
@@ -760,7 +761,7 @@ updateMemo (Memo f) q1 q2 x k =
   Memo $ \q1' q2' x' ->
     case E.eqVar x x' of
       Just Refl | q1 == q1', q2 == q2' -> Just k
-      _ -> f q1' q2' x'
+      _                                -> f q1' q2' x'
 
 data Qsp = Qn | Qs | Qss deriving (Eq, Ord)
 
@@ -774,18 +775,18 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
   where
     allStates = [Qn, Qs, Qss]
 
-    finalProd Qn = pure ()
-    finalProd Qs = () <$ symb Space
+    finalProd Qn  = pure ()
+    finalProd Qs  = () <$ symb Space
     finalProd Qss = () <$ symb Spaces
 
-    transTo Qn Space = (pure Space, Qs)
-    transTo Qn Spaces = (pure Spaces, Qss)
-    transTo Qn (NormalChar c) = (char c, Qn)
-    transTo Qs Space = (symb Space, Qs)
-    transTo Qs Spaces = (symb Space, Qss)
-    transTo Qs (NormalChar c) = (symb Space *> char c, Qn)
-    transTo Qss Space = (symb Space, Qss)
-    transTo Qss Spaces = (pure Spaces, Qss)
+    transTo Qn Space           = (pure Space, Qs)
+    transTo Qn Spaces          = (pure Spaces, Qss)
+    transTo Qn (NormalChar c)  = (char c, Qn)
+    transTo Qs Space           = (symb Space, Qs)
+    transTo Qs Spaces          = (symb Space, Qss)
+    transTo Qs (NormalChar c)  = (symb Space *> char c, Qn)
+    transTo Qss Space          = (symb Space, Qss)
+    transTo Qss Spaces         = (pure Spaces, Qss)
     transTo Qss (NormalChar c) = (symb Spaces *> char c, Qn)
 
     toM :: (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Fs g r) -> Fs g r)) -> StateT (Memo env g) (DefM g) a
@@ -810,8 +811,8 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
       r3 <- do
         let cs' = RS.delete Space $ RS.delete Spaces cs
         let o = case q1 of
-              Qn -> symbI cs'
-              Qs -> symb Space *> symbI cs'
+              Qn  -> symbI cs'
+              Qs  -> symb Space *> symbI cs'
               Qss -> symb Spaces *> symbI cs'
         rr <- procProd Qn q2 r
         return $ (\a f -> f a) <$> o <*> nt rr

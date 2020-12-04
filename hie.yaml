@@ -3,14 +3,14 @@ cradle:
     - path: "./src"
       component: "flippre:lib"
 
-    - path: "././bench/G.hs"
-      component: "flippre:bench:grammar-trans"
+    - path: "./examples/G.hs"
+      component: "flippre:exe:grammar-trans"
 
-    - path: "././bench/BoolList.hs"
-      component: "flippre:bench:bool-list"
+    - path: "./examples/BoolList.hs"
+      component: "flippre:exe:bool-list"
 
-    - path: "././bench/Arith.hs"
-      component: "flippre:bench:arith"
+    - path: "./examples/Arith.hs"
+      component: "flippre:exe:arith"
 
-    - path: "././bench/Let.hs"
-      component: "flippre:bench:arithlet"
+    - path: "./examples/Let.hs"
+      component: "flippre:exe:arithlet"

@@ -1,12 +1,13 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE FlexibleContexts       #-}
+{-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE GADTs                  #-}
+{-# LANGUAGE KindSignatures         #-}
+{-# LANGUAGE PolyKinds              #-}
+{-# LANGUAGE TemplateHaskell        #-}
+{-# LANGUAGE TypeOperators          #-}
+{-# LANGUAGE UndecidableInstances   #-}
 
 module Text.FliPpr
   ( -- * Types
@@ -48,6 +49,8 @@ module Text.FliPpr
     share,
     local,
     mfixF,
+    letr, letrs,
+    def,
 
     -- ** Pretty-Printing Combinators and Datatypes
     spaces,
@@ -116,16 +119,16 @@ module Text.FliPpr
   )
 where
 
-import qualified Data.Fin as F
-import qualified Data.Map as M
-import qualified Data.Type.Nat as F
-import Text.FliPpr.Doc
-import Text.FliPpr.Err
-import qualified Text.FliPpr.Grammar as G
-import Text.FliPpr.Internal.ParserGeneration
-import Text.FliPpr.Internal.PrettyPrinting
-import Text.FliPpr.Internal.Type
-import Text.FliPpr.TH
+import qualified Data.Fin                              as F
+import qualified Data.Map                              as M
+import qualified Data.Type.Nat                         as F
+import           Text.FliPpr.Doc
+import           Text.FliPpr.Err
+import qualified Text.FliPpr.Grammar                   as G
+import           Text.FliPpr.Internal.ParserGeneration
+import           Text.FliPpr.Internal.PrettyPrinting
+import           Text.FliPpr.Internal.Type
+import           Text.FliPpr.TH
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
 --   it behaves as '<>'.
@@ -147,7 +150,7 @@ defines _ f = do
   rs <- mapM (define . f) ks
   let table = M.fromList $ zip ks rs
   return $ \k -> case M.lookup k table of
-    Just m -> m
+    Just m  -> m
     Nothing -> error "defines_: Cannot happen."
 
 -- -- |
@@ -193,6 +196,7 @@ is c f =
     (\_ -> Just c)
     `Branch` (\x -> ununit x f)
 
+
 -- |
 -- The function 'define' provides an effective way to avoid writing 'app' and 'arg'.
 -- We can write
@@ -213,10 +217,8 @@ is c f =
 -- instead of:
 --
 -- >  rec f <- share $ arg $ \i -> ... f `app` a ...
-define :: (FliPprD arg exp, Repr arg exp t r) => r -> DefM (E exp) r
-define f = do
-  f' <- share $ fromFunction f
-  return $ toFunction f'
+define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
+define = share
 
 type Prec = Int
 
