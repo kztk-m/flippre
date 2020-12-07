@@ -5,12 +5,10 @@
 {-# LANGUAGE InstanceSigs              #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE PolyKinds                 #-}
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE RebindableSyntax          #-}
 {-# LANGUAGE RecursiveDo               #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
-{-# LANGUAGE TypeApplications          #-}
 {-# LANGUAGE TypeFamilyDependencies    #-}
 {-# LANGUAGE TypeOperators             #-}
 
@@ -28,16 +26,17 @@ import           Data.Functor.Compose            (Compose (..))
 import           Data.Functor.Identity           (Identity (..))
 import qualified Data.RangeSet.List              as RS
 import           Data.Typeable                   (Proxy (..))
--- Due to RebindableSyntax
 
 import           Debug.Trace
-import           Prelude
 import qualified Text.FliPpr.Doc                 as D
 import           Text.FliPpr.Err                 (Err (..), err)
 import qualified Text.FliPpr.Grammar             as G
 import qualified Text.FliPpr.Internal.Defs       as Defs
 import qualified Text.FliPpr.Internal.PartialEnv as PE
 import           Text.FliPpr.Internal.Type
+
+-- Due to RebindableSyntax
+import           Prelude
 
 ifThenElse :: Bool -> p -> p -> p
 ifThenElse True x _  = x
@@ -264,7 +263,7 @@ instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
   letrDS h = RulesG $ \tenv ->
     Defs.letrDS $ \a ->
       let harg = PExp $ \tenv' -> fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose <$> a
-       in unRulesG (h harg) tenv
+      in unRulesG (h harg) tenv
 
 -- newtype PM s a = PM {runPM :: forall env. ReaderT (Rep env) (RefM s) a}
 
@@ -349,9 +348,9 @@ parsingModeMono e =
     k (Ok a) = case a of
       RF (RD env) ->
         let (v, _) = PE.popEnv env
-         in case v of
-              Just (EqI u) -> return u
-              Nothing      -> err $ D.text "Input is unused in evaluation."
+        in case v of
+             Just (EqI u) -> return u
+             Nothing      -> err $ D.text "Input is unused in evaluation."
 
 -- parsingModeMono :: In a => (forall s. PM s (PExp s (a ~> D))) -> G.Grammar G.ExChar (Err a)
 -- parsingModeMono m = G.finalize $ do
@@ -389,34 +388,31 @@ data CommentSpec = -- | Spec for block comments.
 -- | Make a grammar that represents a single space
 fromCommentSpec :: G.GrammarD Char g => CommentSpec -> g ()
 fromCommentSpec (CommentSpec lc bc) = G.local $ do
-  lineComment <- G.rule $ case lc of
+  lineComment <- G.share $ case lc of
     Nothing -> A.empty
     Just s  -> () <$ G.text s <* many (G.symbI nb) <* G.symbI br
 
-  rec blockComment <- case bc of
-        Nothing -> G.rule A.empty
+  rec blockComment <- fmap Identity $ case bc of
+        Nothing -> G.share A.empty
         Just (BlockCommentSpec op cl isNestable) ->
           if isNestable
             then do
               nonOpCl <- non [op, cl]
-              G.rule $ () <$ G.text op <* G.nt nonOpCl <* many (G.nt blockComment <* G.nt nonOpCl) <* G.text cl
+              G.share $ () <$ G.text op <* nonOpCl <* many (runIdentity blockComment <* nonOpCl) <* G.text cl
             else do
               nonCl <- non [cl]
-              G.rule $ () <$ G.text op <* G.nt nonCl <* G.text cl
+              G.share $ () <$ G.text op <* nonCl <* G.text cl
 
-  singleSpace <- G.rule $ () <$ G.symbI sp
-  return (G.nt lineComment <|> G.nt blockComment <|> G.nt singleSpace)
+  singleSpace <- G.share $ () <$ G.symbI sp
+  return (lineComment <|> runIdentity blockComment <|> singleSpace)
   where
     mfix = G.mfixDefM
 
     many :: G.GrammarD c g => g a -> g [a]
-    many g = G.local $ do
-      g' <- Defs.share g
-      rec a <- G.rule $ pure [] <|> (:) <$> g' <*> G.nt a
-      return (G.unlift a)
+    many = G.manyD
 
-    non :: G.GrammarD Char g => [String] -> Defs.DefM g (Defs.Rules g (Defs.Lift ()))
-    non strings = G.rule $ () <$ many (go strings)
+    non :: G.GrammarD Char g => [String] -> Defs.DefM g (g ()) -- (Defs.Rules g (Defs.Lift ()))
+    non strings = G.share $ () <$ many (go strings)
       where
         go :: G.Grammar Char g => [String] -> g Char
         go ss =
@@ -487,7 +483,7 @@ parsingModeWith spec (FliPpr e) =
       g0 = parsingModeMono e
       g1 :: forall g'. (G.GrammarD Char g', In a) => g' (Err a)
       g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
-   in trace (show $ G.pprAsFlat g0 D.</> D.text "---------" D.</> G.pprAsFlat g1) g1
+  in trace (show $ G.pprAsFlat g0 D.</> D.text "---------" D.</> G.pprAsFlat g1) g1
 
 parsingModeSP :: forall g a. (G.GrammarD Char g, In a) => (forall g'. G.GrammarD Char g' => g' ()) -> FliPpr (a ~> D) -> g (Err a)
 parsingModeSP gsp (FliPpr e) =

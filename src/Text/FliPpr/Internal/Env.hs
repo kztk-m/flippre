@@ -27,7 +27,7 @@ import           Data.Monoid           (Endo (..))
 import           Data.Typeable         (Proxy (..), (:~:) (..))
 import           Prelude               hiding (id, (.))
 import           Text.FliPpr.Doc
-import           Unsafe.Coerce
+import           Unsafe.Coerce         (unsafeCoerce)
 
 -- | A common implementation works in general.
 newtype VarTT i env env' = VarTT {runVarTT :: forall a. Var i env a -> Var i env' a}
@@ -84,47 +84,9 @@ instance DeBruijnIndex (Var U) where
   vz = VarU 0
   vs (VarU i) = VarU (i + 1)
 
--- instance DeBruijnIndex (Var S) where
---   vz = VZ
---   vs = VS
-
 instance Category (VarTT d) where
   id = VarTT id
   VarTT f . VarTT g = VarTT (f . g)
-
--- class EnvImpl i where
---   data Var i :: [Type] -> Type -> Type
---   data Env i :: ([Type] -> Type -> Type) -> [Type] -> [Type] -> Type
---   data Rep i :: [Type] -> Type
-
---   showVar :: Var i env a -> String
---   eqVar :: Var i env a -> Var i env b -> Maybe (a :~: b)
-
---   lookupEnv :: Var i def a -> Env i t use def -> t use a
-
---   modifyEnv :: Var i def a -> (t use a -> t use a) -> Env i t use def -> Env i t use def
---   modifyEnv x f env =
---     let res = lookupEnv x env
---     in updateEnv x (f res) env
-
---   updateEnv :: Var i def a -> t use a -> Env i t use def -> Env i t use def
---   updateEnv x v = modifyEnv x (const v)
-
---   traverseEnvWithVar ::
---     Applicative f =>
---     (forall a. Var i def a -> t use a -> f (t' use' a)) -> Env i t use def -> f (Env i t' use' def)
-
---   zipWithA :: Applicative f =>
---               (forall a. t use a -> t' use' a -> f (t'' use'' a)) ->
---               Env i t use def -> Env i t' use' def -> f (Env i t'' use'' def)
-
---   emptyEnv  :: Env i t use '[]
---   extendEnv :: Env i t use def -> t use a -> (Env i t use (a : def), Var i (a : def) a, VarT i def (a : def))
-
---   repOf :: Env i t use env -> Rep i env
-
---   -- env' must be bigger than or equal to env
---   embedVar :: Rep i env -> Rep i env' -> Var i env a -> Var i env' a
 
 data U k -- Unsafe
 
@@ -162,14 +124,9 @@ instance EnvImpl U where
 
   traverseWithVar f (EnvU k m) = EnvU k <$> IM.traverseWithKey (\i x -> Untype <$> f (VarU (k - i)) (unsafeCast x)) m
 
-  --  zipWithA f env1 env2 = traverseWithVar (\x a -> f a (lookupEnv x env2)) env1
-
   zipWithA f (EnvU k m1) (EnvU _ m2) =
-    -- fmap (EnvU k) $
-    --   fmap IM.fromAscList $ traverse (\((i, x), (_, y)) -> (\r -> (i, Untype r)) <$> f (unsafeCast x) (unsafeCast y)) $ zip (IM.toList m1) (IM.toList m2)
     fmap (EnvU k) $ sequenceA $ IM.intersectionWith (\x y -> Untype <$> f (unsafeCast x) (unsafeCast y)) m1 m2
 
-  -- EnvU k <$> sequenceA (IM.unionWith (\x y -> fmap Untype $ f <$> (unsafeCast <$> x) <*> (unsafeCast <$> y)) (fmap pure m1) (fmap pure m2))
 
   emptyEnv = EnvU (-1) IM.empty
   {-# INLINE emptyEnv #-}
@@ -299,50 +256,6 @@ instance EnvImpl S where
       go n r1 (EExtend r2 _) = coerce (VarTT VS) . go (n -1) r1 r2
       go _ _ _               = error "diffRep: violated invariant."
 
---   -- embedVar (RExtend REnd _) (RExtend REnd _) VZ     = unsafeCoerce VZ
---   -- embedVar (RExtend REnd v) (RExtend e _)    VZ     = VS (embedVar (RExtend REnd v) e VZ)
---   -- embedVar (RExtend e _)    (RExtend e' _)   (VS k) = VS (embedVar e e' k)
---   embedVar r1 r2 n =
---     case requal r1 r2 of
---       Just Refl -> n
---       _         ->
---         case r2 of
---           REnd -> error "Error: embedVar: violated assumption."
---           RExtend r2' _ -> VS (embedVar r1 r2' n)
--- --   embedVar _                _                _      = error "Error: embedVar: violated assumption."
---     where
---       requal :: Rep S env -> Rep S env' -> Maybe (env :~: env')
---       requal REnd REnd = Just Refl
---       requal (RExtend e _) (RExtend e' _) =
---         case requal e e' of
---           Just Refl -> Just (unsafeCoerce Refl)
---           Nothing   -> Nothing
---       requal _ _ = Nothing
-
--- instance Eq (Var U env a) where
---   VarU i == VarU j = i == j
-
--- instance Eq (Var S env a) where
---   VZ == VZ = True
---   VZ == (VS _) = False
---   (VS _) == VZ = False
---   (VS n) == (VS m) = n == m
-
--- extendEnv' :: (EnvImpl rep, Shiftable rep t) =>
---               Env' rep t env -> t env a ->
---               (Env' rep t (a : env), Var rep (a : env) a, VarT rep env (a : env))
--- extendEnv' env v =
---   let (env', r', vt') = extendEnv env v
---   in (mapEnv (shift vt') env', r', vt')
-
--- mapEnv :: (EnvImpl rep) =>
---           (forall a. t use a -> t' use' a) -> Env rep t use def -> Env rep t' use' def
--- mapEnv f = runIdentity . traverseEnvWithVar (const (Identity . f))
-
--- zipWithEnv :: EnvImpl rep =>
---               (forall a. t use a -> t' use' a -> t'' use'' a) ->
---               Env rep t use def -> Env rep t' use' def -> Env rep t'' use'' def
--- zipWithEnv f e1 e2 = runIdentity $ zipWithA (\x y -> Identity (f x y)) e1 e2
 
 foldEnvWithVar ::
   (EnvImpl rep, Monoid m) =>
@@ -371,9 +284,7 @@ pprEnv pprBody = fromMaybe empty . foldrEnvWithVar h Nothing
     h :: forall env a. Var rep env a -> f a -> Maybe d -> Maybe d
     h v body r =
       let rd = align (pprBody (showVar v) body)
-       in Just $ case r of
-            Nothing -> rd
-            Just d  -> d $$ rd
+      in Just $ case r of
+           Nothing -> rd
+           Just d  -> d $$ rd
 
---   -- foldrEnvWithVar (\v body r -> r $$ prefix <> text (showVar v) <+> text "=" <+> align (pprBody prefix body))
---   --                 empty

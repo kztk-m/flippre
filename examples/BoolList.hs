@@ -1,16 +1,15 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RebindableSyntax #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE RebindableSyntax          #-}
+{-# LANGUAGE RecursiveDo               #-}
+{-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE TypeOperators             #-}
 
-import Text.FliPpr
-import Text.FliPpr.Driver.Earley as Earley
-import qualified Text.FliPpr.Grammar as G
-import Prelude
+import           Prelude
+import           Text.FliPpr
+import           Text.FliPpr.Driver.Earley as Earley
+import qualified Text.FliPpr.Grammar       as G
 
 mfix = mfixF
 

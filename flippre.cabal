@@ -55,7 +55,7 @@ common common-examples
     buildable: False
   default-language: Haskell2010
   build-depends: base, flippre
-  ghc-options: -rtsopts  
+  ghc-options: -rtsopts -Wall -Wcompat 
 
 executable grammar-trans 
   import: common-examples 

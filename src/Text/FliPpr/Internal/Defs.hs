@@ -2,9 +2,9 @@
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE FunctionalDependencies    #-}
 {-# LANGUAGE GADTs                     #-}
 {-# LANGUAGE LambdaCase                #-}
+{-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE PolyKinds                 #-}
 {-# LANGUAGE RankNTypes                #-}
@@ -29,34 +29,18 @@ module Text.FliPpr.Internal.Defs
 
     -- * 'DType'-indexed functions
     DefType (..),
-    shareM,
-    shareDef,
-    letrGen,
-    letrG,
-
-    -- * Manipulation of rules
-    Rules,
 
     -- ** High-level I/F
     share,
     local,
-    rule,
-    nt,
-    fixDef,
+    def,
     mfixDefM,
-    shareGen,
-    Convertible (..),
+    LetArg(..),
 
     -- ** Low-level primitives
-    letr, letrs, letrR,
-    lift,
-    unlift,
-    pairRules,
-    unpairRulesM,
+    letr, letrs,
 
     -- * Mapping functios
-    rmap,
-    vmap,
     TransD,
 
     -- * Pretty-printing
@@ -65,18 +49,21 @@ module Text.FliPpr.Internal.Defs
   )
 where
 
-import           Control.Applicative (Alternative (..))
-import           Control.Monad       ((>=>))
-import qualified Control.Monad
-import           Data.Kind           (Type)
-import qualified Text.FliPpr.Doc     as D
+import           Control.Arrow         (first)
+import           Data.Functor.Identity (Identity (..))
+
+import           Control.Applicative   (Alternative (..))
+import qualified Data.Fin              as F
+import           Data.Kind             (Type)
+import qualified Data.Type.Nat         as F
+import qualified Text.FliPpr.Doc       as D
 
 -- | A type for (mutually recursive) definitions
-data DType ft
+data DType k
   = -- | Type lifted from @ft@
-    T ft
+    T k
   | -- | Expressions that may share some definitions
-    DType ft :*: DType ft
+    DType k :*: DType k
 
 type a ** b = a ':*: b
 
@@ -86,12 +73,13 @@ infixr 4 **
 
 infixr 4 :*:
 
-data DTypeVal (f :: ft -> Type) :: DType ft -> Type where
-  VT :: f ft -> DTypeVal f ( 'T ft)
+data DTypeVal (f :: k -> Type) :: DType k -> Type where
+  VT :: f ft -> DTypeVal f (Lift ft)
   VProd :: DTypeVal f a -> DTypeVal f b -> DTypeVal f (a ** b)
 
-class Defs (f :: k -> Type) | f -> k where
+class Defs (f :: k -> Type) where
   data Fs f :: DType k -> Type
+  -- DS stands for "direct style".
 
   -- By kztk @ 2020-11-26
   -- We will use the following methods for recursive definitions
@@ -99,9 +87,6 @@ class Defs (f :: k -> Type) | f -> k where
   unliftDS :: Fs f ( 'T a) -> f a
 
   pairDS :: Fs f a -> Fs f b -> Fs f (a ** b)
-
-  --   unpairRules :: (DefType a, DefType b) => Rules exp (a :*: b) -> (Rules exp a -> Rules exp b -> Rules exp r) -> Rules exp r
-
   -- A method inspired by the trace operator in category theory.
   -- This method serves as a bulding block of mutual recursions
   letrDS :: (f a -> Fs f ( 'T a ** r)) -> Fs f r
@@ -129,19 +114,6 @@ instance Monad (DefM exp) where
   m >>= f = DefM $ \k -> unDefM m $ \v -> unDefM (f v) k
   {-# INLINE (>>=) #-}
 
-
-type Rules f a = DefM f (DTypeVal f a)
-
-lift :: f a -> Rules f ( 'T a)
-lift x = DefM $ \k -> k (VT x)
-
-unlift :: Defs f => Rules f ( 'T a) -> f a
-unlift x = unliftDS $ unDefM x $ \(VT y) -> liftDS y
-
-pairRules :: Rules f a -> Rules f b -> Rules f (a ** b)
-pairRules x y = DefM $ \k -> unDefM x $ \a -> unDefM y $ \b -> k (VProd a b)
-
--- letr :: Defs f => (f a -> Rules f ( 'T a ** r)) -> Rules f r
 letr :: Defs f => (f a -> DefM f (f a, r)) -> DefM f r
 letr h = DefM $ \k -> letrDS $ \a -> unDefM (h a) $ \(b, r) -> pairDS (liftDS b) (k r)
 
@@ -151,23 +123,21 @@ letrs (k:ks) h = letr $ \fk -> letrs ks $ \h' -> do
   (dh'', r) <- h $ \x -> if x == k then fk else h' x
   return (dh'', (dh'' k, r))
 
-letrR :: Defs f => (f a -> Rules f ( 'T a ** r)) -> Rules f r
-letrR h = letr $ h >=> \case { VProd (VT a) r -> return (a, r) }
-
 -- | A variant of 'many' defined without Haskell-level recursion.
 manyD :: (Defs f, Alternative f) => f a -> f [a]
-manyD d = unlift $ letr $ \a -> return (pure [] <|> (:) <$> d <*> a, VT a)
+manyD d = local $ letr $ \a -> return (pure [] <|> (:) <$> d <*> a, a)
 
 -- | A variant of 'some' defined without Haskell-level recursion.
 someD :: (Defs f, Alternative f) => f a -> f [a]
-someD d = unlift $ letr $ \m -> letr $ \s ->
-   p ((:) <$> d <*> m) $
-   p (pure [] <|> s) $
-   return (VT s)
-   where
-     p a = fmap (a,)
-   -- letr $ \x -> return (d, VT $ (:) <$> x <*> manyD x)
-  -- pairRules (lift d) $ lift $ (:) <$> a <*> manyD a
+someD d = local $ letr $ \m -> letr $ \s ->
+   def ((:) <$> d <*> m) $
+   def (pure [] <|> s) $
+   return s
+
+
+def :: Functor f => a -> f b -> f (a, b)
+def a = fmap (a,)
+{-# INLINE def #-}
 
 type family TransD f a = b | b -> a f where
   TransD f ( 'T a) = 'T (f a)
@@ -186,149 +156,61 @@ instance DefType ( 'T a) where
 instance (DefType a, DefType b) => DefType (a ** b) where
   indDType _ step = step
 
-newtype LetG f a = LetG (forall r. (DTypeVal f a -> DefM f (DTypeVal f a,r)) -> DefM f r)
+-- newtype LetG f a = LetG (forall r. (DTypeVal f a -> DefM f (DTypeVal f a,r)) -> DefM f r)
 
-letrG :: (Defs f, DefType a) => (DTypeVal f a -> DefM f (DTypeVal f a, r)) -> DefM f r
-letrG = let LetG f = indDType letrG1 letrGStep in f
-  where
-    letrG1 :: Defs f => LetG f ('T t)
-    letrG1 = LetG $ \h -> letr $ \x -> h (VT x) >>= \case { (VT a, r) -> return (a, r) }
+-- letrG :: (Defs f, DefType a) => (DTypeVal f a -> DefM f (DTypeVal f a, r)) -> DefM f r
+-- letrG = let LetG f = indDType letrG1 letrGStep in f
+--   where
+--     letrG1 :: Defs f => LetG f ('T t)
+--     letrG1 = LetG $ \h -> letr $ \x -> h (VT x) >>= \case { (VT a, r) -> return (a, r) }
 
-    letrGStep :: (DefType a, DefType b, Defs f) => LetG f (a ** b)
-    letrGStep = LetG $ \h -> letrG $ \b -> letrG $ \a -> arr <$> h (VProd a b)
+--     letrGStep :: (DefType a, DefType b, Defs f) => LetG f (a ** b)
+--     letrGStep = LetG $ \h -> letrG $ \b -> letrG $ \a -> arr <$> h (VProd a b)
 
-    arr :: (DTypeVal f (a ** b), r) -> (DTypeVal f a, (DTypeVal f b, r))
-    arr (VProd a b, r) = (a, (b, r))
+--     arr :: (DTypeVal f (a ** b), r) -> (DTypeVal f a, (DTypeVal f b, r))
+--     arr (VProd a b, r) = (a, (b, r))
 
+class Defs f => LetArg f t where
+  letrGen :: (t -> DefM f (t, r)) -> DefM f r
 
-newtype LetRGen f a = LetRGen (forall r. (DTypeVal f a -> Rules f (a ** r)) -> Rules f r)
+instance Defs f => LetArg f (Identity (f a)) where
+  letrGen f = letr (fmap (first runIdentity) . f . Identity)
 
-letrGen :: (Defs f, DefType a) => (DTypeVal f a -> Rules f (a ** r)) -> Rules f r
-letrGen =
-  let LetRGen f = indDType letrGen0 letrGenStep in f
-  where
-    letrGen0 :: Defs f => LetRGen f ( 'T t)
-    letrGen0 = LetRGen $ \h -> letrR (h . VT)
+instance (LetArg f a, LetArg f b) => LetArg f (a, b) where
+  letrGen f = letrGen $ \b -> letrGen $ \a -> do
+                ((a', b'), r) <- f (a, b)
+                return (a', (b', r))
 
-    letrGenStep :: (DefType a, DefType b, Defs f) => LetRGen f (a ** b)
-    letrGenStep = LetRGen $ \h -> letrGen $ \b -> letrGen $ \a -> assocr $ h (VProd a b)
-      where
-        assocr :: Rules f ((a ** b) ** r) -> Rules f (a ** (b ** r))
-        assocr x = DefM $ \k -> unDefM x $ \(VProd (VProd a b) r) -> k (VProd a (VProd b r))
+instance (LetArg f a, LetArg f b, LetArg f c) => LetArg f (a, b, c) where
+  letrGen f = letrGen $ \c -> letrGen $ \b -> letrGen $ \a -> do
+    ((a', b', c'), r) <- f (a, b, c)
+    return (a', (b', (c', r)))
 
+instance (LetArg f a, LetArg f b, LetArg f c, LetArg f d) => LetArg f (a, b, c, d) where
+  letrGen f = letrGen $ \ ~(c,d) -> letrGen $ \ ~(a,b) -> do
+    ((a', b', c', d'), r) <- f (a, b, c, d)
+    return ( (a', b'), ( (c', d'), r ) )
 
-newtype VMap f k1 k2 a = VMap ((forall t. f (k1 t) -> f (k2 t)) -> DTypeVal f (TransD k1 a) -> DTypeVal f (TransD k2 a))
+newtype LetArgFin f a n = LetArgFin { runLetArgFin :: LetArg f a => forall r. ( (F.Fin n -> a) -> DefM f (F.Fin n -> a, r)) -> DefM f r }
 
-vmap :: forall f k1 k2 r. (Defs f, DefType r) => (forall t. f (k1 t) -> f (k2 t)) -> DTypeVal f (TransD k1 r) -> DTypeVal f (TransD k2 r)
-vmap = let VMap f = indDType vmap0 vmapStep in f
-  where
-    vmap0 :: Defs f => VMap f k1 k2 ( 'T t)
-    vmap0 = VMap $ \f (VT x) -> VT (f x)
+instance (LetArg f a, F.SNatI n) => LetArg f (F.Fin n -> a) where
+  letrGen = runLetArgFin $ F.induction f0 fstep
+    where
+      f0 = LetArgFin $ \f -> snd <$> f (const $ error "letrGen: no inhabitants in Fin Z")
+      fstep p = LetArgFin $ \h ->
+        letrGen $ \h0 -> runLetArgFin p $ \hstep -> do
+          (h', r) <- h $ \case { F.FZ -> h0 ; F.FS n -> hstep n }
+          return (h' . F.FS, (h' F.FZ , r))
 
-    vmapStep :: forall a b. (Defs f, DefType a, DefType b) => VMap f k1 k2 (a ** b)
-    vmapStep = VMap $ \f (VProd a b) -> VProd (vmap f a) (vmap f b)
-
-rmap :: forall f k1 k2 a. (DefType a, Defs f) => (forall t. f (k1 t) -> f (k2 t)) -> Rules f (TransD k1 a) -> Rules f (TransD k2 a)
-rmap f x = DefM $ \k -> unDefM x (k . vmap f)
-
-shareDef :: (DefType a, Defs f) => Rules f a -> (DTypeVal f a -> Rules f r) -> Rules f r
-shareDef a h = letrGen (pairRules a . h)
-
-fixDef :: (DefType a, Defs f) => (DTypeVal f a -> Rules f a) -> Rules f a
-fixDef h = letrGen $ \x -> pairRules (h x) (return x)
-
-runDefM :: DefType r => DefM exp (Rules exp r) -> Rules exp r
-runDefM = Control.Monad.join -- unDefM m id
-
-unpairRulesM :: (Defs exp, DefType a, DefType b) => Rules exp (a ** b) -> DefM exp (Rules exp a, Rules exp b)
-unpairRulesM r = DefM $ \k -> unDefM r $ \(VProd a b) -> k (DefM $ \k1 -> k1 a, DefM $ \k2 -> k2 b)
-
--- unpairRules r $ curry k
-
-class Convertible f a s | s -> a where
-  fromDTypeVal :: DTypeVal f a -> s
-  toDTypeVal :: s -> DefM f (DTypeVal f a)
-
--- fromRules :: Rules f a -> DefM f b
--- toRules :: b -> Rules f a
-
-mfixDefM :: (Defs f, DefType a, Convertible f a s) => (s -> DefM f s) -> DefM f s
-mfixDefM h = fmap fromDTypeVal $ fixDef $ (>>= toDTypeVal) . h . fromDTypeVal
-
--- fromRules $ fixDef $ \a -> (fromRules a >>= h) >>= toRules
-
---  fromRules $ fixDef (\a -> unDefM (fromRules a >>= h) toRules)
+mfixDefM :: (Defs f, LetArg f a) => (a -> DefM f a) -> DefM f a
+mfixDefM f = letrGen $ \a -> (,a) <$> f a
 
 -- | 'share's computation.
 share :: Defs f => f a -> DefM f (f a)
 share s = DefM $ \k -> letrDS $ \a -> pairDS (liftDS s) (k a)
 
--- shareDef :: (DefType a, Defs f) => Rules f a -> (DTypeVal f a -> Rules f r) -> Rules f r
--- DefM f (DTypeVal f a) -> (DTypeVal f a -> DefM f (DTypeVal f a)) -> DefM f (DTypeVal f a)
-
--- return :: DTypeVal f a -> DefM f (DTypeVal f a)
--- (\x -> unDefM x id) :: DefM f (Fs f a) -> Fs f a
---
--- v2fs :: DTypeVal f a -> Fs f a
--- (\x -> unDefM x v2fs) :: Rules f a -> Fs f a
-
-newtype ShareM f a = ShareM (DTypeVal f a -> DefM f (DTypeVal f a))
-
-shareM :: (Defs f, DefType a) => DTypeVal f a -> DefM f (DTypeVal f a)
-shareM = let ShareM f = indDType shareM0 shareMStep in f
-  where
-    shareM0 :: Defs f => ShareM f ( 'T t)
-    shareM0 = ShareM $ \(VT x) -> fmap VT (share x)
-
-    shareMStep :: (Defs f, DefType a, DefType b) => ShareM f (a ** b)
-    shareMStep =
-      ShareM $ \(VProd a b) -> shareM a >>= \va -> shareM b >>= \vb -> return (VProd va vb)
-
-shareGen :: forall f a s. (Defs f, DefType a, Convertible f a s) => s -> DefM f s
-shareGen comp = fromDTypeVal <$> (shareM =<< toDTypeVal comp)
-
--- DefM $ \k -> shareDef (toRules @exp @a @s s) $ \a -> unDefM (fromRules @exp @a @s a) k
-
-rule :: Defs f => f a -> DefM f (Rules f ( 'T a))
-rule = shareGen . lift
-
-nt :: Defs f => Rules f ( 'T a) -> f a
-nt = unlift
-
 local :: Defs f => DefM f (f t) -> f t
-local m = unlift $ runDefM $ fmap lift m
-
-instance Convertible f a (DTypeVal f a) where
-  fromDTypeVal = id
-  toDTypeVal = return
-
-instance Convertible f a (Rules f a) where
-  fromDTypeVal = return
-  toDTypeVal = id
-
-instance (Defs f, Convertible f a s, Convertible f b t) => Convertible f (a ** b) (s, t) where
-  fromDTypeVal (VProd a b) = (fromDTypeVal a, fromDTypeVal b)
-  toDTypeVal (s, t) = VProd <$> toDTypeVal s <*> toDTypeVal t
-
-instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3) => Convertible f (a1 ** a2 ** a3) (s1, s2, s3) where
-  fromDTypeVal x = let (s1, (s2, s3)) = fromDTypeVal x in (s1, s2, s3)
-  toDTypeVal (s1, s2, s3) = toDTypeVal (s1, (s2, s3))
-
-instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4) => Convertible f (a1 ** a2 ** a3 ** a4) (s1, s2, s3, s4) where
-  fromDTypeVal x = let (s1, (s2, (s3, s4))) = fromDTypeVal x in (s1, s2, s3, s4)
-  toDTypeVal (s1, s2, s3, s4) = toDTypeVal (s1, (s2, (s3, s4)))
-
-instance (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4, Convertible f a5 s5) => Convertible f (a1 ** a2 ** a3 ** a4 ** a5) (s1, s2, s3, s4, s5) where
-  fromDTypeVal x = let (s1, (s2, (s3, (s4, s5)))) = fromDTypeVal x in (s1, s2, s3, s4, s5)
-  toDTypeVal (s1, s2, s3, s4, s5) = toDTypeVal (s1, (s2, (s3, (s4, s5))))
-
-instance
-  (Defs f, Convertible f a1 s1, Convertible f a2 s2, Convertible f a3 s3, Convertible f a4 s4, Convertible f a5 s5, Convertible f a6 s6) =>
-  Convertible f (a1 ** a2 ** a3 ** a4 ** a5 ** a6) (s1, s2, s3, s4, s5, s6)
-  where
-  fromDTypeVal x = let (s1, (s2, (s3, (s4, (s5, s6))))) = fromDTypeVal x in (s1, s2, s3, s4, s5, s6)
-  toDTypeVal (s1, s2, s3, s4, s5, s6) = toDTypeVal (s1, (s2, (s3, (s4, (s5, s6)))))
-
+local m = unliftDS $ unDefM m liftDS
 
 -- | Monads for managing variable names
 class Monad m => VarM m where

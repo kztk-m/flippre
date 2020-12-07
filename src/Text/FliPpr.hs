@@ -4,7 +4,6 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs                  #-}
 {-# LANGUAGE KindSignatures         #-}
-{-# LANGUAGE PolyKinds              #-}
 {-# LANGUAGE TemplateHaskell        #-}
 {-# LANGUAGE TypeOperators          #-}
 {-# LANGUAGE UndecidableInstances   #-}
@@ -85,7 +84,6 @@ module Text.FliPpr
     F.Nat8,
     F.Nat9,
     reifySNat,
-    Wit (..),
 
     -- ** Template Haskell
     un,

@@ -27,6 +27,8 @@ module Text.FliPpr.Grammar
     space,
     spaces,
 
+    rule, nt,
+
     -- * Manipulation of Grammars
     simplifyGrammar,
     withSpace,
@@ -54,6 +56,8 @@ import           Control.Monad.State       (MonadState, State, StateT (..),
                                             evalState, evalStateT, get, put)
 import           Data.Foldable             (asum)
 --
+
+import           Data.Functor.Identity     (Identity (..))
 
 import           Data.Maybe                (mapMaybe)
 import           Data.Monoid               (Endo (..))
@@ -114,6 +118,12 @@ instance Show c => Grammar c (PprDefs (NonterminalPrinterM c)) where
 pprGrammar :: Show c => PprDefs (NonterminalPrinterM c) _a -> D.Doc
 pprGrammar g =
   evalState (runNonterminalPrinterM (pprDefs g 0)) 1
+
+rule :: Defs.Defs f => f a -> DefM f (Identity (f a))
+rule = fmap Identity . Defs.share
+
+nt :: Defs.Defs f => Identity (f a) -> f a
+nt = runIdentity
 
 data ExChar
   = Space
@@ -183,43 +193,6 @@ spaces = constantResult () $ symb Spaces
 type Env = E.Env E.U
 
 type Var = E.Var E.U
-
--- data VEnv f env where
---   VNil :: VEnv f '[]
---   VCons :: f a -> VEnv f as -> VEnv f (a ': as)
-
--- vmap :: (forall a. f a -> g a) -> VEnv f env -> VEnv g env
--- vmap _ VNil = VNil
--- vmap f (VCons a as) = VCons (f a) (vmap f as)
-
--- lookupVEnv :: Var env a -> VEnv f env -> f a
--- lookupVEnv VZ (VCons a _) = a
--- lookupVEnv (VS x) (VCons _ r) = lookupVEnv x r
-
--- updateVEnv :: Var env a -> f a -> VEnv f env -> VEnv f env
--- updateVEnv VZ v (VCons _ r) = VCons v r
--- updateVEnv (VS x) v (VCons a r) = VCons a (updateVEnv x v r)
-
--- type RepEnv env = VEnv Proxy env
-
--- toRep :: VEnv f env -> RepEnv env
--- toRep = vmap h
---   where
---     h :: f a -> Proxy a
---     h _ = Proxy
-
--- --- Assumption: env' contains env
--- diffRep :: RepEnv env -> RepEnv env' -> VarT env env'
--- diffRep xs ys = go (len ys - len xs) xs ys
---   where
---     len :: RepEnv env -> Int
---     len VNil = 0
---     len (VCons _ r) = 1 + len r
-
---     go :: Int -> RepEnv env -> RepEnv env' -> VarT env env'
---     go 0 _ _ = unsafeCoerce $ VarT id
---     go n r1 (VCons _ r2) = vstep . go (n -1) r1 r2
---     go _ _ _ = error "diffRep: invariant violation."
 
 type Bindings c env1 env2 = Env (RHS c env1) env2
 
@@ -363,14 +336,6 @@ instance Defs (ToFlatGrammar c) where
     Ress defs1 r1 diff1 -> case toFlatGrammars y defs1 of
       Ress defs2 r2 diff2 -> Ress defs2 (VProd (valueMap (E.shift diff2) r1) r2) (diff2 . diff1)
 
-  -- unpairRules xy k = ToFlatGrammars $ \defs ->
-  --   case toFlatGrammars xy defs of
-  --     Ress defs1 (VProd a b) diff1 ->
-  --       let argA = ToFlatGrammars $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Ress defs' (valueMap (E.shift diff') a) id
-  --           argB = ToFlatGrammars $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Ress defs' (valueMap (E.shift diff') b) id
-  --        in case toFlatGrammars (k argA argB) defs1 of
-  --             Ress defs2 r diff2 -> Ress defs2 r (diff2 . diff1)
-
   letrDS h = ToFlatGrammars $ \defs ->
     let (defs1, x, diff) = E.extendEnv defs (RHS []) -- a placeholder
         argH = ToFlatGrammar $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Res defs' (E.shift diff' $ RHS [PCons (NT x) $ PNil id]) id
@@ -446,24 +411,7 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs0) =
         Nothing   -> m x'
 
     procRHS :: RHS c env a -> StateT (MemoS g env) (DefM g) (g a)
-    -- procRHS (RHS rs) = do
-    --   pc <- asum <$> mapM procProd cont
-    --   let p1 = (\a k -> k a) <$> symbI cs <*> pc
-    --   p2 <- asum <$> mapM procProd others
-    --   return $ p1 <|> p2
-    --   where
-    --     (cs, cont, others) = gatherHeads rs
     procRHS (RHS rs) = asum <$> mapM procProd rs
-
-    -- gatherHeads :: [Prod c env a] -> (RSet c, [Prod c env (c -> a)], [Prod c env a])
-    -- gatherHeads [] = (RS.empty, [], [])
-    -- gatherHeads (p : ps) =
-    --   case p of
-    --     PCons (Symb c) r -> (RS.insert c cs, r : cont, others)
-    --     PCons (SymbI s) r -> (RS.union s cs, r : cont, others)
-    --     _ -> (cs, cont, p : others)
-    --   where
-    --     (cs, cont, others) = gatherHeads ps
 
     procProd :: Prod c env a -> StateT (MemoS g env) (DefM g) (g a)
     procProd (PNil a) = return (pure a)
@@ -506,49 +454,7 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs0) =
                     (r, m) <- runStateT (procRHS rhs) (updateMemoS memo x a)
                     return (r, (a, m))
 
---          DefM $ \k ->
-            -- let rhs = E.lookupEnv x defs
-            --  in if inlinable x rhs
-            --       then unDefM (runStateT (procRHS rhs) memo) $ \(res, memo') -> k (res, updateMemoS memo' x res)
-            --       else letrDS $ \a ->
-            --         unDefM (runStateT (procRHS rhs) (updateMemoS memo x a)) $ \(res, memo') -> pairDS (liftDS res) (k (a, memo'))
 
--- data CheckProd c g a = CheckProd Bool (g a)
-
--- instance Functor g => Functor (CheckProd c g) where
---   fmap f (CheckProd b a) = CheckProd b (fmap f a)
-
--- instance Applicative g => Applicative (CheckProd c g) where
---   pure a = CheckProd True (pure a)
---   CheckProd b1 f1 <*> CheckProd b2 f2 = CheckProd (b1 && b2) (f1 <*> f2)
-
--- instance (Defs g, Alternative g) => Alternative (CheckProd c g) where
---   empty = CheckProd False empty
---   CheckProd b1 f1 <|> CheckProd b2 f2 = CheckProd (b1 || b2) (f1 <|> f2)
-
---   many = manyD
---   some = someD
-
--- instance (Defs g, Grammar c g) => Grammar c (CheckProd c g) where
---   symb c = CheckProd True (symb c)
---   symbI cs = if RS.null cs then CheckProd False empty else CheckProd True (symbI cs)
-
--- instance (Alternative g, Defs g) => Defs (CheckProd c g) where
---   data Fs (CheckProd c g) a = CFs (DTypeVal (Const Bool) a) (Fs g a)
-
---   liftDS (CheckProd b f) = CFs (VT $ Const b) (liftDS f)
---   unliftDS (CFs (VT (Const b)) r) = CheckProd b (unliftDS r)
-
---   pairDS (CFs b1 r1) (CFs b2 r2) = CFs (VProd b1 b2) (pairDS r1 r2)
-
---   letrDS h =
---     case h (CheckProd False (empty :: g a)) of
---       CFs (VProd (VT (Const False)) q) r -> CFs q (letrDS $ const r)
---       _ -> case h (CheckProd True (empty :: g a)) of
---         CFs (VProd _ q) _ -> CFs q $
---           letrDS $ \a ->
---             case h (CheckProd True a) of
---               CFs _ r -> r
 
 -- a simple optimizing interpretation
 -- We use the property that
@@ -673,11 +579,11 @@ instance Applicative g => Applicative (ThawSpace g) where
   {-# INLINE pure #-}
 
   f <*> g = ThawSpace $ \sp sps -> runThawSpace f sp sps <*> runThawSpace g sp sps
-  {-# INLINE (<*>) #-} 
+  {-# INLINE (<*>) #-}
 
 instance (Defs g, Alternative g) => Alternative (ThawSpace g) where
   empty = ThawSpace $ \_ _ -> empty
-  {-# INLINE empty #-} 
+  {-# INLINE empty #-}
 
   f <|> g = ThawSpace $ \sp sps -> runThawSpace f sp sps <|> runThawSpace g sp sps
   {-# INLINE (<|>) #-}
@@ -702,37 +608,32 @@ instance (Defs g, Grammar Char g) => Grammar ExChar (ThawSpace g) where
                 symbI $
                   RS.fromNormalizedRangeList $ map (\(NormalChar a1, NormalChar a2) -> (a1, a2)) rs
      in r1 <|> r2 <|> r3
-  {-# INLINE symbI #-} 
+  {-# INLINE symbI #-}
 
   constantResult f a = ThawSpace $ \sp sps -> constantResult f (runThawSpace a sp sps)
 
 instance Defs g => Defs (ThawSpace g) where
-  newtype Fs (ThawSpace g) a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> Rules g a}
+  newtype Fs (ThawSpace g) a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> Fs g a}
 
-  liftDS a = ThawSpaces $ \sp sps -> lift (runThawSpace a sp sps)
+  liftDS a = ThawSpaces $ \sp sps -> liftDS (runThawSpace a sp sps)
   {-# INLINE liftDS #-}
 
-  unliftDS a = ThawSpace $ \sp sps -> unlift (runThawSpaces a sp sps)
+  unliftDS a = ThawSpace $ \sp sps -> unliftDS (runThawSpaces a sp sps)
   {-# INLINE unliftDS #-}
 
-  pairDS x y = ThawSpaces $ \sp sps -> pairRules (runThawSpaces x sp sps) (runThawSpaces y sp sps)
+  pairDS x y = ThawSpaces $ \sp sps -> pairDS (runThawSpaces x sp sps) (runThawSpaces y sp sps)
   {-# INLINE pairDS #-}
 
-  -- unpairRules xy k = ThawSpaces $ \sp sps ->
-  --   unpairRules (runThawSpaces xy sp sps) $ \x y ->
-  --     let x' = ThawSpaces $ \_ _ -> x
-  --         y' = ThawSpaces $ \_ _ -> y
-  --      in runThawSpaces (k x' y') sp sps
-
   letrDS k = ThawSpaces $ \sp sps ->
-    letrR $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
-  {-# INLINE letrDS #-} 
+    letrDS $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
+  {-# INLINE letrDS #-}
 
 thawSpace :: (Defs exp, Alternative exp) => exp () -> ThawSpace exp a -> exp a
-thawSpace sp0 g = unlift $
-  letrR $ \sp -> pairRules (lift $ Space <$ sp0) $
-    letrR $ \sps -> pairRules (lift $ Spaces <$ many sp) $ lift $ runThawSpace g sp sps
-{-# INLINE thawSpace #-} 
+thawSpace sp0 g = local $ do
+  sp  <- share (Space <$ sp0)
+  sps <- share (Spaces <$ many sp)
+  return (runThawSpace g sp sps)
+{-# INLINE thawSpace #-}
 
 -- type Q = Int
 
@@ -772,11 +673,6 @@ data Qsp = Qn | Qs | Qss deriving (Eq, Ord)
 optSpaces :: forall g t. (Defs g, Grammar ExChar g) => FlatGrammar ExChar t -> g t
 optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
   local $ evalStateT (asum <$> mapM (\qf -> (<* finalProd qf) <$> procRHS Qn qf rhs0) allStates) emptyMemo
-  -- unliftDS $
-  --   let m = forM allStates $ \qf -> do
-  --         g <- procRHS Qn qf rhs0
-  --         return $ nt g <* finalProd qf
-  --    in runM (asum <$> m) emptyMemo $ \a _ -> liftDS a
   where
     allStates = [Qn, Qs, Qss]
 
@@ -795,12 +691,6 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
     transTo Qss Spaces         = (pure Spaces, Qss)
     transTo Qss (NormalChar c) = (symb Spaces *> char c, Qn)
     {-# INLINE transTo #-}
-
-    -- toM :: (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Fs g r) -> Fs g r)) -> StateT (Memo env g) (DefM g) a
-    -- toM f = StateT $ \memo -> DefM $ \k -> f memo (curry k)
-
-    -- runM :: StateT (Memo env g) (DefM g) a -> (forall r. DefType r => Memo env g -> ((a -> Memo env g -> Fs g r) -> Fs g r))
-    -- runM m memo k = unDefM (runStateT m memo) $ uncurry k
 
     procRHS :: Qsp -> Qsp -> RHS inc env a -> StateT (Memo env g) (DefM g) (g a)
     procRHS q1 q2 (RHS ps) = asum <$> mapM (procProd q1 q2) ps
@@ -843,14 +733,6 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
             (r, memo') <- runStateT (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a)
             return (r, (a, memo'))
 
-    -- procVar q1 q2 x memo k =
-    --   case lookupMemo memo q1 q2 x of
-    --     Just r -> k (lift r) memo
-    --     Nothing -> do
-    --       let rhs = E.lookupEnv x defs
-    --       letrDS $ \a ->
-    --         runM (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a) $ \r memo' ->
-    --           pairDS (unDefM r $ \(VT y) -> liftDS y) (k (lift a) memo')
 
 -- fuseWithTransducer :: forall g outc inc aaa. Enum inc => GrammarD outc g => FlatGrammar inc aaa -> Transducer inc outc -> g aaa
 -- fuseWithTransducer (FlatGrammar (defs :: Bindings inc env env) rhs) (Transducer qinit qstates qfinals trans) =
@@ -932,7 +814,9 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
 --     trF _ = error "Cannot happen"
 
 collapseSpace :: (Defs g, Grammar ExChar g) => FlatGrammar ExChar a -> g a
-collapseSpace = optSpaces --  fuseWithTransducer g collapseSpacer
+collapseSpace = optSpaces
+{-# INLINE collapseSpace #-}
 
 withSpace :: (Defs exp, Grammar Char exp) => exp () -> ToFlatGrammar ExChar a -> exp a
 withSpace gsp g = thawSpace gsp $ simplifyGrammar $ collapseSpace (flatten g)
+{-# INLINE withSpace #-}

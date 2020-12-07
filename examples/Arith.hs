@@ -1,22 +1,21 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RebindableSyntax #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE RebindableSyntax          #-}
+{-# LANGUAGE RecursiveDo               #-}
+{-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE TypeApplications          #-}
+{-# LANGUAGE TypeOperators             #-}
 
-import Control.DeepSeq
-import System.CPUTime
-import Text.FliPpr
-import Text.FliPpr.Driver.Earley as E
-import qualified Text.FliPpr.Grammar as G
-import Prelude
+import           Control.DeepSeq
+import           Prelude
+import           System.CPUTime
+import           Text.FliPpr
+import           Text.FliPpr.Driver.Earley as E
+import qualified Text.FliPpr.Grammar       as G
 
 ifThenElse :: Bool -> t -> t -> t
-ifThenElse True t _ = t
+ifThenElse True t _  = t
 ifThenElse False _ f = f
 
 data Exp
@@ -75,7 +74,7 @@ pExp = flippr $ do
 
   return $ fromFunction (ppr 0)
   where
-    mfix = G.mfixDefM
+    mfix = mfixF
 
     lt10 :: FliPprE arg exp => (A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
     lt10 f = Branch (PartialBij "lt10" (\x -> if x < 10 then Just x else Nothing) Just) f
@@ -94,12 +93,12 @@ parseExp =
 
 parseExp' :: [Char] -> Either String [Exp]
 parseExp' s = case parseExp s of
-  Ok s -> Right s
+  Ok s   -> Right s
   Fail s -> Left (show s)
 
 parseExpP :: [Char] -> IO ()
 parseExpP s = case parseExp s of
-  Ok s -> putStrLn (show s)
+  Ok s   -> putStrLn (show s)
   Fail s -> print s
 
 exp1 :: Exp

@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE PolyKinds                 #-}
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE RebindableSyntax          #-}
 {-# LANGUAGE RecursiveDo               #-}
@@ -23,6 +22,7 @@ import qualified Text.FliPpr.Grammar       as G
 
 mfix = mfixF
 
+ifThenElse :: Bool -> p -> p -> p
 ifThenElse True t _  = t
 ifThenElse False _ f = f
 
@@ -151,7 +151,7 @@ pExp = do
               unDiv $ opP (Fixity AssocL 2) (op "/") pprE pprE k,
               unMul $ opP (Fixity AssocL 2) (op "*") pprE pprE k,
               unLet $ \x e1 e2 ->
-                parensIf (k > fromIntegral 0) $
+                parensIf (k > 0) $
                   group $
                     text "let" <+> pprVar x <> text "="
                       <> nest 2 (line' <> pprE 0 e1)

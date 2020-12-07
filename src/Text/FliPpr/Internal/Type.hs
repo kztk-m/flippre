@@ -7,18 +7,13 @@
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE InstanceSigs               #-}
 {-# LANGUAGE NoMonomorphismRestriction  #-}
-{-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
-{-# OPTIONS_GHC -fwarn-unused-imports -fwarn-incomplete-patterns #-}
 
 module Text.FliPpr.Internal.Type
   ( FType (..),
@@ -56,9 +51,10 @@ module Text.FliPpr.Internal.Type
     local,
     FinNE,
     reifySNat,
-    Wit (..),
+    -- Wit (..),
 
-    type Lift, type (**), Defs.Convertible, Defs.DefType, Defs, DefsF,
+    type Lift, type (**), Defs.LetArg, -- Defs.Convertible,
+    Defs.DefType, Defs, DefsF,
   )
 where
 
@@ -74,6 +70,8 @@ import           Data.Typeable             (Proxy (..))
 import           Text.FliPpr.Doc           as D
 import           Text.FliPpr.Internal.Defs (Defs, type (**), type Lift)
 import qualified Text.FliPpr.Internal.Defs as Defs
+
+import           Control.Arrow             (first)
 
 -- | A kind for datatypes in FliPpr.
 data FType = FTypeD | Type :~> FType
@@ -206,10 +204,10 @@ type FliPprD arg exp = (Defs exp, FliPprE arg exp)
 --   flocal :: m (exp t) -> exp t
 
 -- | 'A arg a' is nothing but @arg a@, but used for controlling type inference.
-newtype A arg a = A {unA :: arg a}
+newtype A (arg :: Type -> Type) (a :: Type) = A {unA :: arg a}
 
 -- | Similarly, 'E exp t' is nothing but @exp t@.
-newtype E exp t = E {unE :: exp t}
+newtype E (exp :: FType -> Type) (t :: FType) = E {unE :: exp t}
 
 newtype FliPpr t = FliPpr (forall arg exp. FliPprD arg exp => exp t)
 
@@ -306,14 +304,6 @@ instance Defs.Defs e => Defs.Defs (E e) where
 
 infixr 4 <?
 
--- instance Defs exp => Convertible exp (T a) (E exp a) where
---   toDTypeVal = return . VT . unE
---   fromDTypeVal (VT x) = E x
-
--- instance Defs exp => Convertible (E exp) (T a) (E exp a) where
---   toDTypeVal = return . VT
---   fromDTypeVal (VT x) = x
-
 -- |
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction'.
 class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, r -> arg exp t where
@@ -332,7 +322,8 @@ instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A a
   fromFunction k = arg (fromFunction . k)
 
 -- | A specialized version of 'mfixDefM'
-mfixF :: forall exp a d. (Defs exp, Defs.DefType d, Defs.Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
+-- mfixF :: forall exp a d. (Defs exp, Defs.DefType d, Defs.Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
+mfixF :: Defs.LetArg (E f) a => (a -> FliPprM f a) -> FliPprM f a
 mfixF = Defs.mfixDefM
 
 type DefsF exp = Defs.DTypeVal (E exp)
@@ -386,13 +377,20 @@ local = toFunction . Defs.local . fmap fromFunction
 
 -- One-level unfolding to avoid overlapping instances.
 
-instance Defs.Convertible (E exp) (Defs.Lift a) (E exp a) where
-  fromDTypeVal (Defs.VT x) = x
-  toDTypeVal x = return $ Defs.VT x
+instance Defs.Defs exp => Defs.LetArg (E exp) (E exp a) where
+  letrGen f = Defs.letr f
 
-instance (FliPprE arg exp, In a, Repr arg exp t r) => Defs.Convertible (E exp) (Defs.Lift (a ~> t)) (A arg a -> r) where
-  toDTypeVal = return . Defs.VT . fromFunction
-  fromDTypeVal (Defs.VT x) = toFunction x
+instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.LetArg (E exp) (A arg a -> r) where
+  letrGen f = Defs.letr $ fmap (first fromFunction) . f . toFunction
+
+
+-- instance Defs.Convertible (E exp) (Defs.Lift a) (E exp a) where
+--   fromDTypeVal (Defs.VT x) = x
+--   toDTypeVal x = return $ Defs.VT x
+
+-- instance (FliPprE arg exp, In a, Repr arg exp t r) => Defs.Convertible (E exp) (Defs.Lift (a ~> t)) (A arg a -> r) where
+--   toDTypeVal = return . Defs.VT . fromFunction
+--   fromDTypeVal (Defs.VT x) = toFunction x
 
 -- instance Convertible (E exp) t r => Convertible (E exp) t (FinNE F.Z -> r) where
 --   toDTypeVal x = toDTypeVal (x F.FZ)
@@ -404,50 +402,53 @@ instance (FliPprE arg exp, In a, Repr arg exp t r) => Defs.Convertible (E exp) (
 --     F.FZ -> fromDTypeVal v0
 --     F.FS n -> fromDTypeVal h n
 
-type family Prods t (n :: F.Nat) = r where
-  Prods t 'F.Z = t
-  Prods t ( 'F.S n) = t ** Prods t n
+-- type family Prods t (n :: F.Nat) = r where
+--   Prods t 'F.Z = t
+--   Prods t ( 'F.S n) = t ** Prods t n
 
-newtype ToDTypeVal exp r t m = ToDTypeVal {runToDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))}
+-- newtype ToDTypeVal exp r t m = ToDTypeVal {runToDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))}
 
-newtype FromDTypeVal exp r t m = FromDTypeVal {runFromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r}
+-- newtype FromDTypeVal exp r t m = FromDTypeVal {runFromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r}
 
-instance (Defs.Convertible (E exp) t r, F.SNatI m, ts ~ Prods t m) => Defs.Convertible (E exp) ts (FinNE m -> r) where
-  toDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))
-  toDTypeVal = runToDTypeVal $ F.induction f0 fstep
-    where
-      f0 = ToDTypeVal $ \f -> Defs.toDTypeVal (f F.FZ)
+-- instance (Defs.Convertible (E exp) t r, F.SNatI m, ts ~ Prods t m) => Defs.Convertible (E exp) ts (FinNE m -> r) where
+--   toDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))
+--   toDTypeVal = runToDTypeVal $ F.induction f0 fstep
+--     where
+--       f0 = ToDTypeVal $ \f -> Defs.toDTypeVal (f F.FZ)
 
-      fstep :: forall k. F.SNatI k => ToDTypeVal exp r t k -> ToDTypeVal exp r t ( 'F.S k)
-      fstep p = ToDTypeVal $ \f -> Defs.VProd <$> Defs.toDTypeVal (f F.FZ) <*> runToDTypeVal p (f . F.FS)
+--       fstep :: forall k. F.SNatI k => ToDTypeVal exp r t k -> ToDTypeVal exp r t ( 'F.S k)
+--       fstep p = ToDTypeVal $ \f -> Defs.VProd <$> Defs.toDTypeVal (f F.FZ) <*> runToDTypeVal p (f . F.FS)
 
-  fromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r
-  fromDTypeVal = runFromDTypeVal $ F.induction f0 fstep
-    where
-      f0 = FromDTypeVal $ \x _ -> Defs.fromDTypeVal x
-      fstep :: forall k. F.SNatI k => FromDTypeVal exp r t k -> FromDTypeVal exp r t ( 'F.S k)
-      fstep p = FromDTypeVal $ \(Defs.VProd v0 h) x -> case x of
-        F.FZ   -> Defs.fromDTypeVal v0
-        F.FS n -> runFromDTypeVal p h n
+--   fromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r
+--   fromDTypeVal = runFromDTypeVal $ F.induction f0 fstep
+--     where
+--       f0 = FromDTypeVal $ \x _ -> Defs.fromDTypeVal x
+--       fstep :: forall k. F.SNatI k => FromDTypeVal exp r t k -> FromDTypeVal exp r t ( 'F.S k)
+--       fstep p = FromDTypeVal $ \(Defs.VProd v0 h) x -> case x of
+--         F.FZ   -> Defs.fromDTypeVal v0
+--         F.FS n -> runFromDTypeVal p h n
 
 -- | FinNE n represents {0,..,n} (NB: n is included)
 type FinNE n = F.Fin ( 'F.S n)
 
-data Wit c where
-  Wit :: c => Wit c
+-- data Wit c where
+--   Wit :: c => Wit c
 
-newtype Wit' t n = Wit' (Wit (Defs.DefType (Prods t n)))
+-- newtype Wit' t n = Wit' (Wit (Defs.DefType (Prods t n)))
 
-propDefTypeProds :: forall n t. (Defs.DefType t, F.SNatI n) => Proxy n -> Proxy t -> Wit (Defs.DefType (Prods t n))
-propDefTypeProds _ _ = case F.induction @n f0 fstep of Wit' w -> w
-  where
-    f0 :: Wit' t 'F.Z
-    f0 = Wit' Wit
-    fstep :: forall k. Wit' t k -> Wit' t ( 'F.S k)
-    fstep (Wit' Wit) = Wit' Wit
+-- propDefTypeProds :: forall n t. (Defs.DefType t, F.SNatI n) => Proxy n -> Proxy t -> Wit (Defs.DefType (Prods t n))
+-- propDefTypeProds _ _ = case F.induction @n f0 fstep of Wit' w -> w
+--   where
+--     f0 :: Wit' t 'F.Z
+--     f0 = Wit' Wit
+--     fstep :: forall k. Wit' t k -> Wit' t ( 'F.S k)
+--     fstep (Wit' Wit) = Wit' Wit
 
-reifySNat :: forall n r. (Integral n) => n -> (forall m. F.SNatI m => F.SNat m -> (forall t. Defs.DefType t => Proxy t -> Wit (Defs.DefType (Prods t m))) -> r) -> r
-reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy k) -> k (F.snat @k) (\(_ :: Proxy t) -> propDefTypeProds @k Proxy (Proxy :: Proxy t))
+-- reifySNat :: forall n r. (Integral n) => n -> (forall m. F.SNatI m => F.SNat m -> (forall t. Defs.DefType t => Proxy t -> Wit (Defs.DefType (Prods t m))) -> r) -> r
+-- reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy k) -> k (F.snat @k) (\(_ :: Proxy t) -> propDefTypeProds @k Proxy (Proxy :: Proxy t))
+
+reifySNat :: forall n r. Integral n => n -> (forall m. F.SNatI m => F.SNat m -> r) -> r
+reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy m) -> k (F.snat :: F.SNat m)
 
 -- where
 --   makeWit :: forall n r. F.SNatI n => (forall a. DefType (Prods (T a) n) => Proxy a -> r) -> r
@@ -543,7 +544,7 @@ pprIName n
   where
     fancyNames = "xyzwsturabcdeijklmnpqv"
 
-type PrinterI = Defs.PprDefs VarMFliPpr
+type PrinterI = Defs.PprDefs VarMFliPpr :: FType -> Type
 
 instance FliPprE (Const IName) PrinterI where
   fapp e1 e2 = Defs.PprDefs $ \k -> do
