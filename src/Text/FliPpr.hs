@@ -109,6 +109,7 @@ module Text.FliPpr
     G.Grammar,
 
     -- * Utils
+    textAs, RS.RSet,
     Fixity (..),
     Assoc (..),
     Prec,
@@ -119,6 +120,8 @@ where
 
 import qualified Data.Fin                              as F
 import qualified Data.Map                              as M
+import           Data.Maybe                            (fromMaybe)
+import qualified Data.Set                              as S
 import qualified Data.Type.Nat                         as F
 import           Text.FliPpr.Doc
 import           Text.FliPpr.Err
@@ -127,6 +130,10 @@ import           Text.FliPpr.Internal.ParserGeneration
 import           Text.FliPpr.Internal.PrettyPrinting
 import           Text.FliPpr.Internal.Type
 import           Text.FliPpr.TH
+
+import qualified Data.RangeSet.List                    as RS
+import           Text.FliPpr.Automaton                 as A
+
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
 --   it behaves as '<>'.
@@ -194,6 +201,13 @@ is c f =
     (\_ -> Just c)
     `Branch` (\x -> ununit x f)
 
+isMember :: (FliPprE arg exp, Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
+isMember cs f =
+  PartialBij
+    ("isMember " ++ show cs)
+    (\x -> if x `RS.member` cs then Just x else Nothing)
+    Just
+    `Branch` f
 
 -- |
 -- The function 'define' provides an effective way to avoid writing 'app' and 'arg'.
@@ -217,6 +231,7 @@ is c f =
 -- >  rec f <- share $ arg $ \i -> ... f `app` a ...
 define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
 define = share
+
 
 type Prec = Int
 
@@ -247,3 +262,17 @@ $(mkUn ''Bool)
 $(mkUn ''(:))
 $(mkUn ''Either)
 $(mkUn ''(,,))
+
+
+textAs :: (FliPprD arg exp) => A arg String -> A.DFA Char -> E exp D
+textAs = flip textAs'
+
+textAs' :: (FliPprD arg exp) => A.DFA Char -> A arg [Char] -> E exp D
+textAs' (A.DFAImpl i qs fs tr) = local $
+  letr $ \abort ->
+    def abort $
+  letrs (S.toList qs) $ \f ->
+    def (\q s -> case_ s [ unNil  $ if q `S.member` fs then text "" else abort,
+                           unCons $ \c r ->
+                             case_ c [ isMember cs $ \c' -> charAs c' cs <#> f q' r | (cs, q') <- fromMaybe [] $ M.lookup q tr  ]] ) $
+  return (f i)

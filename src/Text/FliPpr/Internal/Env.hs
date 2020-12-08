@@ -102,7 +102,7 @@ instance Category (VarT U) where
 instance EnvImpl U where
   newtype Var U _ _ = VarU Int
 
-  data Env U _ _ = EnvU !Int !(IntMap Untype)
+  data Env U _ _ = EnvU {-# UNPACK #-} !Int !(IntMap Untype)
 
   -- ith var corresponds to (k-i)th index.
   newtype Rep U _ = RepU Int
@@ -153,7 +153,7 @@ instance Category (VarT UL) where
 instance EnvImpl UL where
   newtype Var UL _ _ = VarUL Int
 
-  data Env UL _ _ = EnvUL !Int !(IntMap Untype)
+  data Env UL _ _ = EnvUL {-# UNPACK #-} !Int !(IntMap Untype)
 
   newtype Rep UL _ = RepUL Int
 

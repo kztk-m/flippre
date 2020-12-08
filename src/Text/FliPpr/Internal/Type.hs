@@ -31,6 +31,7 @@ module Text.FliPpr.Internal.Type
     arg,
     app,
     (@@),
+    charAs,
     case_,
     unpair,
     ununit,
@@ -73,6 +74,8 @@ import qualified Text.FliPpr.Internal.Defs as Defs
 
 import           Control.Arrow             (first)
 
+import qualified Data.RangeSet.List        as RS
+
 -- | A kind for datatypes in FliPpr.
 data FType = FTypeD | Type :~> FType
 
@@ -105,7 +108,11 @@ class FliPprE (arg :: Type -> Type) (exp :: FType -> Type) | exp -> arg where
 
   fbchoice :: exp D -> exp D -> exp D
 
+  -- Output character as is, if it is contained in the given set
+  fcharAs :: arg Char -> RS.RSet Char -> exp D
+
   ftext :: String -> exp D
+
   fempty :: exp D
   fcat :: exp D -> exp D -> exp D
 
@@ -267,6 +274,9 @@ app (E f) (A a) = E (fapp f a)
 (@@) = app
 
 infixr 0 @@
+
+charAs :: FliPprE arg exp => A arg Char -> RS.RSet Char -> E exp D
+charAs a cs = E $ fcharAs (unA a) cs
 
 -- | case branching.
 {-# INLINEABLE case_ #-}
@@ -556,6 +566,10 @@ instance FliPprE (Const IName) PrinterI where
     x <- newIName
     d <- Defs.pprDefs (h $ Const x) 0
     return $ D.parensIf (k > 0) $ D.text "\\" <> pprIName x <+> D.text "->" </> d
+
+  fcharAs a cs = Defs.PprDefs $ \k -> do
+    let da = pprIName $ getConst a
+    return $ parensIf (k > 9) $ da D.<+> D.text "`charAs`" D.<+> D.text (show cs)
 
   fcase a bs = Defs.PprDefs $ \k -> do
     let da = pprIName $ getConst a

@@ -28,6 +28,7 @@ library
                        Text.FliPpr.Internal.ParserGeneration,
                        Text.FliPpr.Internal.Env, 
                        Text.FliPpr.Internal.PartialEnv
+                       Text.FliPpr.Automaton 
 
                                  
   build-depends:       base >= 4.7 && < 5, 

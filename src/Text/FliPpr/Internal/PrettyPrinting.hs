@@ -14,6 +14,7 @@ import           Data.Functor.Identity
 import           Text.FliPpr.Doc
 import           Text.FliPpr.Internal.Type
 
+import qualified Data.RangeSet.List        as RS
 import qualified Text.FliPpr.Internal.Defs as Defs
 
 data Ppr d (t :: FType) where
@@ -37,6 +38,10 @@ instance DocLike d => FliPprE Identity (Ppr d) where
   fununit _ x = x
 
   fbchoice x _ = x
+
+  fcharAs (Identity c) cs
+    | c `RS.member` cs        = PD (text [c])
+    | otherwise          = error "charAs: Condition violated."
 
   ftext s = PD (text s)
   fempty = PD empty

@@ -94,26 +94,38 @@ instance Defs.VarM (NonterminalPrinterM c) where
     i <- get
     put $! i + 1
     return $ "N" ++ show i
+  {-# INLINE newVar #-}
 
   nestScope = id
+  {-# INLINE nestScope #-}
 
 instance Functor (PprDefs (NonterminalPrinterM c)) where
   fmap _ (PprDefs h) = PprDefs h
+  {-# INLINE fmap #-}
 
 instance Applicative (PprDefs (NonterminalPrinterM c)) where
   pure _ = PprDefs $ \_ -> return $ D.text "ε"
+  {-# INLINE pure #-}
+
   f <*> a = PprDefs $ \k -> (\d1 d2 -> D.parensIf (k > 9) $ d1 D.<+> D.align d2) <$> pprDefs f 9 <*> pprDefs a 10
+  {-# INLINE (<*>) #-}
 
 instance Alternative (PprDefs (NonterminalPrinterM c)) where
   empty = PprDefs $ \_ -> return $ D.text "⊥"
+  {-# INLINE empty #-}
   f <|> g = PprDefs $ \k -> (\d1 d2 -> D.parensIf (k > 3) $ D.sep [d1, D.text "|", d2]) <$> pprDefs f 3 <*> pprDefs g 3
+  {-# INLINE (<|>) #-}
 
   many = Defs.manyD
+  {-# INLINE many #-}
   some = Defs.someD
+  {-# INLINE some #-}
 
 instance Show c => Grammar c (PprDefs (NonterminalPrinterM c)) where
   symb c = PprDefs $ \_ -> return $ D.text (show c)
+  {-# INLINE symb #-}
   symbI cs = PprDefs $ \_ -> return $ D.text (show cs)
+  {-# INLINE symbI #-}
 
 pprGrammar :: Show c => PprDefs (NonterminalPrinterM c) _a -> D.Doc
 pprGrammar g =
@@ -128,7 +140,7 @@ nt = runIdentity
 data ExChar
   = Space
   | Spaces
-  | NormalChar !Char
+  | NormalChar {-# UNPACK #-} !Char
   deriving (Eq, Ord)
 
 instance Enum ExChar where
@@ -203,7 +215,7 @@ instance Show c => D.Pretty (RHS c env a) where
   ppr (RHS rs) =
     D.punctuate (D.line D.<> D.text "|" D.<> D.text " ") $ map D.ppr rs
 
-data FlatGrammar c a = forall env. FlatGrammar (Bindings c env env) (RHS c env a)
+data FlatGrammar c a = forall env. FlatGrammar !(Bindings c env env) !(RHS c env a)
 
 pprAsFlat :: Show c => ToFlatGrammar c a -> D.Doc
 pprAsFlat = D.ppr . flatten
@@ -215,7 +227,7 @@ instance Show c => D.Pretty (FlatGrammar c a) where
       pprDef x rhs = D.text ("N" ++ x) D.<+> D.group (D.align (D.text "=" D.<+> D.ppr rhs))
       pprDefN n rhs = D.hsep [n, D.text "=", D.align (D.ppr rhs)]
 
-data Prod c env a = PNil a | forall b. PCons (Symb c env b) (Prod c env (b -> a))
+data Prod c env a = PNil !a | forall b. PCons !(Symb c env b) !(Prod c env (b -> a))
 
 instance Show c => D.Pretty (Prod c env a) where
   ppr (PNil _) = D.text "ε"
@@ -562,6 +574,7 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
   -- FIXME: We many not need to perform inlining here, as 'unFlatten' does so.
   -- letr h = OptRulesOther $ letr $ \a -> unOptRules $ h (OptSimple a)
   letrDS h =
+    -- FIXME: This tries to inline definitions, but we do not need to do it at this point, as unFlatten does so.
     case h (OptOther empty) of
       OptRulesPair (OptLifted res) _
         | isSimpleEnough res ->
@@ -700,8 +713,8 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
       | q1 == q2  = return (pure a)
       | otherwise = return empty
     procProd q1 q2 (PCons (SymbI cs) r) = do
-      r1 <- if RS.member Space cs  then procProd q1 q2 (PCons (Symb Space) r)  else pure (empty)
-      r2 <- if RS.member Spaces cs then procProd q1 q2 (PCons (Symb Spaces) r) else pure (empty)
+      r1 <- if RS.member Space cs  then procProd q1 q2 (PCons (Symb Space) r)  else pure empty
+      r2 <- if RS.member Spaces cs then procProd q1 q2 (PCons (Symb Spaces) r) else pure empty
       r3 <- do
         let cs' = RS.delete Space $ RS.delete Spaces cs
         let o = case q1 of

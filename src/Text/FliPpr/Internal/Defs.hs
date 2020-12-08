@@ -94,6 +94,7 @@ class Defs (f :: k -> Type) where
 -- In implementation, it is a specialized version of a codensity monad.
 newtype DefM f a = DefM {unDefM :: forall r. DefType r => (a -> Fs f r) -> Fs f r}
 
+
 -- | 'DefM' is a monad to make definitions easily.
 --   We intentionally do not make it an instance of 'MonadFix'.
 instance Functor (DefM exp) where
@@ -173,6 +174,9 @@ instance (DefType a, DefType b) => DefType (a ** b) where
 class Defs f => LetArg f t where
   letrGen :: (t -> DefM f (t, r)) -> DefM f r
 
+instance Defs f => LetArg f () where
+  letrGen f = snd <$> f ()
+
 instance Defs f => LetArg f (Identity (f a)) where
   letrGen f = letr (fmap (first runIdentity) . f . Identity)
 
@@ -190,6 +194,19 @@ instance (LetArg f a, LetArg f b, LetArg f c, LetArg f d) => LetArg f (a, b, c, 
   letrGen f = letrGen $ \ ~(c,d) -> letrGen $ \ ~(a,b) -> do
     ((a', b', c', d'), r) <- f (a, b, c, d)
     return ( (a', b'), ( (c', d'), r ) )
+
+instance (LetArg f a1, LetArg f a2, LetArg f a3, LetArg f a4, LetArg f a5) => LetArg f (a1, a2, a3, a4, a5) where
+  letrGen f = letrGen $ \ ~(a4,a5) -> letrGen $ \ ~(a1, a2, a3) -> do
+    ((b1, b2, b3, b4, b5), r) <- f (a1, a2, a3, a4, a5)
+    return ( (b1, b2, b3), ( (b4, b5), r ) )
+
+instance (LetArg f a1, LetArg f a2, LetArg f a3, LetArg f a4, LetArg f a5, LetArg f a6) => LetArg f (a1, a2, a3, a4, a5, a6) where
+  letrGen f = letrGen $ \ ~(a4,a5, a6) -> letrGen $ \ ~(a1, a2, a3) -> do
+    ((b1, b2, b3, b4, b5, b6), r) <- f (a1, a2, a3, a4, a5, a6)
+    return ( (b1, b2, b3), ( (b4, b5, b6), r ) )
+
+
+
 
 newtype LetArgFin f a n = LetArgFin { runLetArgFin :: LetArg f a => forall r. ( (F.Fin n -> a) -> DefM f (F.Fin n -> a, r)) -> DefM f r }
 

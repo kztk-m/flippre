@@ -35,6 +35,8 @@ import qualified Text.FliPpr.Internal.Defs       as Defs
 import qualified Text.FliPpr.Internal.PartialEnv as PE
 import           Text.FliPpr.Internal.Type
 
+import           Data.Bifunctor                  (bimap)
+
 -- Due to RebindableSyntax
 import           Prelude
 
@@ -200,6 +202,10 @@ instance FliPprE PArg (PExp s) where
                 b >>= \b' -> case b' of
                   EqI bb -> finv bb
          in tryUpdateEnv v a e
+
+  fcharAs a cs = PExp $ \tenv ->
+    let x = unPArg a tenv
+    in (\ (G.NormalChar c) -> do { env <- tryUpdateEnv x (Just $ EqI c) (PE.undeterminedEnv tenv); return $ RD env }) <$> G.symbI (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
 
   ftext s = fromP $ G.text s
 
