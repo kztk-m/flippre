@@ -6,14 +6,19 @@
 {-# LANGUAGE TemplateHaskell           #-}
 {-# LANGUAGE TypeOperators             #-}
 
+-- To suppress warnings caused by TH code.
+{-# LANGUAGE MonoLocalBinds            #-}
+
+
 import           Prelude
 import           Text.FliPpr
 import           Text.FliPpr.Driver.Earley as Earley
 import qualified Text.FliPpr.Grammar       as G
 
+mfix :: LetArg (E f) a => (a -> FliPprM f a) -> FliPprM f a
 mfix = mfixF
 
-example1 :: FliPpr ([Bool] :~> D)
+example1 :: FliPpr ([Bool] ~> D)
 example1 = flippr $ do
   let manyParens d = local $ do
         rec m <- share $ d <? parens m
@@ -51,7 +56,7 @@ gram1 = parsingModeSP gsp example1
 parser1 :: String -> Err [[Bool]]
 parser1 = Earley.parse gram1
 
-example2 :: FliPpr ([Bool] :~> D)
+example2 :: FliPpr ([Bool] ~> D)
 example2 = flippr $ do
   pprTF <- share $
     arg $ \x ->

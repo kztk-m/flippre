@@ -72,6 +72,8 @@ data Result env t where
   RD :: Env env -> Result env D
   RF :: Result (a ': env) t -> Result env (a ~> t)
 
+{-# ANN applySem "HLint: ignore Avoid lambda using `infix`" #-}
+
 applySem ::
   GU s (Err (Result r (a ~> t))) ->
   Var r a ->
@@ -197,11 +199,8 @@ instance FliPprE PArg (PExp s) where
         Err (Result env r)
       updateB finv v = mapToEnvA $ \eb ->
         let (b, e) = PE.popEnv eb
-            a =
-              fmap EqI $
-                b >>= \b' -> case b' of
-                  EqI bb -> finv bb
-         in tryUpdateEnv v a e
+            a = fmap EqI $ b >>= \(EqI bb) -> finv bb
+        in tryUpdateEnv v a e
 
   fcharAs a cs = PExp $ \tenv ->
     let x = unPArg a tenv

@@ -199,7 +199,7 @@ is c f =
     ("is " ++ show c)
     (\x -> if x == c then Just () else Nothing)
     (\_ -> Just c)
-    `Branch` (\x -> ununit x f)
+    `Branch` (`ununit` f)
 
 isMember :: (FliPprE arg exp, Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
 isMember cs f =

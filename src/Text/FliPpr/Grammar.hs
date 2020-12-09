@@ -72,6 +72,8 @@ import qualified Text.FliPpr.Internal.Env  as E
 -- import Debug.Trace (trace)
 -- import Text.Printf (printf)
 
+{-# ANN module "HLint: ignore Use const" #-}
+
 class (Applicative e, Alternative e) => Grammar c e | e -> c where
   symb :: c -> e c
   symbI :: RSet c -> e c
@@ -605,6 +607,7 @@ instance (Defs g, Alternative g) => Alternative (ThawSpace g) where
   {-# INLINE many #-}
   some = Defs.someD
   {-# INLINE some #-}
+
 
 instance (Defs g, Grammar Char g) => Grammar ExChar (ThawSpace g) where
   symb Space          = ThawSpace $ \sp _ -> sp

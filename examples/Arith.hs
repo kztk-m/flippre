@@ -7,12 +7,17 @@
 {-# LANGUAGE TypeApplications          #-}
 {-# LANGUAGE TypeOperators             #-}
 
+-- To suppress warnings caused by TH code.
+{-# LANGUAGE MonoLocalBinds            #-}
+
 import           Control.DeepSeq
 import           Prelude
 import           System.CPUTime
 import           Text.FliPpr
 import           Text.FliPpr.Driver.Earley as E
-import qualified Text.FliPpr.Grammar       as G
+
+{-# ANN module "HLint: ignore Avoid lambda using `infix`" #-}
+{-# ANN module "HLint: ignore Use section" #-}
 
 ifThenElse :: Bool -> t -> t -> t
 ifThenElse True t _  = t
@@ -57,7 +62,7 @@ pExp = flippr $ do
   rec pprNum <- define $ \x ->
         case_
           x
-          [ lt10 $ \x -> pprDigit x,
+          [ lt10 $ \xx -> pprDigit xx,
             dm10 $ \d r -> pprNum d <#> pprDigit r
           ]
 
@@ -93,25 +98,25 @@ parseExp =
 
 parseExp' :: [Char] -> Either String [Exp]
 parseExp' s = case parseExp s of
-  Ok s   -> Right s
-  Fail s -> Left (show s)
+  Ok r   -> Right r
+  Fail d -> Left (show d)
 
 parseExpP :: [Char] -> IO ()
 parseExpP s = case parseExp s of
-  Ok s   -> putStrLn (show s)
-  Fail s -> print s
+  Ok r   -> print r
+  Fail d -> print d
 
 exp1 :: Exp
 exp1 = Add (Num 1) (Mul (Num 2) (Num 3))
 
 exp2 :: Exp
 exp2 =
-  foldr (\x -> if x `mod` 2 == 0 then Mul (Num $ x `div` 2) else Add (Num $ x `div` 2)) (Num 0) $
+  foldr (\x -> if even x then Mul (Num $ x `div` 2) else Add (Num $ x `div` 2)) (Num 0) $
     take 100 $ cycle [2 .. 21]
 
 exp3 :: Exp
 exp3 =
-  foldl (\r x -> if x `mod` 2 == 0 then Mul r (Num $ x `div` 2) else Add r (Num $ x `div` 2)) (Num 0) $
+  foldl (\r x -> if even x then Mul r (Num $ x `div` 2) else Add r (Num $ x `div` 2)) (Num 0) $
     take 100 $ cycle [2 .. 21]
 
 countTime :: String -> IO a -> IO a
