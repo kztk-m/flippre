@@ -58,7 +58,7 @@ common common-examples
   build-depends: base, flippre
   ghc-options: -rtsopts -Wall -Wcompat 
 
-executable grammar-trans 
+executable grammar-trans
   import: common-examples 
   main-is: G.hs
 
@@ -76,6 +76,10 @@ executable arithlet
   build-depends: deepseq 
   main-is: Let.hs
 
+executable simple-lang
+  import: common-examples
+  main-is: SimpleLang.hs 
+  
 source-repository head
   type:     git 
   location: https://github.com/kztk-m/flippre

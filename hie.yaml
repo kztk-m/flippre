@@ -14,3 +14,6 @@ cradle:
 
     - path: "./examples/Let.hs"
       component: "flippre:exe:arithlet"
+
+    - path: "./examples/SimpleLang.hs"
+      component: "flippre:exe:simple-lang"
