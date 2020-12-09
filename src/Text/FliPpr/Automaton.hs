@@ -80,8 +80,9 @@ data DFAImpl c q =
           transDFAImpl    :: M.Map q [(RSet c, q)] }
 
 instance (Show q, Eq c, Show c) => D.Pretty (DFAImpl c q) where
-    ppr (DFAImpl i0 _ fs tr) =
-        D.vsep [ D.text "Initial: " D.<+> D.text (show i0),
+    ppr (DFAImpl i0 qs fs tr) =
+        D.vsep [ D.text "State(s):" D.<+> D.text (show qs),
+                 D.text "Initial: " D.<+> D.text (show i0),
                  D.text "Final(s):" D.<+> D.text (show fs),
                  D.sep [D.text "Transition(s):", D.nest 2 (D.align (pprTrMap tr)) ] ]
 
@@ -137,11 +138,11 @@ epsClosure = go
             let ks' = [ k' | k <- ks, k' <- fromMaybe [] $ M.lookup k m, k' `L.notElem` ks  ]
             in tell (Any $ not $ null ks') >> pure (ks ++ ks') ) m
 
-renumberD :: Ord q => DFAImpl c q -> DFAImpl c Word
-renumberD dfa@(DFAImpl _ states _ _) = mapStateMonotonicD q2i dfa
-    where
-        tbl = M.fromAscList $ zip (S.toList states) [0..fromIntegral (S.size states) - 1]
-        q2i q = fromJust $ M.lookup q tbl
+-- renumberD :: Ord q => DFAImpl c q -> DFAImpl c Word
+-- renumberD dfa@(DFAImpl _ states _ _) = mapStateMonotonicD q2i dfa
+--     where
+--         tbl = M.fromAscList $ zip (S.toList states) [0..fromIntegral (S.size states) - 1]
+--         q2i q = fromJust $ M.lookup q tbl
 
 renumberN :: Ord q => NFA c q -> NFA c Word
 renumberN nfa@(NFA (NFANE is fs tr) etr) = mapStateMonotonicN q2i nfa
@@ -249,13 +250,13 @@ determinizeImpl (NFANE is fs tr) = go [is] S.empty M.empty
 complete :: (Bounded c, Enum c, Ord c) => DFAImpl c Word  -> DFAImpl c Word
 complete a =
     let DFAImpl i qs fs tr = mapStateMonotonicD (+1) a
-    in DFAImpl i (S.insert 0 qs) fs (fmap completeTr tr `M.union` dtr)
+    in DFAImpl i (S.insert 0 qs) fs (fmap completeTr (foldr (\k -> M.insertWith (++) k []) tr qs)`M.union` dtr)
     where
         completeTr :: (Bounded c, Enum c, Ord c) => [(RSet c, Word )] -> [(RSet c, Word )]
         completeTr dst =
             let dom = L.foldl' (\r (cs,_) -> RS.union r cs) RS.empty dst
-            in if RS.null dom then dst
-               else                (RS.complement dom, 0):dst
+            in if RS.isFull dom then dst
+               else                  (RS.complement dom, 0):dst
         dtr :: Bounded  c=> M.Map Word  [(RSet c, Word )]
         dtr = M.singleton 0 [(RS.full, 0)]
 
@@ -420,7 +421,7 @@ instance (Bounded c, Enum c, Ord c) => Regex c (DFA c) where
     intersection a1 a2
        | DFAImpl i  qs  fs  tr  <- mapStateMonotonicD (2 *) a1,
          DFAImpl i' qs' fs' tr' <- mapStateMonotonicD ((+ 1) . (2 *)) a2 =
-        renumberD $ DFAImpl (i,i') (S.cartesianProduct qs qs') (S.cartesianProduct fs fs') (intersectTrans tr tr')
+        minimizeImpl $ DFAImpl (i,i') (S.cartesianProduct qs qs') (S.cartesianProduct fs fs') (intersectTrans tr tr')
 
     fromRSet cs = DFAImpl 0 (S.fromAscList [0, 1]) (S.singleton 1) (M.singleton 0 [ (cs, 1) ])
 
