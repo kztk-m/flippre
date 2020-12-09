@@ -18,6 +18,15 @@ import           Text.FliPpr
 import           Text.FliPpr.Driver.Earley as Earley
 import qualified Text.FliPpr.Grammar       as G
 
+import           Data.String               (fromString)
+
+import qualified Text.FliPpr.Automaton     as Automaton
+
+
+-- import           Debug.Trace
+
+
+mfix :: LetArg (E f) a => (a -> FliPprM f a) -> FliPprM f a
 mfix = mfixF
 
 ifThenElse :: Bool -> p -> p -> p
@@ -38,87 +47,29 @@ data Exp
 
 $(mkUn ''Exp)
 
-type Q = Word
-
-data DFA = DFA {init :: Q, trans :: [(Q, [(Char, Q)])], finals :: [Q]}
-
-allStates :: DFA -> [Q]
-allStates (DFA init trans finals) =
-  let qs0 = init : finals ++ concat [q : map snd cqs | (q, cqs) <- trans]
-  in map head $ L.group $ sort qs0
-
-fromDFA :: FliPprD a e => DFA -> FliPprM e (A a String -> E e D)
-fromDFA dfa@(DFA init tr fs) = do
-  rec abort <- define abort
-  let qs = allStates dfa
-  letrs qs $ \f ->
-    def (\q s -> case_ s [ unNil $ if q `elem` fs then text "" else abort,
-                           unCons $ \a r ->
-                              case_ a [ is c $ text [c] <#> f q' r | (c, q') <- fromJust (lookup q tr) ] ]) $
-    return (f init)
-
--- fromDFA dfa@(DFA init tr fs) = do
---   rec abort <- define abort
---   let qs = allStates dfa
---   let s2i q = let Just i = elemIndex q qs in i
---   -- The following code does not work when length qs = 0
---   reifySNat (length qs - 1) $ \sn w ->
---     case w (Proxy :: Proxy (G.T (String ~> D))) of
---       Wit -> do
---         rec f <- defines sn $ \i s ->
---               let q = qs `safeIndex` fromIntegral i
---                in case_
---                     s
---                     --        [unNil $ (if elem q fs then text " " else abort),
---                     --        (if elem q fs then ((unNil $ text ""):) else id)
---                     [ unNil (if q `elem` fs then text " " else abort),
---                       unCons $ \a r ->
---                         case_
---                           a
---                           [ is c $ text [c] <#> f (fromIntegral $ s2i q') r
---                             | (c, q') <- fromJust (lookup q tr)
---                           ]
---                     ]
---         return (f $ fromIntegral $ s2i init)
---   where
---     safeIndex :: [Q] -> Int -> Q
---     safeIndex as i
---       | i >= length as = error $ "safeIndex: index too large." ++ show (as, i)
---       | otherwise = as !! i
-
-dfaNum :: DFA
-dfaNum =
-  DFA
-    0
-    [ (0, [(c, 2) | c <- digit] ++ [('-', 1)]),
-      (1, [(c, 2) | c <- digit]),
-      (2, [(c, 2) | c <- digit])
-    ]
-    [2]
-  where
-    digit = ['0' .. '9']
-
-dfaVar :: DFA
-dfaVar =
-  DFA
-    0
-    [ (0, [(c, 1) | c <- smallAlpha \\ ['l']] ++ [('l', 2)]),
-      (1, [(c, 1) | c <- alphaNum]),
-      (2, [(c, 1) | c <- alphaNum \\ ['e']] ++ [('e', 3)]),
-      (3, [(c, 1) | c <- alphaNum \\ ['t']] ++ [('t', 4)]),
-      (4, [(c, 1) | c <- alphaNum])
-    ]
-    [1, 2, 3]
-  where
-    smallAlpha = ['a' .. 'z']
-    alphaNum = ['0' .. '9'] ++ ['a' .. 'z'] ++ ['A' .. 'Z']
-
 mkPprInt :: FliPprD a e => FliPprM e (A a Int -> E e D)
-mkPprInt = do
-  f <- fromDFA dfaNum
-  return $ \x -> case_ x [atoi $ f]
+mkPprInt =
+  share $ \x -> case_ x [atoi $ \s -> textAs s numbers]
   where
+    numbers = Automaton.plus (Automaton.range '0' '9')
     atoi = Branch (PartialBij "atoi" (Just . show) (\x -> Just (read x :: Int)))
+
+-- mkPprInt :: FliPprD a e => FliPprM e (A a Int -> E e D)
+-- mkPprInt = do
+--   f <- fromDFA dfaNum
+--   return $ \x -> case_ x [atoi f]
+--   where
+
+keywords :: [String]
+keywords = ["let", "in"]
+
+mkPprVar :: FliPprD a e => FliPprM e (A a String -> E e D)
+mkPprVar =
+  share $ \x -> textAs x ident
+  where
+    smallAlpha = Automaton.range 'a' 'z'
+    alphaNum = Automaton.unions [Automaton.range '0' '9', Automaton.range 'a' 'z', Automaton.range 'A' 'Z']
+    ident = smallAlpha <> Automaton.star alphaNum `Automaton.difference` Automaton.unions (map fromString keywords)
 
 {-# ANN opP "HLint: ignore Avoid lambda using `infix`" #-}
 

@@ -50,6 +50,7 @@ module Text.FliPpr
     mfixF,
     letr, letrs,
     def,
+    LetArg(..),
 
     -- ** Pretty-Printing Combinators and Datatypes
     spaces,
