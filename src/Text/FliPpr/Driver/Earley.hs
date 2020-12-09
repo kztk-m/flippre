@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE RecursiveDo           #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TypeFamilies          #-}
 
 module Text.FliPpr.Driver.Earley (asEarley, parse) where
@@ -41,9 +42,9 @@ toEarley (G.FlatGrammar defs rhs) = do
 asEarley :: Ord c => G.ToFlatGrammar c t -> E.Grammar r (E.Prod r c c t)
 asEarley g = toEarley $ G.flatten g
 
-parse :: (Show c, Ord c) => (forall g. G.GrammarD c g => g (Err a)) -> [c] -> Err [a]
-parse g str =
-  case E.fullParses (E.parser (asEarley g)) str of
+parse :: forall c a. (Show c, Ord c) => (forall g. G.GrammarD c g => g (Err a)) -> [c] -> Err [a]
+parse g = \str ->
+  case E.fullParses pp str of
     (as@(_ : _), _) -> sequence as
     ([], E.Report i es v) ->
       err $
@@ -56,3 +57,8 @@ parse g str =
                   D.text "near:" <+> D.text (show v)
                 ]
           ]
+  where
+    gr :: E.Grammar r (E.Prod r c c (Err a))
+    gr = asEarley g
+    pp :: E.Parser c [c] (Err a)
+    pp = E.parser gr
