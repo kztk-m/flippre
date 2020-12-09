@@ -7,13 +7,11 @@
 {-# LANGUAGE TemplateHaskell           #-}
 {-# LANGUAGE TypeOperators             #-}
 
-import qualified Control.Applicative       as A
+-- To suppress warnings caused by TH code.
+{-# LANGUAGE MonoLocalBinds            #-}
+
+
 import           Control.DeepSeq
-import           Data.List                 (elemIndex, sort, (\\))
-import qualified Data.List                 as L (group)
-import           Data.Maybe                (fromJust)
-import           Data.Typeable             (Proxy (..))
-import           Debug.Trace
 import           Prelude
 import           System.CPUTime
 import           Text.FliPpr
@@ -122,11 +120,10 @@ mkPprInt = do
   where
     atoi = Branch (PartialBij "atoi" (Just . show) (\x -> Just (read x :: Int)))
 
-mkPprVar :: FliPprD a e => FliPprM e (A a String -> E e D)
-mkPprVar = fromDFA dfaVar
+{-# ANN opP "HLint: ignore Avoid lambda using `infix`" #-}
 
 opP :: (DocLike d, Num n, Ord n) => Fixity -> (d -> d -> d) -> (n -> a -> d) -> (n -> b -> d) -> n -> a -> b -> d
-opP fixity f p1 p2 k x y = opPrinter fixity f (\k -> p1 k x) (\k -> p2 k y) k
+opP fixity f p1 p2 k x y = opPrinter fixity f (\k' -> p1 k' x) (\k' -> p2 k' y) k
 
 manyParens :: FliPprD a e => E e D -> E e D
 manyParens d = local $ do
@@ -144,8 +141,8 @@ pExp = do
         manyParens $
           case_
             e
-            [ unNum $ pprInt,
-              unVar $ pprVar,
+            [ unNum pprInt,
+              unVar pprVar,
               unSub $ opP (Fixity AssocL 1) (op "-") pprE pprE k,
               unAdd $ opP (Fixity AssocL 1) (op "+") pprE pprE k,
               unDiv $ opP (Fixity AssocL 2) (op "/") pprE pprE k,
@@ -176,8 +173,8 @@ parseExp =
 
 parseExp' :: [Char] -> [Exp]
 parseExp' s = case parseExp s of
-  Ok s   -> s
-  Fail s -> error (show s)
+  Ok r   -> r
+  Fail e -> error (show e)
 
 exp1 :: Exp
 exp1 =
