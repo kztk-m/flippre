@@ -4,7 +4,7 @@
 
 module Text.FliPpr.Automaton
     (
-        DFA, DFAImpl(..), NFA(..), NFANE(..), Regex(..),
+        DFA, DFAImpl(..), NFA(..), NFANE(..), Regex(..), range, plus, intersections, unions,
     )
     where
 
@@ -320,6 +320,17 @@ class Monoid r => Regex c r | r -> c where
     difference :: r -> r -> r
     difference r1 r2 = r1 `intersection` complement r2
 
+range :: (Regex c r, Ord c) => c -> c -> r
+range c1 c2 = fromRSet $ RS.singletonRange (c1, c2)
+
+plus :: (Regex c r) => r -> r
+plus r = r <> star r
+
+unions :: Regex c r => [r] -> r
+unions = foldr union empty
+
+intersections :: Regex c r => [r] -> r
+intersections = foldr intersection full
 
 emptyNFA :: Bounded c => NFA c Word
 emptyNFA = NFA (NFANE S.empty S.empty M.empty) M.empty
