@@ -57,6 +57,8 @@ import           Control.Monad.State       (MonadState, State, StateT (..),
 import           Data.Foldable             (asum)
 --
 
+import           Data.Bifunctor            (bimap)
+
 import           Data.Functor.Identity     (Identity (..))
 
 import           Data.Maybe                (mapMaybe)
@@ -484,7 +486,7 @@ data Opt c g a where
   OptSymbI :: RSet c -> Opt c g c
   OptEmpty :: Opt c g a
   OptPure :: a -> Opt c g a
-  OptSimple :: g a -> Opt c g a -- inlinable
+  -- OptSimple :: g a -> Opt c g a -- inlinable
   OptOther :: g a -> Opt c g a
 
 -- type Simplify c g = CheckProd c (Opt c g)
@@ -498,19 +500,20 @@ unOpt (OptSymb c)   = symb c
 unOpt (OptSymbI cs) = symbI cs
 unOpt OptEmpty      = empty
 unOpt (OptPure a)   = pure a
-unOpt (OptSimple p) = p
+-- unOpt (OptSimple p) = p
 unOpt (OptOther p)  = p
 
-isSimpleEnough :: Opt c g a -> Bool
-isSimpleEnough (OptOther _) = False
-isSimpleEnough _            = True
+-- isSimpleEnough :: Opt c g a -> Bool
+-- isSimpleEnough (OptOther _) = False
+-- isSimpleEnough _            = True
 
 instance Grammar c g => Functor (Opt c g) where
   fmap f (OptPure a) = OptPure (f a)
-  fmap _ OptEmpty = OptEmpty
-  fmap f p
-    | isSimpleEnough p = OptSimple $ fmap f (unOpt p)
-    | otherwise = OptOther $ fmap f (unOpt p)
+  fmap _ OptEmpty    = OptEmpty
+  fmap f p           = OptOther $ fmap f (unOpt p)
+  -- fmap f p
+  --   | isSimpleEnough p = OptSimple $ fmap f (unOpt p)
+  --   | otherwise = OptOther $ fmap f (unOpt p)
   {-# INLINABLE fmap #-}
 
 instance Grammar c g => Applicative (Opt c g) where
@@ -573,15 +576,14 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
   pairDS p1 p2 = OptRulesPair p1 p2
   {-# INLINE pairDS #-}
 
-  -- FIXME: We many not need to perform inlining here, as 'unFlatten' does so.
-  -- letr h = OptRulesOther $ letr $ \a -> unOptRules $ h (OptSimple a)
-  letrDS h =
-    -- FIXME: This tries to inline definitions, but we do not need to do it at this point, as unFlatten does so.
-    case h (OptOther empty) of
-      OptRulesPair (OptLifted res) _
-        | isSimpleEnough res ->
-          let ~(OptRulesPair _ r) = h res in r
-      _ -> OptRulesOther $ letrDS $ \a -> unOptRules $ h (OptSimple a)
+  letrDS h = OptRulesOther $ letrDS $ \a -> unOptRules $ h (OptOther a)
+  -- letrDS h =
+  --   -- FIXME: This tries to inline definitions, but we do not need to do it at this point, as unFlatten does so.
+  --   case h (OptOther empty) of
+  --     OptRulesPair (OptLifted res) _
+  --       | isSimpleEnough res ->
+  --         let ~(OptRulesPair _ r) = h res in r
+  --     _ -> OptRulesOther $ letrDS $ \a -> unOptRules $ h (OptSimple a)
 
 newtype ThawSpace g a = ThawSpace {runThawSpace :: g ExChar -> g ExChar -> g a}
 
@@ -622,8 +624,11 @@ instance (Defs g, Grammar Char g) => Grammar ExChar (ThawSpace g) where
           let rs = RS.toRangeList $ RS.delete Space $ RS.delete Spaces cs
            in fmap fromChar $
                 symbI $
-                  RS.fromNormalizedRangeList $ map (\(NormalChar a1, NormalChar a2) -> (a1, a2)) rs
+                  RS.fromNormalizedRangeList $ map (bimap unNormalChar unNormalChar) rs
      in r1 <|> r2 <|> r3
+     where
+       unNormalChar (NormalChar c) = c
+       unNormalChar _              = error "Cannot happen."
   {-# INLINE symbI #-}
 
   constantResult f a = ThawSpace $ \sp sps -> constantResult f (runThawSpace a sp sps)

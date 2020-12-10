@@ -204,7 +204,11 @@ instance FliPprE PArg (PExp s) where
 
   fcharAs a cs = PExp $ \tenv ->
     let x = unPArg a tenv
-    in (\ (G.NormalChar c) -> do { env <- tryUpdateEnv x (Just $ EqI c) (PE.undeterminedEnv tenv); return $ RD env }) <$> G.symbI (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
+    in (\ c -> do { env <- tryUpdateEnv x (Just $ EqI $ unNormalChar c) (PE.undeterminedEnv tenv); return $ RD env })
+       <$> G.symbI (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
+    where
+      unNormalChar (G.NormalChar c) = c
+      unNormalChar _                = error "Cannot happen."
 
   ftext s = fromP $ G.text s
 

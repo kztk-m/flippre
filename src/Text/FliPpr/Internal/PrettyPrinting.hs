@@ -72,8 +72,13 @@ instance DocLike d => Defs.Defs (Ppr d) where
   --   unpairRules (PprRules (VProd x y)) k = k (PprRules x) (PprRules y)
 
   letrDS h =
-    let ~(Defs.VProd ~(Defs.VT a) b) = pprRules $ h a
-     in PprRules b
+    let (a,b) = k $ pprRules $ h a
+    in PprRules b
+    where
+      -- Explicit decomposer to suppress an incomplete-uni-patterns warning, for this actually complete pattern.
+      k :: Defs.DTypeVal (Ppr d) (Lift a ** b) -> (Ppr d a, Defs.DTypeVal (Ppr d) b)
+      k (Defs.VProd (Defs.VT x) y) = (x, y)
+
 
 -- instance DocLike d => FliPprD Identity Identity (Ppr d) where
 --   fshare = Identity
