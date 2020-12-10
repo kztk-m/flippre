@@ -46,114 +46,8 @@ $(mkUn ''Exp)
 $(mkUn ''Lit)
 
 
--- Compositional approach to pattern matching.
--- Can we do better by composing continuations (namely, br)?
-newtype PatT env env' a = PatT { runPatT :: forall r. PartialBij r env -> PartialBij (a, r) env' }
-
-varP :: PatT env (a, env) a
-varP = PatT $ \(PartialBij s f fi) -> PartialBij ("_ " ++ s) (\(a,env) -> (a,) <$> f env) (\(a,r) -> (a,) <$> fi r)
-
-lift :: forall a b env env'. PartialBij a b -> PatT env env' b -> PatT env env' a
-lift (PartialBij fn f fi) (PatT tr) = PatT $ h . tr
-    where
-        h :: PartialBij (b, r) env' -> PartialBij (a, r) env'
-        h (PartialBij gn g gi) = PartialBij (fn ++ "(" ++ gn ++ ")") (\(a,r) -> do { b <- f a; g (b, r) }) (\x -> do { (b, r) <- gi x; a <- fi b ; return (a, r) })
- --       (\x -> do { (b, r) <- g x; a <- f b ; return (a, r) }) (\(a,r) -> do { b <- f a; g (b, r) })
-
-prod :: PatT env' env'' a -> PatT env env' b -> PatT env env'' (a, b)
-prod (PatT tr1) (PatT tr2) = PatT $ \p -> arr (tr1 (tr2 p))
-    where
-        arr :: PartialBij (a, (b, r)) env'' -> PartialBij ((a, b), r) env''
-        arr (PartialBij s f fi) = PartialBij s (f . (\((a,b),r) -> (a,(b,r))) ) (fmap (\(a, (b, r)) -> ((a, b), r)) . fi)
-
-(&.) :: PatT env' env'' a -> PatT env env' b -> PatT env env'' (a, b)
-(&.) = prod
-
-infixr 4 &.
-
-uni :: PartialBij a () -> PatT env env a
-uni (PartialBij fn f fi) = PatT $ \(PartialBij gn g gi) -> PartialBij (fn ++ " " ++ gn) (\(a,r) -> do { env <- g r; () <- f a ; return env }) (\env -> (,) <$> fi () <*> gi env)
-
-pOp :: PartialBij Exp (BinOp, (Exp, Exp))
-pOp = PartialBij "Op" (\case { (Op b x1 x2) -> Just (b, (x1,x2)); _ -> Nothing }) (\(b, (x1,x2)) -> Just $ Op b x1 x2)
-
-pMul :: PartialBij BinOp ()
-pMul = PartialBij "Mul" (\case { Mul -> Just () ; _ -> Nothing}) (const $ Just Mul)
-
-pat :: PatT () env a -> PartialBij a env
-pat tr = h $ runPatT tr (PartialBij "" Just Just)
-    where
-        h :: PartialBij (a, ()) env -> PartialBij a env
-        h (PartialBij fn f fi) = PartialBij fn (\a -> f (a, ())) (fmap fst . fi)
-
-px :: PatT env (Exp, (Exp, (Exp, env))) Exp
-px = lift pOp (uni pMul &. lift pOp (uni pMul &. varP &. varP) &. varP)
-
-class FliPprE arg exp => Decomp arg exp a r t | r -> t exp arg, exp -> arg, exp a t -> r where
-    decomp :: A arg a -> r -> E exp t
-
--- instance Decomp arg exp a (A arg a -> E exp t) t where
---     decomp a f = f a
-
-instance (FliPprE arg exp) => Decomp arg exp () (E exp t) t where
-    decomp a f = ununit a f
-
-instance (Eq a, Eq as, Decomp arg exp as r t) => Decomp arg exp (a, as) (A arg a -> r) t where
-    decomp as f = unpair as $ \a1 a2 -> decomp a2 $ f a1
-
-br :: (Decomp arg exp b r t, Eq b) => PatT () b a -> r -> Branch (A arg) (E exp) a t
-br p k = Branch (pat p) $ \a -> decomp a k
-
-_btest = br px $ \_e1 _e2 _e3 -> text ""
-
-{-
-
-var :: Pat a a
-
-var : forall env r. PInj env r -> PInj (a:env) (a, r)
-
-var : PatT env (a : env) a
-
-
-f : PInj a b
--------------------------------------------
-lift f : PatT env env' b -> PatT env env' a
-
-prod :: PatT env' env'' a -> PatT env env' b -> PatT env env'' (a, b)
-
-
-PatT
-var :: Pat env b -> Pat (a:env) (a, b)
-
-f : PartialBij a b   p : Pat env b
---------------------------------------
-f p : Pat env a
-
-
-f : PartialBij a (b, c)   p : Pat env1 b   q : Pat env2 c
-----------------------------------------------------------
-f p1 p2 : Pat (env1 ++ env2) a
-
-p : Pat [a1...an] a      k : A arg a1 ... A arg an -> E exp r
---------------------------------------------------------------
-pat p : Branch (A arg) (E exp) r a
-
-
--}
-
 otherwiseP :: (arg Exp -> exp t) -> Branch arg exp Exp t
 otherwiseP = Branch (PartialBij "otherwiseP" Just Just)
-
--- since un* expressions do no compose well, we need to prepare some special combinators.
-unOpAdd :: FliPprE arg exp => (A arg Exp -> A arg Exp -> E exp t) -> Branch (A arg) (E exp) Exp t
-unOpAdd f = Branch (PartialBij "Op Add _ _"
-                               (\case { Op Add e1 e2 -> Just (e1, e2); _ -> Nothing })
-                               (\case { (e1, e2) -> Just (Op Add e1 e2) })) $ \e1e2 -> unpair e1e2 f
-
-unOpMul :: FliPprE arg exp => (A arg Exp -> A arg Exp -> E exp t) -> Branch (A arg) (E exp) Exp t
-unOpMul f = Branch (PartialBij "Op Mul _ _"
-                               (\case { Op Mul e1 e2 -> Just (e1, e2); _ -> Nothing })
-                               (\case { (e1, e2) -> Just (Op Add e1 e2) })) $ \e1e2 -> unpair e1e2 f
 
 atoiP :: (arg String -> exp t) -> Branch arg exp Int t
 atoiP = Branch (PartialBij "atoi"
@@ -210,12 +104,12 @@ flipprExp = do
                           unIf  $ \e0 e1 e2 -> pprIf pExp e0 e1 e2,
                           otherwiseP $ pExp (prec + 1) ]
                | prec == 1 ->
-                case_ x [ $(branch [p| Op Add e1 e2 |] [| pprOp pExp (Fixity AssocL 1) "+" e1 e2 |]),
+                case_ x [ $(pat 'Op) $(pat 'Add) varP varP `br` \e1 e2 -> pprOp pExp (Fixity AssocL 1) "+" e1 e2,
                           otherwiseP $ pExp (prec + 1) ]
                | prec == 2 ->
                    case_ x [ --  $(branch [p| Op Mul e1 e2 |] [| pprOp pExp (Fixity AssocL 2)  "*" e1 e2 |]),
                              -- compostional approach to pattern matching
-                             br (lift pOp (uni pMul &. varP &. varP)) $ \e1 e2 -> pprOp pExp (Fixity AssocL 2) "*" e1 e2,
+                             br ($(pat 'Op) $(pat 'Mul) varP varP) $ \e1 e2 -> pprOp pExp (Fixity AssocL 2) "*" e1 e2,
                              otherwiseP $ pExp (prec + 1) ]
                | otherwise ->
                    case_ x [ unVar $ \n -> pprVar n,

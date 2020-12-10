@@ -1,13 +1,18 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections   #-}
 
-module Text.FliPpr.TH where
+module Text.FliPpr.TH
+  (
+    un, mkUn, branch, pat,
+  ) where
 
-import Data.Char as C
-import Language.Haskell.TH as TH
-import Language.Haskell.TH.Datatype as TH
-import Text.FliPpr.Internal.Type
-import Prelude hiding (exp)
+import           Control.Arrow                (second)
+import           Data.Char                    as C
+import           Language.Haskell.TH          as TH
+import           Language.Haskell.TH.Datatype as TH
+import           Prelude                      hiding (exp)
+import           Text.FliPpr.Internal.Type
+import           Text.FliPpr.Pat              as Pat
 
 {-
 Needs FlexibleContents.
@@ -113,47 +118,28 @@ unGen cname = do
     parseType (TH.SigT _ _) = fail "Kind signatures are not supported yet."
     parseType t = return ([], t)
 
-    isSingleton :: TH.Name -> Q Bool
-    isSingleton tyname = do
-      info <- TH.reify tyname
-      case info of
-        TH.TyConI dec ->
-          case dec of
-            TH.DataD _ _ _ _ cs _ ->
-              return $ length cs <= 1
-            TH.NewtypeD _ _ _ _ _ _ ->
-              return True
-            TH.DataInstD _ _ _ _ cs _ ->
-              return $ length cs <= 1
-            TH.NewtypeInstD _ _ _ _ _ _ ->
-              return True
-            _ ->
-              return False
-        _ ->
-          return False
+    -- numberOfArgs :: TH.Type -> Int
+    -- numberOfArgs (TH.AppT (TH.AppT ArrowT _) t2) = numberOfArgs t2 + 1
+    -- numberOfArgs (TH.ForallT _ _ t) = numberOfArgs t
+    -- numberOfArgs (TH.SigT t _) = numberOfArgs t
+    -- numberOfArgs (TH.ParensT t) = numberOfArgs t
+    -- numberOfArgs _ = 0
 
-    numberOfArgs :: TH.Type -> Int
-    numberOfArgs (TH.AppT (TH.AppT ArrowT _) t2) = numberOfArgs t2 + 1
-    numberOfArgs (TH.ForallT _ _ t) = numberOfArgs t
-    numberOfArgs (TH.SigT t _) = numberOfArgs t
-    numberOfArgs (TH.ParensT t) = numberOfArgs t
-    numberOfArgs _ = 0
+    -- makeForward :: TH.Name -> Int -> Bool -> Q TH.Exp
+    -- makeForward cn n isSing = do
+    --   vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
+    --   let pat = return $ TH.ConP cn $ map TH.VarP vs
+    --   let exp = return $ foldr (\x r -> TH.TupE [TH.VarE x, r]) (TH.TupE []) vs
+    --   if isSing
+    --     then [|\ $(pat) -> Just $(exp)|]
+    --     else [|\x -> case x of $(pat) -> Just $(exp); _ -> Nothing|]
 
-    makeForward :: TH.Name -> Int -> Bool -> Q TH.Exp
-    makeForward cn n isSing = do
-      vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
-      let pat = return $ TH.ConP cn $ map TH.VarP vs
-      let exp = return $ foldr (\x r -> TH.TupE [TH.VarE x, r]) (TH.TupE []) vs
-      if isSing
-        then [|\ $(pat) -> Just $(exp)|]
-        else [|\x -> case x of $(pat) -> Just $(exp); _ -> Nothing|]
-
-    makeBackward :: TH.Name -> Int -> Q TH.Exp
-    makeBackward cn n = do
-      vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
-      let pat = return $ foldr (\x r -> TH.TupP [TH.VarP x, r]) (TH.TupP []) vs
-      let exp = return $ foldl TH.AppE (TH.ConE cn) $ map TH.VarE vs
-      [|\ $(pat) -> Just $(exp)|]
+    -- makeBackward :: TH.Name -> Int -> Q TH.Exp
+    -- makeBackward cn n = do
+    --   vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
+    --   let pat = return $ foldr (\x r -> TH.TupP [TH.VarP x, r]) (TH.TupP []) vs
+    --   let exp = return $ foldl TH.AppE (TH.ConE cn) $ map TH.VarE vs
+    --   [|\ $(pat) -> Just $(exp)|]
 
     makeBody :: Int -> Q TH.Exp
     makeBody n = do
@@ -182,17 +168,17 @@ unGen cname = do
 -- The variables in the pattern must be different from any other bound variable in the scope.
 -- Otherwise, the same variable in the body refers to the bound variable,
 -- instead of the one introduced in the pattern.
-branch :: Q (TH.Pat) -> Q (TH.Exp) -> Q (TH.Exp)
+branch :: Q TH.Pat -> Q TH.Exp -> Q TH.Exp
 branch patQ expQ = do
-  pat <- patQ
+  p <- patQ
   exp <- expQ
-  let vs = gatherVarNames pat
-  let f = makeForward pat vs
-  let fi = makeBackward pat vs
-  let nf = "<" ++ pprint pat ++ ">"
+  let vs = gatherVarNames p
+  let f = makeForward' p vs
+  let fi = makeBackward' p vs
+  let nf = "<" ++ pprint p ++ ">"
   [|
     Branch
-      (PartialBij $(TH.litE $ TH.stringL $ nf) $f $fi)
+      (PartialBij $(TH.litE $ TH.stringL nf) $f $fi)
       $(makeBody exp vs)
     |]
   where
@@ -201,17 +187,17 @@ branch patQ expQ = do
       where
         go (TH.LitP _) r = r
         go (TH.VarP n) r = n : r
-        go (TH.TupP ps) r = foldr ($) r (map go ps)
-        go (TH.UnboxedTupP ps) r = foldr ($) r (map go ps)
-        go (TH.ConP _ ps) r = foldr ($) r (map go ps)
+        go (TH.TupP ps) r = foldr go r ps
+        go (TH.UnboxedTupP ps) r = foldr go r ps
+        go (TH.ConP _ ps) r = foldr go r ps
         go (TH.InfixP p1 _ p2) r = go p1 (go p2 r)
         go (TH.UInfixP p1 _ p2) r = go p1 (go p2 r)
         go (TH.ParensP p) r = go p r
         go (TH.TildeP p) r = go p r
         go (TH.BangP p) r = go p r
-        go (TH.WildP) r = r
-        go (TH.RecP _ fs) r = foldr ($) r (map (go . snd) fs)
-        go (TH.ListP ps) r = foldr ($) r (map go ps)
+        go TH.WildP r = r
+        go (TH.RecP _ fs) r = foldr (go . snd) r fs
+        go (TH.ListP ps) r = foldr go r ps
         go (TH.SigP p _) r = go p r
         go p _ = error $ "branch: Not supported: " ++ pprint p
 
@@ -220,27 +206,27 @@ branch patQ expQ = do
     patToExp (TH.VarP x) = TH.VarE x
     patToExp (TH.TupP ps) = TH.TupE (map patToExp ps)
     patToExp (TH.UnboxedTupP ps) = TH.UnboxedTupE (map patToExp ps)
-    patToExp (TH.ConP c ps) = foldl (TH.AppE) (TH.ConE c) $ map patToExp ps
+    patToExp (TH.ConP c ps) = foldl TH.AppE (TH.ConE c) $ map patToExp ps
     patToExp (TH.InfixP p1 n p2) = TH.InfixE (Just $ patToExp p1) (TH.ConE n) (Just $ patToExp p2)
     patToExp (TH.UInfixP p1 n p2) = TH.UInfixE (patToExp p1) (TH.ConE n) (patToExp p2)
     patToExp (TH.ParensP p) = TH.ParensE (patToExp p)
     patToExp (TH.TildeP p) = patToExp p
     patToExp (TH.BangP p) = patToExp p
-    patToExp (TH.WildP) = TH.TupE []
-    patToExp (TH.RecP n fs) = TH.RecConE n $ map (\(f, p) -> (f, patToExp p)) fs
+    patToExp TH.WildP = TH.TupE []
+    patToExp (TH.RecP n fs) = TH.RecConE n $ map (second patToExp) fs
     patToExp (TH.ListP ps) = TH.ListE (map patToExp ps)
     patToExp (TH.SigP p t) = TH.SigE (patToExp p) t
     patToExp p = error $ "branch: Not supported: " ++ pprint p
 
-    makeForward :: TH.Pat -> [TH.Name] -> Q TH.Exp
-    makeForward pat vs = do
-      let e = return $ foldr (\a r -> TH.TupE [a, r]) (TH.TupE []) $ map TH.VarE vs
-      [|\x -> case x of $(return pat) -> Just $(e); _ -> Nothing|]
+    makeForward' :: TH.Pat -> [TH.Name] -> Q TH.Exp
+    makeForward' pat0 vs = do
+      let e = return $ foldr (\a r -> TH.TupE [TH.VarE a, r]) (TH.TupE []) vs
+      [|\x -> case x of $(return pat0) -> Just $(e); _ -> Nothing|]
 
-    makeBackward :: TH.Pat -> [TH.Name] -> Q TH.Exp
-    makeBackward pat vs = do
-      let p = return $ foldr (\a r -> TH.TupP [a, r]) (TH.TupP []) $ map TH.VarP vs
-      [|\ $(p) -> Just $(return $ patToExp pat)|]
+    makeBackward' :: TH.Pat -> [TH.Name] -> Q TH.Exp
+    makeBackward' pat0 vs = do
+      let p = return $ foldr (\a r -> TH.TupP [TH.VarP a, r]) (TH.TupP []) vs
+      [|\ $(p) -> Just $(return $ patToExp pat0)|]
 
     makeBody :: TH.Exp -> [TH.Name] -> Q TH.Exp
     makeBody exp vs = do
@@ -254,3 +240,71 @@ branch patQ expQ = do
             unpair $(TH.varE x) $
               \ $(TH.varP u) $(if null vs then TH.wildP else TH.varP x') -> $(go us x')
             |]
+
+pat :: TH.Name -> Q TH.Exp
+pat cname = do
+  cinfo <- TH.reify cname
+  case cinfo of
+    TH.DataConI _ ty tyname -> do
+      let n = numberOfArgs ty
+      isSing <- isSingleton tyname
+      let f = makeForward cname n isSing
+      let fi = makeBackward cname n
+      let pBij = [| PartialBij $(TH.litE $ TH.stringL $ TH.nameBase cname) $f $fi |]
+      mkLift n [| Pat.lift $pBij |]
+    _ ->
+      fail $ "pat: " ++ show cname ++ " is not a constructor or unsupported name."
+
+    where
+      -- mkLift 0 f = [| $f unit |]
+      -- mkLift 1 f = [| \x -> $f (x &. unit) |]
+      -- mkLift 2 f = [| \x1 x2 -> $f (x1 &. x2 &. unit) |]
+      -- ...
+      mkLift :: Int -> Q TH.Exp -> Q TH.Exp
+      mkLift n f = do
+        vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1..n]
+        let body = foldr (\x r -> [| $(TH.varE x) Pat.&. $r |] ) [| Pat.unit |] vs
+        foldr (\x r -> [| \ $(TH.varP x) -> $r |] ) [| $f $body |] vs
+
+
+numberOfArgs :: TH.Type -> Int
+numberOfArgs (TH.AppT (TH.AppT ArrowT _) t2) = numberOfArgs t2 + 1
+numberOfArgs (TH.ForallT _ _ t)              = numberOfArgs t
+numberOfArgs (TH.SigT t _)                   = numberOfArgs t
+numberOfArgs (TH.ParensT t)                  = numberOfArgs t
+numberOfArgs _                               = 0
+
+makeForward :: TH.Name -> Int -> Bool -> Q TH.Exp
+makeForward cn n isSing = do
+  vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
+  let p = return $ TH.ConP cn $ map TH.VarP vs
+  let exp = return $ foldr (\x r -> TH.TupE [TH.VarE x, r]) (TH.TupE []) vs
+  if isSing
+    then [|\ $(p) -> Just $(exp)|]
+    else [|\x -> case x of $(p) -> Just $(exp); _ -> Nothing|]
+
+makeBackward :: TH.Name -> Int -> Q TH.Exp
+makeBackward cn n = do
+  vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
+  let p = return $ foldr (\x r -> TH.TupP [TH.VarP x, r]) (TH.TupP []) vs
+  let exp = return $ foldl TH.AppE (TH.ConE cn) $ map TH.VarE vs
+  [|\ $(p) -> Just $(exp)|]
+
+isSingleton :: TH.Name -> Q Bool
+isSingleton tyname = do
+  info <- TH.reify tyname
+  case info of
+    TH.TyConI dec ->
+      case dec of
+        TH.DataD _ _ _ _ cs _ ->
+          return $ length cs <= 1
+        TH.NewtypeD {} ->
+          return True
+        TH.DataInstD _ _ _ _ cs _ ->
+          return $ length cs <= 1
+        TH.NewtypeInstD {} ->
+          return True
+        _ ->
+          return False
+    _ ->
+      return False

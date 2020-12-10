@@ -86,10 +86,14 @@ module Text.FliPpr
     F.Nat9,
     reifySNat,
 
+    -- ** Pattern-like expressions
+    module Text.FliPpr.Pat,
+
     -- ** Template Haskell
     un,
     branch,
     mkUn,
+    pat,
 
     -- ** Predefined Deconstructors
     unTrue,
@@ -130,6 +134,7 @@ import qualified Text.FliPpr.Grammar                   as G
 import           Text.FliPpr.Internal.ParserGeneration
 import           Text.FliPpr.Internal.PrettyPrinting
 import           Text.FliPpr.Internal.Type
+import           Text.FliPpr.Pat
 import           Text.FliPpr.TH
 
 import qualified Data.RangeSet.List                    as RS

@@ -29,6 +29,7 @@ library
                        Text.FliPpr.Internal.Env, 
                        Text.FliPpr.Internal.PartialEnv
                        Text.FliPpr.Automaton 
+                       Text.FliPpr.Pat 
 
                                  
   build-depends:       base >= 4.7 && < 5, 
