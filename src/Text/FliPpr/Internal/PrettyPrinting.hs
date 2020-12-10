@@ -17,8 +17,8 @@ import qualified Data.RangeSet.List        as RS
 import qualified Text.FliPpr.Internal.Defs as Defs
 
 data Ppr d (t :: FType) where
-  PD :: d -> Ppr d D
-  PF :: (a -> Ppr d r) -> Ppr d (a ~> r)
+  PD :: !d -> Ppr d D
+  PF :: !(a -> Ppr d r) -> Ppr d (a ~> r)
 
 instance DocLike d => FliPprE Identity (Ppr d) where
   fapp (PF f) a = f (coerce a)

@@ -73,9 +73,14 @@ infixr 4 **
 
 infixr 4 :*:
 
+-- | Products of @f@ types.
+--
+--   The argument of constructor 'VT' is intensionally lazy, as
+--   we may want to use Haskell's recursive definitions to implement 'letrDS'.
+
 data DTypeVal (f :: k -> Type) :: DType k -> Type where
-  VT :: f ft -> DTypeVal f (Lift ft)
-  VProd :: DTypeVal f a -> DTypeVal f b -> DTypeVal f (a ** b)
+  VT ::    f ft -> DTypeVal f (Lift ft)
+  VProd :: !(DTypeVal f a) -> !(DTypeVal f b) -> DTypeVal f (a ** b)
 
 class Defs (f :: k -> Type) where
   data Fs f :: DType k -> Type

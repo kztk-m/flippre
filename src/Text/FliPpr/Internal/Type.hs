@@ -89,7 +89,7 @@ type In a = Eq a
 
 -- | A type for partial bijections. The 'String'-typed field will be used in pretty-printing
 --   of FliPpr expressions.
-data PartialBij a b = PartialBij String (a -> Maybe b) (b -> Maybe a)
+data PartialBij a b = PartialBij !String !(a -> Maybe b) !(b -> Maybe a)
 
 -- | A datatype represents branches.
 data Branch arg exp a (t :: FType)
