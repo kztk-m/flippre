@@ -69,23 +69,6 @@ module Text.FliPpr
     --    defineR,
     defines,
 
-    -- * Finite natural numbers
-    FinNE,
-    F.Fin (..),
-    F.SNat (..),
-    F.SNatI (..),
-    F.Nat0,
-    F.Nat1,
-    F.Nat2,
-    F.Nat3,
-    F.Nat4,
-    F.Nat5,
-    F.Nat6,
-    F.Nat7,
-    F.Nat8,
-    F.Nat9,
-    reifySNat,
-
     -- ** Pattern-like expressions
     module Text.FliPpr.Pat,
 
@@ -104,6 +87,24 @@ module Text.FliPpr
     unRight,
     unTuple3,
 
+    -- * Finite natural numbers (mostly, imported from "fin")
+    FinNE,
+    F.Fin (..),
+    F.SNat (..),
+    F.SNatI (..),
+    F.Nat0,
+    F.Nat1,
+    F.Nat2,
+    F.Nat3,
+    F.Nat4,
+    F.Nat5,
+    F.Nat6,
+    F.Nat7,
+    F.Nat8,
+    F.Nat9,
+    reifySNat,
+
+
     -- * Evaluator
     pprMode,
     parsingMode,
@@ -119,7 +120,7 @@ module Text.FliPpr
     Assoc (..),
     Prec,
     opPrinter,
-    is,
+    is, isMember,
   )
 where
 
@@ -239,14 +240,17 @@ define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
 define = share
 
 
+-- | Precedence.
 type Prec = Int
 
+-- | Fixity is a pair of associativity and precedence.
 data Fixity = Fixity Assoc Prec
 
+-- | Operator's associativity.
 data Assoc
-  = AssocL
-  | AssocR
-  | AssocN
+  = AssocL -- ^ left associative
+  | AssocR -- ^ right associative
+  | AssocN -- ^ non-associative
 
 opPrinter ::
   (DocLike d, Ord n, Num n) =>
@@ -269,6 +273,8 @@ $(mkUn ''(:))
 $(mkUn ''Either)
 $(mkUn ''(,,))
 
+-- | @textAs x r@ serves as @text x@ in pretty-printing, but
+-- in parsing it serves as @r@ of which parsing result is used to update @x$.
 
 textAs :: (FliPprD arg exp) => A arg String -> A.DFA Char -> E exp D
 textAs = flip textAs'

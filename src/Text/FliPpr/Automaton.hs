@@ -2,9 +2,14 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 
+-- | This module implements basic operations on automata.
+
 module Text.FliPpr.Automaton
     (
-        DFA, DFAImpl(..), NFA(..), NFANE(..), Regex(..), range, plus, intersections, unions,
+        DFA, DFAImpl(..), NFA(..), NFANE(..), Regex(..),
+
+        -- * Derived operators
+        range, plus, intersections, unions,
     )
     where
 
@@ -32,9 +37,10 @@ import           Text.FliPpr.Doc      as D hiding (empty)
 
 
 data NFANE c q =
-    NFANE { initsNFAne  :: S.Set q, -- ^ Initial state,
-            finalsNFAne :: S.Set q, -- ^ final state
-            transNFAne  :: M.Map q [(RSet c, q)] }
+    NFANE { initsNFAne  :: S.Set q, -- ^ Initial states
+            finalsNFAne :: S.Set q, -- ^ final states
+            transNFAne  :: M.Map q [(RSet c, q)] -- ^ transitions
+          }
 
 pprRSet :: (Eq c, Show c) => RSet c -> D.Doc
 pprRSet = D.brackets . go . RS.toRangeList
@@ -58,7 +64,7 @@ instance (Show q, Eq c, Show c) => D.Pretty (NFANE c q) where
                  D.text "Final(s):  " D.<+> D.text (show fs),
                  D.vsep [D.text "Transition(s):", D.nest 2 (D.align (pprTrMap tr)) ]]
 
-data NFA c q = NFA (NFANE c q) (M.Map q [q])
+data NFA c q = NFA (NFANE c q) (M.Map q [q]) -- ^ a pair of NFA without epsilon rules, and epsilon rules.
 
 instance (Show q, Eq c, Show c) => D.Pretty (NFA c q) where
     ppr (NFA (NFANE is fs tr) eps) =
@@ -74,10 +80,11 @@ instance (Show q, Eq c, Show c) => D.Pretty (NFA c q) where
 type DFA c = DFAImpl c Word
 
 data DFAImpl c q =
-    DFAImpl { initDFAImpl :: q,
-          statesDFAImpl   :: S.Set q,
-          finalsDFAImpl   :: S.Set q,
-          transDFAImpl    :: M.Map q [(RSet c, q)] }
+    DFAImpl { initDFAImpl :: q, -- ^ initial state
+          statesDFAImpl   :: S.Set q, -- ^ all states
+          finalsDFAImpl   :: S.Set q, -- ^ final states
+          transDFAImpl    :: M.Map q [(RSet c, q)] -- ^ transitions
+          }
 
 instance (Show q, Eq c, Show c) => D.Pretty (DFAImpl c q) where
     ppr (DFAImpl i0 qs fs tr) =
@@ -294,42 +301,73 @@ instance IsString (DFA Char) where
 
 
 class Monoid r => Regex c r | r -> c where
+    -- | 'empty' denotes the empty set
+    --
+    -- prop> empty == complement full
     empty :: r
     empty = complement full
 
-
+    -- | 'full' denotes the set of all strings.
+    --
+    -- prop> full == complement empty
     full  :: r
     full = complement empty
+
+    -- | 'union's two sets
+    --
+    -- prop> union r1 r2 == complement (complement r1 `intersection` complement r2)
 
     union :: r -> r -> r
     union r1 r2 = complement (complement r1 `intersection` complement r2)
 
+    -- | 'intersection' of two sets
+    --
+    -- prop> intersection r1 r2 == complement (complement r1 `union` complement r2)
+
     intersection :: r -> r -> r
     intersection r1 r2 = complement (complement r1 `union` complement r2)
+
+    -- | A 'singleton' set that consists only of a single letter word of @c@.
 
     singleton :: c -> r
     singleton = fromRSet . RS.singleton
     {-# INLINE singleton #-}
 
+    -- | A set of single letters taken from the given set.
+
     fromRSet :: RSet c -> r
 
+    -- | Kleene star.
+
     star :: r -> r
+
+    -- | The complement of the given set.
+    --
+    -- prop> complement r == full `difference` r
 
     complement :: r -> r
     complement r = full `difference` r
 
+    -- | The difference of the given two sets.
+
     difference :: r -> r -> r
     difference r1 r2 = r1 `intersection` complement r2
 
+    {-# MINIMAL (full | empty), (complement | difference), (union | intersection), star, fromRSet  #-}
+
+-- | @range c1 c2@ represents the set of single letter word of which component @c@ satisfies @c1 <= c && c <= c2@.
 range :: (Regex c r, Ord c) => c -> c -> r
 range c1 c2 = fromRSet $ RS.singletonRange (c1, c2)
 
+-- | @plus r = r <> star r@
 plus :: (Regex c r) => r -> r
 plus r = r <> star r
 
+-- | The union of given sets.
 unions :: Regex c r => [r] -> r
 unions = foldr union empty
 
+-- | The intersection of given sets.
 intersections :: Regex c r => [r] -> r
 intersections = foldr intersection full
 

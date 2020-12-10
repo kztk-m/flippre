@@ -132,7 +132,7 @@ choiceGen :: PExp s r -> PExp s r -> PExp s r
 choiceGen p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
 
 fromP :: GU s a -> PExp s D
-fromP x = PExp $ \tenv -> G.constantResult (return $ RD (PE.undeterminedEnv tenv)) x
+fromP x = PExp $ \tenv -> (return $ RD (PE.undeterminedEnv tenv)) <$ x
 
 -- return (RD PE.undeterminedEnv) <$ x
 

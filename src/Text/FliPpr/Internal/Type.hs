@@ -210,10 +210,10 @@ type FliPprD arg exp = (Defs exp, FliPprE arg exp)
 --   fshare :: exp t -> m (exp t)
 --   flocal :: m (exp t) -> exp t
 
--- | 'A arg a' is nothing but @arg a@, but used for controlling type inference.
+-- | @A arg a@ is nothing but @arg a@, but used for controlling type inference.
 newtype A (arg :: Type -> Type) (a :: Type) = A {unA :: arg a}
 
--- | Similarly, 'E exp t' is nothing but @exp t@.
+-- | Similarly, @E exp t@ is nothing but @exp t@.
 newtype E (exp :: FType -> Type) (t :: FType) = E {unE :: exp t}
 
 newtype FliPpr t = FliPpr (forall arg exp. FliPprD arg exp => exp t)

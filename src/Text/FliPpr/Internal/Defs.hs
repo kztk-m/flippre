@@ -73,7 +73,7 @@ infixr 4 **
 
 infixr 4 :*:
 
--- | Products of @f@ types.
+-- | Nested products of @f@ types.
 --
 --   The argument of constructor 'VT' is intensionally lazy, as
 --   we may want to use Haskell's recursive definitions to implement 'letrDS'.
@@ -82,7 +82,11 @@ data DTypeVal (f :: k -> Type) :: DType k -> Type where
   VT ::    f ft -> DTypeVal f (Lift ft)
   VProd :: !(DTypeVal f a) -> !(DTypeVal f b) -> DTypeVal f (a ** b)
 
+-- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
 class Defs (f :: k -> Type) where
+  -- | Interpretation of product types. We are expecting that
+  -- @Fs f a@ is isomorphic to @forall r. (DTypeVal f a -> f r) -> f r@,
+  -- but having direct interpretation would be convenient, at least to define 'letrDS'.
   data Fs f :: DType k -> Type
   -- DS stands for "direct style".
 
@@ -92,16 +96,15 @@ class Defs (f :: k -> Type) where
   unliftDS :: Fs f ( 'T a) -> f a
 
   pairDS :: Fs f a -> Fs f b -> Fs f (a ** b)
-  -- A method inspired by the trace operator in category theory.
-  -- This method serves as a bulding block of mutual recursions
+
+  -- | A method inspired by the trace operator in category theory (it is named
+  -- after "let rec" and "trace"), a basic building block of mutual recursions.
   letrDS :: (f a -> Fs f ( 'T a ** r)) -> Fs f r
 
--- In implementation, it is a specialized version of a codensity monad.
+-- | A monad to give better programming I/F. This actually is a specialized version of a codensity monad: @Def f@ is @Codensity (Fs f)@.
+--   We intentionally did not make it an instance of 'MonadFix'.
 newtype DefM f a = DefM {unDefM :: forall r. DefType r => (a -> Fs f r) -> Fs f r}
 
-
--- | 'DefM' is a monad to make definitions easily.
---   We intentionally do not make it an instance of 'MonadFix'.
 instance Functor (DefM exp) where
   fmap f m = DefM $ \k -> unDefM m (k . f)
   {-# INLINE fmap #-}
@@ -120,9 +123,29 @@ instance Monad (DefM exp) where
   m >>= f = DefM $ \k -> unDefM m $ \v -> unDefM (f v) k
   {-# INLINE (>>=) #-}
 
+-- | A basic building block for mutual recursion.
+--
+--  To define a recursion, simply use this function.
+--
+--  > letr $ \f ->
+--  >   def fdef $
+--  >   ... f ...
+--
+--  To define mutual recursions, nest this function.
+--
+-- > letr $ \f -> letr $ \g ->
+-- >   def fdef >>>
+-- >   def gdef $
+-- >   ... f ... g ...
 letr :: Defs f => (f a -> DefM f (f a, r)) -> DefM f r
 letr h = DefM $ \k -> letrDS $ \a -> unDefM (h a) $ \(b, r) -> pairDS (liftDS b) (k r)
 
+-- | @letrs [k1,...,kn] $ \f -> (def fdef r)@ to mean
+--
+-- > letr $ \f1 -> letr $ \f2 -> ... letr $ \fn ->
+-- >   def (fdef k1) >>> ... >>> def (fdef kn) $ do
+-- >   let f k = fromJust $ lookup k [(k1,f1), ..., (kn,fn)]
+-- >   r
 letrs :: (Defs f, Eq k) => [k] -> ((k -> f a) -> DefM f (k -> f a, r)) -> DefM f r
 letrs [] h = snd <$> h (const $ error "Text.FliPpr.Internal.Defs.letrs: out of bounds")
 letrs (k:ks) h = letr $ \fk -> letrs ks $ \h' -> do
@@ -140,15 +163,17 @@ someD d = local $ letr $ \m -> letr $ \s ->
    def (pure [] <|> s) $
    return s
 
-
+-- | @def a@ is a synonym of @fmap (a,)@, which is convenient to be used with 'letr'.
 def :: Functor f => a -> f b -> f (a, b)
 def a = fmap (a,)
 {-# INLINE def #-}
 
+-- | @TransD f a@ maps @f@ to leaves in @a@. For example, @TransD f (Lift a ** Lift b) = (Lift (f a) ** Lift (f b))@.
 type family TransD f a = b | b -> a f where
   TransD f ( 'T a) = 'T (f a)
   TransD f (a ** b) = TransD f a ** TransD f b
 
+-- | To perform induction on the structure of @DType k@.
 class DefType (r :: DType k) where
   indDType ::
     forall f.
@@ -176,6 +201,7 @@ instance (DefType a, DefType b) => DefType (a ** b) where
 --     arr :: (DTypeVal f (a ** b), r) -> (DTypeVal f a, (DTypeVal f b, r))
 --     arr (VProd a b, r) = (a, (b, r))
 
+-- | A class that provides a generalized version of 'letr'.
 class Defs f => LetArg f t where
   letrGen :: (t -> DefM f (t, r)) -> DefM f r
 
@@ -224,6 +250,15 @@ instance (LetArg f a, F.SNatI n) => LetArg f (F.Fin n -> a) where
           (h', r) <- h $ \case { F.FZ -> h0 ; F.FS n -> hstep n }
           return (h' . F.FS, (h' F.FZ , r))
 
+-- | A variant of 'mfix'. This function is supported to be used as:
+--
+--- > {-# LANGUAGE RecursiveDo, RebindableSyntax #-}
+--  >
+--  > someFunc = do
+--  >     rec a <- share $ ... a ... b ...
+--  >         b <- share $ ... a ... b ...
+--  >     ...
+--  >   where mfix = mfixDefM
 mfixDefM :: (Defs f, LetArg f a) => (a -> DefM f a) -> DefM f a
 mfixDefM f = letrGen $ \a -> (,a) <$> f a
 
@@ -231,6 +266,13 @@ mfixDefM f = letrGen $ \a -> (,a) <$> f a
 share :: Defs f => f a -> DefM f (f a)
 share s = DefM $ \k -> letrDS $ \a -> pairDS (liftDS s) (k a)
 
+-- | Makes definions to be 'local'.
+--
+-- For example, in the follownig code, the scope of shared computation is limited to @foo@; so using @foo@ twice copies @defa@.
+--
+-- > foo = local $ do
+-- >    a <- share defa
+-- >     ...
 local :: Defs f => DefM f (f t) -> f t
 local m = unliftDS $ unDefM m liftDS
 
@@ -239,14 +281,11 @@ class Monad m => VarM m where
   -- | A new variable name, which may or may not differ in calls.
   --   For de Bruijn levels, use the Reader monad and define
   --
-  --   @
-  --      newVar = do {i <- ask ; return ("x" ++ show i ) }
-  --   @
+  --   >  newVar = do {i <- ask ; return ("x" ++ show i ) }
   --
   --   Just for using different names, use the State monad and define
-  --   @
-  --      newVar = do { i <- get ; put (i + 1) ; return ("x" ++ show i) }
-  --   @
+  --
+  --   >  newVar = do { i <- get ; put (i + 1) ; return ("x" ++ show i) }
   --
   --   This representation does not cover de Bruijn indices; we do not support them.
   newVar :: m String
@@ -254,6 +293,7 @@ class Monad m => VarM m where
   -- | +1 to the nesting level. This is just identity if ones to assign different names for different variables.
   nestScope :: m a -> m a
 
+-- | A general pretty-printer for 'Defs' methods. Use different @m@ printing different HOAS, to avoid overlapping instance.
 newtype PprDefs m _a = PprDefs {pprDefs :: D.Precedence -> m D.Doc}
 
 data RPairD = RPairD D.Doc D.Doc | ROtherD D.Doc
@@ -262,6 +302,7 @@ pprRPairD :: RPairD -> D.Doc
 pprRPairD (RPairD d1 d2) = D.hcat [D.text "<", D.align d1 D.<$$> D.text ",", D.align d2, D.text ">"]
 pprRPairD (ROtherD d) = d
 
+-- FIXME: The current pretty-printer does not output "let rec ... and ...", which makes outputs unreadable.
 instance VarM m => Defs (PprDefs m) where
   newtype Fs (PprDefs m) _a = PRules {runPRules :: D.Precedence -> m RPairD}
 

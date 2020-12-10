@@ -1,5 +1,6 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TupleSections   #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TemplateHaskell  #-}
+{-# LANGUAGE TupleSections    #-}
 
 module Text.FliPpr.TH
   (
@@ -14,9 +15,9 @@ import           Prelude                      hiding (exp)
 import           Text.FliPpr.Internal.Type
 import           Text.FliPpr.Pat              as Pat
 
-{-
-Needs FlexibleContents.
--}
+-- | Generate "un" functions for datatypes. This does not work well for
+-- non-letter constructor names in general, except for @[]@, @(:)@, and tuples.
+
 mkUn :: TH.Name -> Q [TH.Dec]
 mkUn n = do
   info <- TH.reifyDatatype n
@@ -42,22 +43,23 @@ mkUn n = do
             j : _ -> return $ TH.mkName $ "unTuple" ++ show j
             _ -> fail $ "mkUn does not support non-letter constructors in general: " ++ show n
 
--- |
--- Make an (injective) deconstructor from a constructor.
---
--- For example, we have:
---
--- >>> :t $(un '(:))
--- \$(un '(:))
---   :: (FliPprE arg exp, Eq a, Data.Typeable.Internal.Typeable a) =>
---      (A arg a -> A arg [a] -> E exp t) -> Branch (A arg) (E exp) [a] t
---
--- >>> :t $(un 'Left)
--- \$(un 'Left)
---   :: (FliPprE arg exp, Eq a, Data.Typeable.Internal.Typeable a) =>
---      (A arg a -> E exp t1) -> Branch (A arg) (E exp) (Either a t) t1
---
--- In general, use of 'un' requires FlexibleContents.
+{- |
+Make an (injective) deconstructor from a constructor.
+
+For example, we have:
+
+>>> :t $(un '(:))
+$(un '(:))
+  :: forall (arg :: * -> *) (exp :: FType -> *) a (r :: FType).
+     (FliPprE arg exp, Eq a) =>
+     (A arg a -> A arg [a] -> E exp r) -> Branch (A arg) (E exp) [a] r
+
+>>> :t $(un 'Left)
+$(un 'Left)
+  :: forall (arg :: * -> *) (exp :: FType -> *) a (r :: FType) b.
+     (FliPprE arg exp, Eq a) =>
+     (A arg a -> E exp r) -> Branch (A arg) (E exp) (Either a b) r
+-}
 un :: TH.Name -> Q TH.Exp
 un n = do
   (t, e) <- unGen n
@@ -161,9 +163,7 @@ unGen cname = do
 -- A syntactic sugar for 'Branch'.
 -- A typical usage is:
 --
--- @@
---  $(branch [p| a : x |] [| ppr `app` a <> pprs `app` x |])
--- @@
+-- > $(branch [p| a : x |] [| ppr `app` a <> pprs `app` x |])
 --
 -- The variables in the pattern must be different from any other bound variable in the scope.
 -- Otherwise, the same variable in the body refers to the bound variable,
@@ -240,6 +240,36 @@ branch patQ expQ = do
             unpair $(TH.varE x) $
               \ $(TH.varP u) $(if null vs then TH.wildP else TH.varP x') -> $(go us x')
             |]
+
+{- |
+
+This provide the most general way for pattern matching in this module.
+The generated pattern-like expressions are supposed to be used together with 'br' in 'Text.FliPpr.Pat'.
+
+>>> :t $(pat '(:))
+$(pat '(:))
+  :: forall env'1 env'2 a env.
+     PatT env'1 env'2 a -> PatT env env'1 [a] -> PatT env env'2 [a]
+
+
+>>> :t $(pat 'True)
+$(pat 'True) :: forall env'. PatT env' env' Bool
+
+
+>>> :t $(pat 'Left)
+$(pat 'Left) :: forall env env' a b. PatT env env' a -> PatT env env' (Either a b)
+
+
+>>> :t $(pat '(,,,))
+$(pat '(,,,))
+  :: forall env'1 env'2 a env'3 b env'4 c env d.
+     PatT env'1 env'2 a
+     -> PatT env'3 env'1 b
+     -> PatT env'4 env'3 c
+     -> PatT env env'4 d
+     -> PatT env env'2 (a, b, c, d)
+
+-}
 
 pat :: TH.Name -> Q TH.Exp
 pat cname = do

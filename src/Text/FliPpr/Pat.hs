@@ -6,7 +6,15 @@
 {-# LANGUAGE TupleSections          #-}
 {-# LANGUAGE UndecidableInstances   #-}
 
--- | Utility to handle branching
+-- | Utility to handle branching. The goal of this module is to provide basic building blocks to
+--   write FliPpr patterns.
+--
+--   For example, by this module's functions, one can write:
+--
+--   > case_ x [ pNil `br` ... {- nil case -} ...,
+--   >           pCons varP pNil `br` \x -> ... {- singleton case -} ...,
+--   >           pCons varP (pCons varP varP) `br` \x y xs -> ... {- double cons case -} ... ]
+--
 module Text.FliPpr.Pat
     (
         PatT, varP, lift, (&.), unit, toPartialBij,
@@ -14,7 +22,7 @@ module Text.FliPpr.Pat
         -- * Derived combinators
         lift0, lift2, lift3,
 
-        -- * Predefined operators
+        -- * Predefined pattern-like combinators.
         pNil, pCons, pTrue, pFalse,
 
         -- * Pattern to branching
@@ -31,13 +39,15 @@ data PBij a b = PBij !(a -> Maybe b) !(b -> Maybe a)
 fromPBij :: (PBij a b, ShowS) -> PartialBij a b
 fromPBij (PBij f fi, fn) = PartialBij (fn "") f fi
 
--- | A pattern of type @a@ transforms environments from @env@ to @env'@
+-- | A pattern of type @a@ transforms environments from @env@ to @env'@.
 
 newtype PatT env env' a = PatT { runPatT :: forall r. PBij r env -> (PBij (a, r) env', ShowS) }
 
+-- | A variable pattern of type @a@.
 varP :: PatT env (a, env) a
 varP = PatT $ \(PBij f fi) -> (PBij (\(a,env) -> (a,) <$> f env) (\(a,r) -> (a,) <$> fi r), showString "_")
 
+-- | Lifting 'PartialBij' into a pattern transformer.
 lift :: forall a b env env'. PartialBij a b -> PatT env env' b -> PatT env env' a
 lift (PartialBij fn f fi) (PatT tr) = PatT $ h . tr
     where
@@ -58,30 +68,34 @@ prod (PatT tr1) (PatT tr2) = PatT $ \p ->
         assocr ((a, b), c) = (a, (b, c))
         assocl (a, (b, c)) = ((a, b), c)
 
+-- | Pair patterns.
 (&.) :: PatT env' env'' a -> PatT env env' b -> PatT env env'' (a, b)
 (&.) = prod
 
 infixr 4 &.
 
+-- | The unit pattern.
 unit :: PatT env env ()
 unit = PatT $ \(PBij f fi) -> (PBij (\((), r) -> f r) (fmap ((),) . fi), id)
 
+-- | Lifting of 'PartialBij' that returns @()@.
 lift0 :: PartialBij a () -> PatT env' env' a
 lift0 p = lift p unit
 
+-- | Lifting of 'PartialBij' that returns pairs.
 lift2 :: PartialBij a (b, c) -> PatT env'1 env'2 b -> PatT env env'1 c -> PatT env env'2 a
 lift2 p x y = lift p (x &. y)
 
+-- | Lifting of 'PartialBij' that returns triples represented as nested pair.
 lift3 :: PartialBij a (b, (c, d)) -> PatT env2 env3 b -> PatT env1 env2 c -> PatT env env1 d -> PatT env env3 a
 lift3 p x y z = lift p (x &. y &. z)
 
 -- | Converts 'PatT' to 'PartialBij'
 --
--- >>> :t pat (pCons varP (pCons varP varP))
+-- >>> :t toPartialBij (pCons varP (pCons varP varP))
 -- toPartialBij (pCons varP (pCons varP varP)) :: forall b. PartialBij [b] (b, (b, ([b], ())))
---
--- >>> let PartialBij fn _ _ = toPartialBij (pCons (pCons varP varP) (pCons varP varP)) in fn
--- "((:) ((:) _ _) ((:) _ _))"
+-- >>> :t toPartialBij (pCons (pCons varP varP) (pCons varP varP))
+-- toPartialBij (pCons (pCons varP varP) (pCons varP varP)) :: forall b. PartialBij [[b]] (b, ([b], ([b], ([[b]], ()))))
 
 toPartialBij :: PatT () env a -> PartialBij a env
 toPartialBij tr = fromPBij $ h $ runPatT tr (PBij Just Just)

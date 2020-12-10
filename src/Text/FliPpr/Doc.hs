@@ -1,5 +1,9 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
+-- | This module implements Wadler's pretty-printing combinators.
+--   We do not use the existing well-designed libraries because we want to make
+--   pretty-printing combinators class methods, so that FliPpr programs can use
+--   the combinators, with different meanings in forward and backward execution.
 module Text.FliPpr.Doc
   ( Precedence,
     Pretty (..),
@@ -28,12 +32,14 @@ module Text.FliPpr.Doc
   )
 where
 
-import Control.Arrow (second)
-import Data.Coerce (coerce)
-import Data.Semigroup ()
+import           Control.Arrow  (second)
+import           Data.Coerce    (coerce)
+import           Data.Semigroup ()
 
+-- | Though we define 'Precedence' as 'Rational', FliPpr assumes that the set of precedences is finite in order to generate finite CFGs.
 type Precedence = Rational
 
+-- | Pretty-printable datatypes (used internally)
 class Pretty a where
   pprPrec :: Precedence -> a -> Doc
   pprPrec _ = ppr
@@ -45,6 +51,8 @@ class Pretty a where
   pprList = brackets' . punctuate (text ",") . map ppr
     where
       brackets' d = group (text "[" <> align (d </> text "]"))
+
+  {-# MINIMAL ppr | pprPrec #-}
 
 instance Pretty a => Pretty [a] where
   ppr = pprList
@@ -63,6 +71,7 @@ instance Pretty Float where ppr = text . show
 
 instance Pretty Double where ppr = text . show
 
+-- | A type class that provides pretty-printing combinators.
 class (Semigroup d, Monoid d) => DocLike d where
   text :: String -> d
   empty :: d
@@ -115,8 +124,8 @@ infixr 5 </>
 infixr 5 //
 
 foldDoc :: DocLike d => (d -> d -> d) -> [d] -> d
-foldDoc _ [] = empty
-foldDoc _ [d] = d
+foldDoc _ []       = empty
+foldDoc _ [d]      = d
 foldDoc f (d : ds) = f d (foldDoc f ds)
 
 hcat :: DocLike d => [d] -> d
@@ -147,12 +156,12 @@ braces :: DocLike d => d -> d
 braces d = text "{" <> d <> text "}"
 
 parensIf :: DocLike d => Bool -> d -> d
-parensIf True = parens
+parensIf True  = parens
 parensIf False = id
 
 punctuate :: DocLike d => d -> [d] -> d
-punctuate _op [] = empty
-punctuate _op [d] = d
+punctuate _op []      = empty
+punctuate _op [d]     = d
 punctuate op (d : ds) = d <> op <> punctuate op ds
 
 class DocLike d => Renderable d where

@@ -12,6 +12,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 
+-- | This module provides manipulation of grammars.
 module Text.FliPpr.Grammar
   ( -- * Type definitions
     Grammar (..),
@@ -45,6 +46,8 @@ module Text.FliPpr.Grammar
     -- * Pretty-Printing
     pprGrammar,
     pprAsFlat,
+
+    -- * Re-export of 'Defs' for convenience.
     module Defs,
   )
 where
@@ -76,18 +79,19 @@ import qualified Text.FliPpr.Internal.Env  as E
 
 {-# ANN module "HLint: ignore Use const" #-}
 
+-- | A grammar expression. This class does not specify any ways to define "nonterminals", which indeed is the role of 'Defs'.
 class (Applicative e, Alternative e) => Grammar c e | e -> c where
+  -- | A production of a given single char.
   symb :: c -> e c
+
+  -- | A production of a single character taken from a given set.
   symbI :: RSet c -> e c
 
-  -- | Same as @fmap . const@ but this would be useful for further optimization.
-  --   TODO: Remove it, as it is not used.
-  constantResult :: a -> e t -> e a
-  constantResult f e = f <$ e
-
+-- | A production of symbols.
 symbols :: Grammar c e => [c] -> e [c]
 symbols = foldr (\a r -> (:) <$> symb a <*> r) (pure [])
 
+-- | Grammars, with ability to define nonterminals.
 type GrammarD c e = (Defs e, Grammar c e)
 
 newtype NonterminalPrinterM c a = NonterminalPrinterM {runNonterminalPrinterM :: State Int a}
@@ -135,16 +139,38 @@ pprGrammar :: Show c => PprDefs (NonterminalPrinterM c) _a -> D.Doc
 pprGrammar g =
   evalState (runNonterminalPrinterM (pprDefs g 0)) 1
 
+-- | 'rule' introduces sharing. A typical use is:
+--
+-- > do x <- rule $ text "A" <|> text "B"
+-- >   ... nt x ... nt x ...
+--
+--
+-- This code is different from the below one, which expands the definition of @x@.
+--
+-- > do x <- return $ text "A" <|> text "B"
+-- >    ... x ... x ...
+--
+-- Note that this combinator is just about sharing. Looping must be handled by
+-- 'letr' and its derived combinators (such as 'mfixDefM'; recursive definitions
+-- is possible by locally defining @mfix = mfixDefM@ together with
+-- GHC extensions "RebindableSyntax" and "RecursiveDo").
+
 rule :: Defs.Defs f => f a -> DefM f (Identity (f a))
 rule = fmap Identity . Defs.share
 
+-- | A synonym of 'runIdentity', which is named after "nonterminal" and supposed to be used with 'rule'.
 nt :: Defs.Defs f => Identity (f a) -> f a
 nt = runIdentity
 
+-- | Characters with special symbols 'Space' and 'Spaces'. They will be
+--   converted to a single "white space" and zero-or-more "white spaces", by
+--   'withSpace' so that concatenation of 'Space' and 'Spaces' does not lead to
+--   ambiguity. The "white space" here is not necessarily the space character,
+--   'withSpace' provides users to specify how "white spaces" are interpreted.
 data ExChar
-  = Space
-  | Spaces
-  | NormalChar {-# UNPACK #-} !Char
+  = Space    -- ^ Special symbol denoting a single space " "
+  | Spaces   -- ^ Special symbol denoting zero-or-more spaces
+  | NormalChar {-# UNPACK #-} !Char -- ^ Normal charactors (which may be " ")
   deriving (Eq, Ord)
 
 instance Enum ExChar where
@@ -186,6 +212,7 @@ instance Show ExChar where
   showList s = \r -> show (D.pprList s) ++ r
 
 class CharLike c where
+  -- | Injection from 'Char'
   fromChar :: Char -> c
 
 instance CharLike Char where
@@ -194,17 +221,21 @@ instance CharLike Char where
 instance CharLike ExChar where
   fromChar = NormalChar
 
+-- | A production of a charactor.
 char :: (CharLike c, Grammar c e) => Char -> e c
 char c = symb (fromChar c)
 
+-- | A production of a string.
 text :: (CharLike c, Grammar c e) => String -> e [c]
 text = foldr (\c r -> (:) <$> char c <*> r) (pure [])
 
+-- | A production of the special symbol 'Space'
 space :: Grammar ExChar e => e ()
-space = constantResult () $ symb Space
+space = () <$ symb Space
 
+-- | A production of the special symbol 'Spaces'
 spaces :: Grammar ExChar e => e ()
-spaces = constantResult () $ symb Spaces
+spaces = () <$ symb Spaces
 
 type Env = E.Env E.U
 
@@ -219,6 +250,8 @@ instance Show c => D.Pretty (RHS c env a) where
   ppr (RHS rs) =
     D.punctuate (D.line D.<> D.text "|" D.<> D.text " ") $ map D.ppr rs
 
+-- | Flat grammars. This definion basically follows what appears in:
+--   Arthur I. Baars, S. Doaitse Swierstra, Marcos Viera: Typed Transformations of Typed Grammars: The Left Corner Transform. Electron. Notes Theor. Comput. Sci. 253(7): 51-64 (2010).
 data FlatGrammar c a = forall env. FlatGrammar !(Bindings c env env) !(RHS c env a)
 
 pprAsFlat :: Show c => ToFlatGrammar c a -> D.Doc
@@ -277,10 +310,11 @@ data Res c env a = forall env'. Res (Bindings c env' env') (RHS c env' a) (Diff 
 instance Functor (Res c env) where
   fmap f (Res bs rhs diff) = Res bs (fmap f rhs) diff
 
+-- | Interpretation of the 'GrammarD' methods to produce 'FlatGrammar's.
+
 -- FIXME: This implementation is inefficient due to repeated shifting.
 -- So, we need to abstract environments for faster manipulatoin and
 -- avoid re-traversal of data-structures by delaying shifting.
-
 newtype ToFlatGrammar c a = ToFlatGrammar {toFlatGrammar :: forall env. Bindings c env env -> Res c env a}
   deriving (Functor)
 
@@ -327,7 +361,7 @@ instance Grammar c (ToFlatGrammar c) where
   symb c = ToFlatGrammar $ \defs -> Res defs (RHS [PCons (Symb c) $ PNil id]) id
   symbI cs = ToFlatGrammar $ \defs -> Res defs (RHS [PCons (SymbI cs) $ PNil id]) id
 
-  constantResult = (<$)
+--  constantResult = (<$)
 
 type Value = Defs.DTypeVal
 
@@ -360,6 +394,7 @@ instance Defs (ToFlatGrammar c) where
             let defs2' = E.updateEnv (E.shift diff2 x) r defs2
              in Ress defs2' res (diff2 . diff)
 
+-- | Conversion to flat grammars.
 flatten :: ToFlatGrammar c a -> FlatGrammar c a
 flatten g =
   case toFlatGrammar g E.emptyEnv of
@@ -489,8 +524,22 @@ data Opt c g a where
   -- OptSimple :: g a -> Opt c g a -- inlinable
   OptOther :: g a -> Opt c g a
 
+-- | An interpretation of grammar methods for simplification.
+
 -- type Simplify c g = CheckProd c (Opt c g)
 type Simplify c g = Opt c (ToFlatGrammar c)
+
+-- | Simplification of grammars, it performs
+--
+--   * Conversions using the fact that @empty@ is the zero element
+--
+--   * Conversions using the fact that @pure f@ is the unit element
+--
+--   * Merging 'symbI's that occur directly under '<|>'
+--
+--   * Removal of nonterminals unreachable from the start symbol.
+--
+--   * A simple inlining.
 
 simplifyGrammar :: (Show c, Ord c, Enum c, GrammarD c g) => Simplify c g a -> g a
 simplifyGrammar g = unOpt $ unFlatten $ removeNonProductive $ flatten $ unOpt g
@@ -631,7 +680,7 @@ instance (Defs g, Grammar Char g) => Grammar ExChar (ThawSpace g) where
        unNormalChar _              = error "Cannot happen."
   {-# INLINE symbI #-}
 
-  constantResult f a = ThawSpace $ \sp sps -> constantResult f (runThawSpace a sp sps)
+--  constantResult f a = ThawSpace $ \sp sps -> constantResult f (runThawSpace a sp sps)
 
 instance Defs g => Defs (ThawSpace g) where
   newtype Fs (ThawSpace g) a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> Fs g a}
@@ -838,6 +887,7 @@ collapseSpace :: (Defs g, Grammar ExChar g) => FlatGrammar ExChar a -> g a
 collapseSpace = optSpaces
 {-# INLINE collapseSpace #-}
 
+-- | Thawing 'Space' and 'Spaces'.
 withSpace :: (Defs exp, Grammar Char exp) => exp () -> ToFlatGrammar ExChar a -> exp a
 withSpace gsp g = thawSpace gsp $ simplifyGrammar $ collapseSpace (flatten g)
 {-# INLINE withSpace #-}

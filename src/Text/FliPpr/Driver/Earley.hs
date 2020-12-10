@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TypeFamilies          #-}
 
+-- | Interpretation of 'Grammar's as Earley parsers.
 module Text.FliPpr.Driver.Earley (asEarley, parse) where
 
 import           Data.Foldable            (asum)
@@ -39,9 +40,18 @@ toEarley (G.FlatGrammar defs rhs) = do
     procSymb _env (G.SymbI cs) = pure $ E.satisfy (`RS.member` cs)
     procSymb env (G.NT x)      = pure $ Env.lookupEnv x env
 
+-- | Converts our grammars into those in @Text.Earley@.
 asEarley :: Ord c => G.ToFlatGrammar c t -> E.Grammar r (E.Prod r c c t)
 asEarley g = toEarley $ G.flatten g
 
+-- | Performs parsing after conversion by 'asEarley'.
+--
+--   There is a caveat in the usage of this function.
+--   Merely using @parse g s@ multiple times triggers re-interpretation of @g@. So please prepare a partially applied function as:
+--
+--   > parseG = parse g
+--
+--   to avoid the re-interpretatin of g.
 parse :: forall c a. (Show c, Ord c) => (forall g. G.GrammarD c g => g (Err a)) -> [c] -> Err [a]
 parse g = \str ->
   case E.fullParses pp str of
