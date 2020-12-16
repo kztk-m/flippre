@@ -62,8 +62,7 @@ import           Data.Foldable             (asum)
 
 import           Data.Bifunctor            (bimap)
 
-import           Data.Functor.Identity     (Identity (..))
-
+import           Data.Coerce               (coerce)
 import           Data.Maybe                (mapMaybe)
 import           Data.Monoid               (Endo (..))
 import           Data.RangeSet.List        (RSet)
@@ -155,12 +154,12 @@ pprGrammar g =
 -- is possible by locally defining @mfix = mfixDefM@ together with
 -- GHC extensions "RebindableSyntax" and "RecursiveDo").
 
-rule :: Defs.Defs f => f a -> DefM f (Identity (f a))
-rule = fmap Identity . Defs.share
+rule :: Defs.Defs f => f a -> DefM f (Tip (f a))
+rule = coerce . Defs.share
 
 -- | A synonym of 'runIdentity', which is named after "nonterminal" and supposed to be used with 'rule'.
-nt :: Defs.Defs f => Identity (f a) -> f a
-nt = runIdentity
+nt :: Defs.Defs f => Tip (f a) -> f a
+nt = coerce
 
 -- | Characters with special symbols 'Space' and 'Spaces'. They will be
 --   converted to a single "white space" and zero-or-more "white spaces", by
@@ -365,9 +364,9 @@ instance Grammar c (ToFlatGrammar c) where
 
 type Value = Defs.DTypeVal
 
-valueMap :: (forall b. f b -> g b) -> Value f a -> Value g a
-valueMap f (VT a)      = VT (f a)
-valueMap f (VProd x y) = VProd (valueMap f x) (valueMap f y)
+-- valueMap :: (forall b. f b -> g b) -> Value f a -> Value g a
+-- valueMap f (VT a)      = VT (f a)
+-- valueMap f (VCons x y) = VCons (f x) (valueMap f y)
 
 data Ress c env a = forall env'. Ress (Bindings c env' env') (Value (RHS c env') a) (Diff env env')
 
@@ -382,15 +381,15 @@ instance Defs (ToFlatGrammar c) where
     case toFlatGrammars c defs of
       Ress defs' (VT r') diff' -> Res defs' r' diff'
 
-  pairDS x y = ToFlatGrammars $ \defs -> case toFlatGrammars x defs of
-    Ress defs1 r1 diff1 -> case toFlatGrammars y defs1 of
-      Ress defs2 r2 diff2 -> Ress defs2 (VProd (valueMap (E.shift diff2) r1) r2) (diff2 . diff1)
+  consDS x y = ToFlatGrammars $ \defs -> case toFlatGrammar x defs of
+    Res defs1 r1 diff1 -> case toFlatGrammars y defs1 of
+      Ress defs2 r2 diff2 -> Ress defs2 (VCons (E.shift diff2 r1) r2) (diff2 . diff1)
 
   letrDS h = ToFlatGrammars $ \defs ->
     let (defs1, x, diff) = E.extendEnv defs (RHS []) -- a placeholder
         argH = ToFlatGrammar $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Res defs' (E.shift diff' $ RHS [PCons (NT x) $ PNil id]) id
      in case toFlatGrammars (h argH) $ E.mapEnv (E.shift diff) defs1 of
-          Ress defs2 (VProd (VT r) res) diff2 ->
+          Ress defs2 (VCons r res) diff2 ->
             let defs2' = E.updateEnv (E.shift diff2 x) r defs2
              in Ress defs2' res (diff2 . diff)
 
@@ -607,13 +606,13 @@ unOptRules :: (Defs g, Grammar c g) => Fs (Opt c g) a -> Fs g a
 -- unOptRules _ | trace "unOptRules" False = undefined
 unOptRules (OptRulesOther r)    = r
 unOptRules (OptLifted p)        = liftDS (unOpt p)
-unOptRules (OptRulesPair p1 p2) = pairDS (unOptRules p1) (unOptRules p2)
+unOptRules (OptRulesCons p1 p2) = consDS (unOpt p1) (unOptRules p2)
 
 instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
   data Fs (Opt c g) _a where
     OptRulesOther :: Fs g a -> Fs (Opt c g) a
     OptLifted :: Opt c g a -> Fs (Opt c g) (Lift a)
-    OptRulesPair :: Fs (Opt c g) a -> Fs (Opt c g) b -> Fs (Opt c g) (a ** b)
+    OptRulesCons :: Opt c g a -> Fs (Opt c g) b -> Fs (Opt c g) (a <* b)
 
   liftDS p = OptLifted p
   {-# INLINE liftDS #-}
@@ -622,16 +621,16 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
   unliftDS (OptRulesOther r) = OptOther $ unliftDS r
   {-# INLINE unliftDS #-}
 
-  pairDS p1 p2 = OptRulesPair p1 p2
-  {-# INLINE pairDS #-}
+  consDS p1 p2 = OptRulesCons p1 p2
+  {-# INLINE consDS #-}
 
   letrDS h = OptRulesOther $ letrDS $ \a -> unOptRules $ h (OptOther a)
   -- letrDS h =
   --   -- FIXME: This tries to inline definitions, but we do not need to do it at this point, as unFlatten does so.
   --   case h (OptOther empty) of
-  --     OptRulesPair (OptLifted res) _
+  --     OptRulesCons (OptLifted res) _
   --       | isSimpleEnough res ->
-  --         let ~(OptRulesPair _ r) = h res in r
+  --         let ~(OptRulesCons _ r) = h res in r
   --     _ -> OptRulesOther $ letrDS $ \a -> unOptRules $ h (OptSimple a)
 
 newtype ThawSpace g a = ThawSpace {runThawSpace :: g ExChar -> g ExChar -> g a}
@@ -691,8 +690,8 @@ instance Defs g => Defs (ThawSpace g) where
   unliftDS a = ThawSpace $ \sp sps -> unliftDS (runThawSpaces a sp sps)
   {-# INLINE unliftDS #-}
 
-  pairDS x y = ThawSpaces $ \sp sps -> pairDS (runThawSpaces x sp sps) (runThawSpaces y sp sps)
-  {-# INLINE pairDS #-}
+  consDS x y = ThawSpaces $ \sp sps -> consDS (runThawSpace x sp sps) (runThawSpaces y sp sps)
+  {-# INLINE consDS #-}
 
   letrDS k = ThawSpaces $ \sp sps ->
     letrDS $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps

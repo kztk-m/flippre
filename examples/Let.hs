@@ -88,7 +88,7 @@ pExp = do
   let op s d1 d2 =
         group $
           d1 <> nest 2 (line' <> text s <+>. d2)
-  rec pprE <- defines (snat :: SNat Nat4) $ \k e ->
+  rec pprE <- define $ \k e ->
         manyParens $
           case_
             e
@@ -106,14 +106,14 @@ pExp = do
                       <> line
                       <> text "in" <+> pprE 0 e2
             ]
-  return (\x -> spaces <> pprE 0 x <> spaces)
+  return (\x -> spaces <> pprE (0 :: FinNE Nat4) x <> spaces)
 
 grammar :: G.GrammarD Char g => g (Err Exp)
 grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pExp)
 
-makeParser :: In t => (forall a e. FliPprD a e => FliPprM e (A a t -> E e D)) -> String -> Err [t]
-makeParser p =
-  Earley.parse $ parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> p)
+-- makeParser :: In t => (forall a e. FliPprD a e => FliPprM e (A a t -> E e D)) -> String -> Err [t]
+-- makeParser p =
+--   Earley.parse $ parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> p)
 
 pprExp :: Exp -> Doc
 pprExp = pprMode (flippr $ fromFunction <$> pExp)

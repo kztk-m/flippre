@@ -1,12 +1,13 @@
-{-# LANGUAGE DataKinds              #-}
-{-# LANGUAGE FlexibleContexts       #-}
-{-# LANGUAGE FlexibleInstances      #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GADTs                  #-}
-{-# LANGUAGE KindSignatures         #-}
-{-# LANGUAGE TemplateHaskell        #-}
-{-# LANGUAGE TypeOperators          #-}
-{-# LANGUAGE UndecidableInstances   #-}
+{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE FunctionalDependencies    #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE KindSignatures            #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE TypeOperators             #-}
+{-# LANGUAGE UndecidableInstances      #-}
 
 module Text.FliPpr
   ( -- * Types
@@ -67,7 +68,7 @@ module Text.FliPpr
     define,
     Repr (..),
     --    defineR,
-    defines,
+    -- defines,
 
     -- ** Pattern-like expressions
     module Text.FliPpr.Pat,
@@ -156,14 +157,14 @@ infixr 4 <+>.
 
 infixr 4 </>.
 
-defines :: (FliPprD arg exp, Repr arg exp t r, F.SNatI n) => F.SNat n -> (FinNE n -> r) -> FliPprM exp (FinNE n -> r)
-defines _ f = do
-  let ks = [minBound .. maxBound]
-  rs <- mapM (define . f) ks
-  let table = M.fromList $ zip ks rs
-  return $ \k -> case M.lookup k table of
-    Just m  -> m
-    Nothing -> error "defines_: Cannot happen."
+-- defines :: (FliPprD arg exp, Repr arg exp t r, F.SNatI n) => F.SNat n -> (FinNE n -> r) -> FliPprM exp (FinNE n -> r)
+-- defines _ f = do
+--   let ks = [minBound .. maxBound]
+--   rs <- mapM (define . f) ks
+--   let table = M.fromList $ zip ks rs
+--   return $ \k -> case M.lookup k table of
+--     Just m  -> m
+--     Nothing -> error "defines_: Cannot happen."
 
 -- -- |
 -- -- @defineR (k1,k2)@ is the same as @defines [k1..k2]@, but a bit more efficient. x
@@ -236,7 +237,8 @@ isMember cs f =
 -- instead of:
 --
 -- >  rec f <- share $ arg $ \i -> ... f `app` a ...
-define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
+-- define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
+define :: LetArg (E f) r => r -> FliPprM f r
 define = share
 
 

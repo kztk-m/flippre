@@ -124,6 +124,8 @@ instance EnvImpl U where
 
   traverseWithVar f (EnvU k m) = EnvU k <$> IM.traverseWithKey (\i x -> Untype <$> f (VarU (k - i)) (unsafeCast x)) m
 
+  mapEnv f (EnvU k m) = EnvU k $ IM.map (Untype . f . unsafeCast) m
+
   zipWithA f (EnvU k m1) (EnvU _ m2) =
     fmap (EnvU k) $ sequenceA $ IM.intersectionWith (\x y -> Untype <$> f (unsafeCast x) (unsafeCast y)) m1 m2
 

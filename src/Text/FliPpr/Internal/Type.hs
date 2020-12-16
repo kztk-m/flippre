@@ -54,8 +54,8 @@ module Text.FliPpr.Internal.Type
     reifySNat,
     -- Wit (..),
 
-    type Lift, type (**), Defs.LetArg, -- Defs.Convertible,
-    Defs.DefType, Defs, DefsF,
+    type Lift, type (<*), Defs.LetArg, -- Defs.Convertible,
+    Defs,
   )
 where
 
@@ -69,7 +69,7 @@ import           Data.Semigroup            (Semigroup (..))
 import qualified Data.Type.Nat             as F
 import           Data.Typeable             (Proxy (..))
 import           Text.FliPpr.Doc           as D
-import           Text.FliPpr.Internal.Defs (Defs, type (**), type Lift)
+import           Text.FliPpr.Internal.Defs (Defs, type (<*), type Lift)
 import qualified Text.FliPpr.Internal.Defs as Defs
 
 import           Control.Arrow             (first)
@@ -235,13 +235,13 @@ flippr x = FliPpr (unE $ Defs.local x) -- flipprPure (unC x)
 --   In pretty-printing, it is equivalent to @text ""@.
 {-# INLINEABLE spaces #-}
 spaces :: FliPprE arg exp => E exp D
-spaces = E fspaces
+spaces = (coerce :: exp D -> E exp D) fspaces
 
 -- | In pretty-printing, it works as @text " "@. In parsing
 --   it behaves a single space in some sense.
 {-# INLINEABLE space #-}
 space :: FliPprE arg exp => E exp D
-space = E fspace
+space = (coerce :: exp D -> E exp D) fspace
 
 -- | For internal use. Use '<+>'.
 {-# INLINEABLE nespaces #-}
@@ -251,22 +251,24 @@ nespaces = space <#> spaces
 -- | For internal use. Use '<+>.'.
 {-# INLINEABLE nespaces' #-}
 nespaces' :: FliPprE arg exp => E exp D
-nespaces' = E fnespaces'
+nespaces' = (coerce :: exp D -> E exp D) fnespaces'
 
 -- | Similar to 'line', but it also accepts the empty string in parsing.
 {-# INLINEABLE line' #-}
 line' :: FliPprE arg exp => E exp D
-line' = E fline'
+line' = (coerce :: exp D -> E exp D) fline'
 
 -- | A wrapper for 'farg'.
 {-# INLINEABLE arg #-}
 arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
-arg f = E (farg (coerce f))
+arg = (coerce :: ((arg a -> exp t) -> exp (a ~> t)) ->
+                  (A arg a -> E exp t) -> E exp (a ~> t)) farg
 
 -- | A wrapper for 'fapp'.
 {-# INLINEABLE app #-}
 app :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
-app (E f) (A a) = E (fapp f a)
+app = (coerce :: (exp (a ~> t) -> arg a -> exp t) ->
+                 (E exp (a ~> t) -> A arg a -> E exp t)) fapp
 
 -- | FliPpr version of '$'.
 {-# INLINE (@@) #-}
@@ -276,12 +278,17 @@ app (E f) (A a) = E (fapp f a)
 infixr 0 @@
 
 charAs :: FliPprE arg exp => A arg Char -> RS.RSet Char -> E exp D
-charAs a cs = E $ fcharAs (unA a) cs
+charAs = (coerce :: (arg Char -> RS.RSet Char -> exp D) ->
+                    (A arg Char -> RS.RSet Char -> E exp D)) fcharAs
+-- charAs a cs = E $ fcharAs (unA a) cs
 
 -- | case branching.
 {-# INLINEABLE case_ #-}
 case_ :: (In a, FliPprE arg exp) => A arg a -> [Branch (A arg) (E exp) a r] -> E exp r
-case_ (A a) bs = E (fcase a (coerce bs))
+case_ = (coerce :: (arg a -> [Branch arg exp a r] -> exp r) ->
+                    A arg a -> [Branch (A arg) (E exp) a r] -> E exp r)
+        fcase
+-- case_ (A a) bs = E (fcase a (coerce bs))
 
 -- | A CPS style conversion from @A arg (a,b)@ to a pair of @A arg a@ and @A arg b@.
 --   A typical use of 'unpair' is to implement (invertible) pattern matching in FliPpr.
@@ -290,27 +297,40 @@ case_ (A a) bs = E (fcase a (coerce bs))
 --   one can avoid using a bit awkward 'unpair' explicitly.
 {-# INLINEABLE unpair #-}
 unpair :: (In a, In b, FliPprE arg exp) => A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r
-unpair (A x) k = E $ funpair x (coerce k)
+unpair = (coerce :: (arg (a, b) -> (arg a -> arg b -> exp r) -> exp r)
+                    -> (A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r))
+         funpair
+-- unpair (A x) k = E $ funpair x (coerce k)
 
 {-# INLINEABLE ununit #-}
 ununit :: FliPprE arg exp => A arg () -> E exp r -> E exp r
-ununit (A x) y = E $ fununit x (coerce y)
+ununit = (coerce :: (arg () -> exp r -> exp r)
+                     -> A arg () -> E exp r -> E exp r) fununit
+-- ununit (A x) y = E $ fununit x (coerce y)
 
 -- | Biased choice. @a <? b = a@ in parsing, but it accepts strings indicated by both @a@ and @b$ in parsing.
 (<?) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
-(<?) (E x) (E y) = E (fbchoice x y)
+(<?) = (coerce :: (exp D -> exp D -> exp D)
+                  -> E exp D -> E exp D -> E exp D)
+        fbchoice
+-- (<?) (E x) (E y) = E (fbchoice x y)
 
 instance Defs.Defs e => Defs.Defs (E e) where
   newtype Fs (E e) a = RE (Defs.Fs e a)
 
-  liftDS (E x) = RE (Defs.liftDS x)
-  unliftDS (RE x) = E (Defs.unliftDS x)
+  -- liftDS (E x) = RE (Defs.liftDS x)
+  liftDS = coerce (Defs.liftDS :: e a -> Defs.Fs e (Lift a))
+  -- unliftDS (RE x) = E (Defs.unliftDS x)
+  unliftDS = coerce (Defs.unliftDS  :: Defs.Fs e (Lift a) -> e a)
+    where
+      _ = RE -- just to suppress unused constructor RE, which is indeed used via coerce.
 
-  pairDS (RE r1) (RE r2) = RE (Defs.pairDS r1 r2)
+  -- consDS (E r1) (RE r2) = RE (Defs.consDS r1 r2)
+  consDS = coerce (Defs.consDS :: e a -> Defs.Fs e b -> Defs.Fs e (a <* b))
 
   --  unpairRules (RE e) k = RE $ unpairRules e (coerce k)
-
-  letrDS h = RE $ Defs.letrDS (coerce h)
+  -- letrDS h = RE $ Defs.letrDS (coerce h)
+  letrDS = coerce (Defs.letrDS :: (e a -> Defs.Fs e (a <* r)) -> Defs.Fs e r)
 
 infixr 4 <?
 
@@ -336,7 +356,7 @@ instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A a
 mfixF :: Defs.LetArg (E f) a => (a -> FliPprM f a) -> FliPprM f a
 mfixF = Defs.mfixDefM
 
-type DefsF exp = Defs.DTypeVal (E exp)
+-- type DefsF exp = Defs.DTypeVal (E exp)
 
 -- | A specialized version of 'letr', which would be useful for defining mutual recursions.
 --
@@ -355,13 +375,19 @@ type DefsF exp = Defs.DTypeVal (E exp)
 --    code_using_f_and_g
 --  @
 --
-letr :: (Repr arg exp ft rep, FliPprD arg exp) => (rep -> FliPprM exp (rep, r)) -> FliPprM exp r
-letr h = Defs.letr $ \x -> do
-  (d, r) <- h (toFunction x)
-  return (fromFunction d, r)
+
+letr :: Defs.LetArg (E f) t => (t -> FliPprM f (t, r)) -> FliPprM f r
+letr = Defs.letrGen
+
+
+-- letr :: (Repr arg exp ft rep, FliPprD arg exp) => (rep -> FliPprM exp (rep, r)) -> FliPprM exp r
+-- letr h = Defs.letr $ \x -> do
+--   (d, r) <- h (toFunction x)
+--   return (fromFunction d, r)
 
 -- not efficient for large list
-letrs :: (Repr arg exp ft rep, FliPprD arg exp, Eq k) => [k] -> ((k -> rep) -> FliPprM exp (k -> rep, r)) -> FliPprM exp r
+-- letrs :: (Repr arg exp ft rep, FliPprD arg exp, Eq k) => [k] -> ((k -> rep) -> FliPprM exp (k -> rep, r)) -> FliPprM exp r
+letrs :: (Eq k, Defs.LetArg (E f) t) => [k] -> ((k -> t) -> FliPprM f (k -> t, r)) -> FliPprM f r
 letrs [] f = snd <$> f (const $ error "letrs: out of bounds")
 letrs (k:ks) f = letr $ \f1 -> letrs ks $ \frest -> do
   (rf, rest) <- f $ \k' -> if k' == k then f1 else frest k'
@@ -374,12 +400,14 @@ letrs (k:ks) f = letr $ \f1 -> letrs ks $ \frest -> do
 
 
 -- | Useful combinator that can be used with 'letr'.
-def :: Monad m => a -> m b -> m (a, b)
+def :: Functor m => a -> m b -> m (a, b)
 def a b = (a,) <$> b
 
 -- | Spacilized version of 'Defs.share'
-share ::(Repr arg exp ft rep,  FliPprD arg exp) => rep -> FliPprM exp rep
-share = fmap toFunction . Defs.share . fromFunction
+-- share ::(Repr arg exp ft rep,  FliPprD arg exp) => rep -> FliPprM exp rep
+-- share = fmap toFunction . Defs.share . fromFunction
+share :: Defs.LetArg (E f) r => r -> FliPprM f r
+share e = letr $ \x -> return (e, x)
 
 -- | Specialized version of 'Defs.local'
 local :: (Repr arg exp ft rep, FliPprD arg exp) => FliPprM exp rep -> rep

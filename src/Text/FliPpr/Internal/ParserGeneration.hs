@@ -255,8 +255,8 @@ instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
   liftDS x = RulesG $ \tenv -> Defs.liftDS (Compose <$> unPExp x tenv)
   unliftDS (RulesG x) = PExp $ \tenv -> getCompose <$> Defs.unliftDS (x tenv)
 
-  pairDS x y = RulesG $ \tenv ->
-    Defs.pairDS (unRulesG x tenv) (unRulesG y tenv)
+  consDS x y = RulesG $ \tenv ->
+    Defs.consDS (Compose <$> unPExp x tenv) (unRulesG y tenv)
 
   -- unpairRules (x :: Rules (PExp g) (a :*: b)) k = RulesG $ \(tenv :: Rep r) ->
   --   case propTransDPreservesDefType @a @(Compose Err (Result r)) of
@@ -401,19 +401,19 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
     Nothing -> A.empty
     Just s  -> () <$ G.text s <* many (G.symbI nb) <* G.symbI br
 
-  rec blockComment <- fmap Identity $ case bc of
-        Nothing -> G.share A.empty
+  rec blockComment <- case bc of
+        Nothing -> G.rule A.empty
         Just (BlockCommentSpec op cl isNestable) ->
           if isNestable
             then do
               nonOpCl <- non [op, cl]
-              G.share $ () <$ G.text op <* nonOpCl <* many (runIdentity blockComment <* nonOpCl) <* G.text cl
+              G.rule $ () <$ G.text op <* nonOpCl <* many (G.nt blockComment <* nonOpCl) <* G.text cl
             else do
               nonCl <- non [cl]
-              G.share $ () <$ G.text op <* nonCl <* G.text cl
+              G.rule $ () <$ G.text op <* nonCl <* G.text cl
 
   singleSpace <- G.share $ () <$ G.symbI sp
-  return (lineComment <|> runIdentity blockComment <|> singleSpace)
+  return (lineComment <|> G.nt blockComment <|> singleSpace)
   where
     mfix = G.mfixDefM
 

@@ -16,6 +16,8 @@ import           System.CPUTime
 import           Text.FliPpr
 import           Text.FliPpr.Driver.Earley as E
 
+import           Data.Word
+
 {-# ANN module "HLint: ignore Avoid lambda using `infix`" #-}
 {-# ANN module "HLint: ignore Use section" #-}
 
@@ -66,7 +68,7 @@ pExp = flippr $ do
             dm10 $ \d r -> pprNum d <#> pprDigit r
           ]
 
-  rec ppr <- defines (snat :: SNat Nat2) $ \k x ->
+  rec ppr <- define $ \k x ->
         manyParens $
           case_
             x
@@ -77,7 +79,7 @@ pExp = flippr $ do
               unNum $ \n -> pprNum n
             ]
 
-  return $ fromFunction (ppr 0)
+  return $ fromFunction (ppr (0 :: Word8))
   where
     mfix = mfixF
 
@@ -95,11 +97,6 @@ pprExp = pprMode pExp
 parseExp :: [Char] -> Err [Exp]
 parseExp =
   E.parse $ parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) pExp
-
-parseExp' :: [Char] -> Either String [Exp]
-parseExp' s = case parseExp s of
-  Ok r   -> Right r
-  Fail d -> Left (show d)
 
 parseExpP :: [Char] -> IO ()
 parseExpP s = case parseExp s of
