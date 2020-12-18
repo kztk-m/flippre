@@ -357,17 +357,19 @@ toProds EmptyRHS         = []
 toProds (SingRHS prod)   = [prod]
 toProds (OtherRHS prods) = prods
 
+-- | Interpretation of the 'GrammarD' methods to produce 'FlatGrammar's.
+
 newtype SemToFlatGrammar c a =
   SemToFlatGrammar { unSemToFlatGrammar :: forall env. E.Rep E.U env -> SemToFlatGrammarRes c env a }
   deriving Functor
 
 data SemToFlatGrammarRes c env a =
   forall env' b.
-  SemToFlatGrammarRes !(E.Rep E.U env')
-                      !(E.VarT E.U env env')
-                      !(SCondRHS b)
-                      !(forall envf. E.VarT E.U env' envf
-                        -> E.Env E.U (RHS c envf) env
+  SemToFlatGrammarRes !(E.Rep E.U env')      -- Representation of the type of resulting environment
+                      !(E.VarT E.U env env') -- A witness that result is bigger than the original
+                      !(SCondRHS b)          -- A condition that a resulting rhs should satisfy
+                      !(forall envf. E.VarT E.U env' envf -- A final environment
+                        -> E.Env E.U (RHS c envf) env     -- The original environment
                         -> (E.Env E.U (RHS c envf) env' , RHSs c envf b a))
 
 instance Functor (SemToFlatGrammarRes c env) where
@@ -383,9 +385,6 @@ toFlatGrammar d =
 
 instance Applicative (SemToFlatGrammar c) where
   pure a = SemToFlatGrammar $ \tenv -> SemToFlatGrammarRes tenv id SSingleton (\_diff env -> (env, SingRHS $ PNil a))
-
-  -- It always introduces new symbols for each operands of (<*>).
-  -- Some pre- or post-processing would be useful for avoinding this.
   d1 <*> d2 = SemToFlatGrammar $ \tenv ->
     case unSemToFlatGrammar d1 tenv of
       SemToFlatGrammarRes tenv1 diff1 cond1 k1 ->
@@ -484,19 +483,17 @@ instance Defs (SemToFlatGrammar c) where
          harg = SemToFlatGrammar $ \tenv' -> SemToFlatGrammarRes tenv' E.diffRefl SSingleton $ \df env ->
                   (env , SingRHS $ PCons (NT $ E.shift (E.diffRep tenva tenv' >>> df) (E.varZ tenv)) $ PNil id )
     in case unDSemToFlatGrammar (h harg) tenva of
-          DSemToFlatGrammarRes tenvh diffh (DCondCons _ condh) kh -> DSemToFlatGrammarRes tenvh (E.diffStep E.diffRefl >>> diffh) condh $ \df env ->
-            let (env', x, _) = E.extendEnv env (RHS [])
-            in case kh df env' of
-              (envh, DRHSCons rh r) -> (E.updateEnv (E.shift diffh x) (toRHS rh) envh, r)
+          DSemToFlatGrammarRes tenvh diffh (DCondCons _ condh) kh ->
+            DSemToFlatGrammarRes tenvh (E.diffStep E.diffRefl >>> diffh) condh $ \df env ->
+              let (env', x, _) = E.extendEnv env (RHS [])
+              in case kh df env' of
+                (envh, DRHSCons rh r) -> (E.updateEnv (E.shift diffh x) (toRHS rh) envh, r)
 
 
 
 
 -- -- | Interpretation of the 'GrammarD' methods to produce 'FlatGrammar's.
 
--- -- FIXME: This implementation is inefficient due to repeated shifting.
--- -- So, we need to abstract environments for faster manipulatoin and
--- -- avoid re-traversal of data-structures by delaying shifting.
 -- newtype ToFlatGrammar c a = ToFlatGrammar {toFlatGrammar :: forall env. Bindings c env env -> Res c env a}
 --   deriving (Functor)
 
