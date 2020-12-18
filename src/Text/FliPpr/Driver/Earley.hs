@@ -41,7 +41,7 @@ toEarley (G.FlatGrammar defs rhs) = do
     procSymb env (G.NT x)      = pure $ Env.lookupEnv x env
 
 -- | Converts our grammars into those in @Text.Earley@.
-asEarley :: Ord c => G.ToFlatGrammar c t -> E.Grammar r (E.Prod r c c t)
+asEarley :: Ord c => G.SemToFlatGrammar c t -> E.Grammar r (E.Prod r c c t)
 asEarley g = toEarley $ G.flatten g
 
 -- | Performs parsing after conversion by 'asEarley'.

@@ -60,6 +60,19 @@ class Category (VarT i) =>  EnvImpl (i :: k -> Type) where
 
   emptyEnv :: Env i f '[]
 
+  emptyRep :: Rep i '[]
+  emptyRep = repOf emptyEnv
+
+
+  diffRefl :: VarT i env env
+  diffRefl = id
+
+  diffStep :: VarT i env env' -> VarT i env (a : env')
+
+  extendRep :: Rep i env -> Proxy a -> Rep i (a : env)
+
+  varZ :: Rep i env -> Var i (a : env) a
+
   -- | Extending environment. It returns a triple of a new environment, a
   -- newly-introduced variable, and a witness that the new environment is one bigger than the original.
   extendEnv :: Env i f env -> f a -> (Env i f (a : env), Var i (a : env) a, VarT i env (a : env))
@@ -129,15 +142,24 @@ instance EnvImpl U where
   zipWithA f (EnvU k m1) (EnvU _ m2) =
     fmap (EnvU k) $ sequenceA $ IM.intersectionWith (\x y -> Untype <$> f (unsafeCast x) (unsafeCast y)) m1 m2
 
-
+  -- I don't know why (-1) is used here.
   emptyEnv = EnvU (-1) IM.empty
   {-# INLINE emptyEnv #-}
+
+  emptyRep = RepU (-1)
+  {-# INLINE emptyRep #-}
+
+  extendRep (RepU k) _ = RepU (k + 1)
 
   extendEnv (EnvU k m) v = (EnvU (k + 1) (IM.insert (k + 1) (Untype v) m), VarU 0, VarTU 1)
   {-# INLINE extendEnv #-}
 
+  diffStep (VarTU k) = VarTU (k + 1)
+
   repOf (EnvU k _) = RepU k
   {-# INLINE repOf #-}
+
+  varZ _ = VarU 0
 
   diffRep (RepU k) (RepU k') = VarTU $ k' - k
     -- VarTU $ VarTT $ \(VarU i) -> VarU (i + (k' - k))
@@ -182,6 +204,12 @@ instance EnvImpl UL where
 
   emptyEnv = EnvUL 0 IM.empty
   extendEnv (EnvUL k m) v = (EnvUL (k + 1) (IM.insert k (Untype v) m), VarUL k, VarTUL ())
+
+  diffStep _ = VarTUL ()
+
+  extendRep (RepUL k) _ = RepUL (k + 1)
+
+  varZ (RepUL k) = VarUL k
 
   repOf (EnvUL k _) = RepUL k
 
@@ -239,10 +267,16 @@ instance EnvImpl S where
   emptyEnv = EEnd
   extendEnv e v = (EExtend e v, VZ, coerce (VarTT VS))
 
+  varZ _ = VZ
+
+  diffStep i = coerce $ VarTT (VS . runVarT i)
+
   repOf = SRep . mapEnv h
     where
       h :: f a -> Proxy a
       h _ = Proxy
+
+  extendRep = coerce EExtend
 
   --   repOf EEnd          = REnd
   --   repOf (EExtend e _) = RExtend (repOf e) Proxy

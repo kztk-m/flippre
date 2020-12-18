@@ -6,16 +6,18 @@
 {-# LANGUAGE FunctionalDependencies     #-}
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 -- | This module provides manipulation of grammars.
 module Text.FliPpr.Grammar
   ( -- * Type definitions
-    Grammar (..),
+    FromSymb(..), Grammar,
     GrammarD,
     ExChar (..),
     CharLike (..),
@@ -35,7 +37,7 @@ module Text.FliPpr.Grammar
     withSpace,
 
     -- ** Flat Grammars
-    ToFlatGrammar,
+    SemToFlatGrammar,
     flatten,
     Prod (..),
     Symb (..),
@@ -53,18 +55,22 @@ module Text.FliPpr.Grammar
 where
 
 import           Control.Applicative       (Alternative (..), Const (..))
-import           Control.Category          (Category (..), id, (.))
+import           Control.Arrow             (second)
+import           Control.Category          (Category (..), id, (.), (>>>))
 import           Control.Monad             (forM)
 import           Control.Monad.State       (MonadState, State, StateT (..),
                                             evalState, evalStateT, get, put)
 import           Data.Foldable             (asum)
 --
 
+
+
 import           Data.Bifunctor            (bimap)
 
 import           Data.Coerce               (coerce)
 import           Data.Maybe                (mapMaybe)
 import           Data.Monoid               (Endo (..))
+import           Data.Proxy                (Proxy (Proxy))
 import           Data.RangeSet.List        (RSet)
 import qualified Data.RangeSet.List        as RS
 import           Data.Typeable             ((:~:) (..))
@@ -78,13 +84,19 @@ import qualified Text.FliPpr.Internal.Env  as E
 
 {-# ANN module "HLint: ignore Use const" #-}
 
--- | A grammar expression. This class does not specify any ways to define "nonterminals", which indeed is the role of 'Defs'.
-class (Applicative e, Alternative e) => Grammar c e | e -> c where
+class FromSymb c e | e -> c where
   -- | A production of a given single char.
   symb :: c -> e c
+  symb = symbI . RS.singleton
 
   -- | A production of a single character taken from a given set.
   symbI :: RSet c -> e c
+
+-- | A grammar expression. This class does not specify any ways to define "nonterminals", which indeed is the role of 'Defs'.
+type Grammar c e = (Applicative e, Alternative e, FromSymb c e)
+
+-- class (Applicative e, Alternative e) => Grammar c e | e -> c where
+
 
 -- | A production of symbols.
 symbols :: Grammar c e => [c] -> e [c]
@@ -128,7 +140,7 @@ instance Alternative (PprDefs (NonterminalPrinterM c)) where
   some = Defs.someD
   {-# INLINE some #-}
 
-instance Show c => Grammar c (PprDefs (NonterminalPrinterM c)) where
+instance Show c => FromSymb c (PprDefs (NonterminalPrinterM c)) where
   symb c = PprDefs $ \_ -> return $ D.text (show c)
   {-# INLINE symb #-}
   symbI cs = PprDefs $ \_ -> return $ D.text (show cs)
@@ -253,7 +265,7 @@ instance Show c => D.Pretty (RHS c env a) where
 --   Arthur I. Baars, S. Doaitse Swierstra, Marcos Viera: Typed Transformations of Typed Grammars: The Left Corner Transform. Electron. Notes Theor. Comput. Sci. 253(7): 51-64 (2010).
 data FlatGrammar c a = forall env. FlatGrammar !(Bindings c env env) !(RHS c env a)
 
-pprAsFlat :: Show c => ToFlatGrammar c a -> D.Doc
+pprAsFlat :: Show c => SemToFlatGrammar c a -> D.Doc
 pprAsFlat = D.ppr . flatten
 
 instance Show c => D.Pretty (FlatGrammar c a) where
@@ -300,22 +312,14 @@ instance E.Shiftable E.U (Prod c) where
 instance E.Shiftable E.U (RHS c) where
   shift diff (RHS rs) = RHS $ map (E.shift diff) rs
 
-type Diff env env' = E.VarT E.U env env'
+-- type Diff env env' = E.VarT E.U env env'
 
--- This implementation can be a source of slowdown due to shifting, but we did
--- not find this is a bottleneck by test cases in @./examples/@.
-data Res c env a = forall env'. Res (Bindings c env' env') (RHS c env' a) (Diff env env')
+-- -- This implementation can be a source of slowdown due to shifting, but we did
+-- -- not find this is a bottleneck by test cases in @./examples/@.
+-- data Res c env a = forall env'. Res (Bindings c env' env') (RHS c env' a) (Diff env env')
 
-instance Functor (Res c env) where
-  fmap f (Res bs rhs diff) = Res bs (fmap f rhs) diff
-
--- | Interpretation of the 'GrammarD' methods to produce 'FlatGrammar's.
-
--- FIXME: This implementation is inefficient due to repeated shifting.
--- So, we need to abstract environments for faster manipulatoin and
--- avoid re-traversal of data-structures by delaying shifting.
-newtype ToFlatGrammar c a = ToFlatGrammar {toFlatGrammar :: forall env. Bindings c env env -> Res c env a}
-  deriving (Functor)
+-- instance Functor (Res c env) where
+--   fmap f (Res bs rhs diff) = Res bs (fmap f rhs) diff
 
 instance Applicative (Prod c env) where
   pure = PNil
@@ -328,76 +332,255 @@ instance Applicative (Prod c env) where
       go f (PNil a) r     = fmap (f a) r
       go f (PCons a as) r = PCons a (go (flip . (f .)) as r)
 
-instance Applicative (ToFlatGrammar c) where
-  pure a = ToFlatGrammar $ \defs -> Res defs (RHS [PNil a]) id
-  f <*> a = ToFlatGrammar $ \defs ->
-    case toFlatGrammar f defs of
-      Res defs1 rhs1 diff1 ->
-        case toFlatGrammar a defs1 of
-          Res defs2 rhs2 diff2 ->
-            case (rhs1, rhs2) of
-              (RHS [], _) -> Res defs2 (RHS []) (diff2 . diff1)
-              (_, RHS []) -> Res defs2 (RHS []) (diff2 . diff1)
-              (RHS [p1], RHS [p2]) -> Res defs2 (RHS [E.shift diff2 p1 <*> p2]) (diff2 . diff1)
-              _ ->
-                let (defs3, x, diff3) = E.extendEnv defs2 (E.shift diff2 rhs1)
-                    (defs4, y, diff4) = E.extendEnv (E.mapEnv (E.shift diff3) defs3) (E.shift diff3 rhs2)
-                 in Res (E.mapEnv (E.shift diff4) defs4) (RHS [PCons (NT $ E.shift diff4 x) (PNil id) <*> PCons (NT y) (PNil id)]) (diff4 . diff3 . diff2 . diff1)
+data CondRHS = Empty | Singleton | Other
 
-instance Alternative (ToFlatGrammar c) where
-  empty = ToFlatGrammar $ \defs -> Res defs (RHS []) id
-  a1 <|> a2 = ToFlatGrammar $ \defs ->
-    case toFlatGrammar a1 defs of
-      Res defs1 (RHS ps1) diff1 ->
-        case toFlatGrammar a2 defs1 of
-          Res defs2 (RHS ps2) diff2 ->
-            Res defs2 (RHS (map (E.shift diff2) ps1 ++ ps2)) (diff2 . diff1)
+data SCondRHS (c :: CondRHS) where
+  SEmpty     :: SCondRHS 'Empty
+  SSingleton :: SCondRHS 'Singleton
+  SOther     :: SCondRHS 'Other
+
+data RHSs c env (b :: CondRHS) a where
+  EmptyRHS :: RHSs c env 'Empty a
+  SingRHS  :: !(Prod c env a) -> RHSs c env 'Singleton  a
+  OtherRHS :: ![Prod c env a] ->  RHSs c env 'Other a
+
+instance Functor (RHSs c env b) where
+  fmap _ EmptyRHS      = EmptyRHS
+  fmap f (SingRHS p)   = SingRHS (fmap f p)
+  fmap f (OtherRHS ps) = OtherRHS $ map (fmap f) ps
+
+toRHS :: RHSs c env b a -> RHS c env a
+toRHS = RHS . toProds
+
+toProds :: RHSs c env b a -> [Prod c env a]
+toProds EmptyRHS         = []
+toProds (SingRHS prod)   = [prod]
+toProds (OtherRHS prods) = prods
+
+newtype SemToFlatGrammar c a =
+  SemToFlatGrammar { unSemToFlatGrammar :: forall env. E.Rep E.U env -> SemToFlatGrammarRes c env a }
+  deriving Functor
+
+data SemToFlatGrammarRes c env a =
+  forall env' b.
+  SemToFlatGrammarRes !(E.Rep E.U env')
+                      !(E.VarT E.U env env')
+                      !(SCondRHS b)
+                      !(forall envf. E.VarT E.U env' envf
+                        -> E.Env E.U (RHS c envf) env
+                        -> (E.Env E.U (RHS c envf) env' , RHSs c envf b a))
+
+instance Functor (SemToFlatGrammarRes c env) where
+  fmap f (SemToFlatGrammarRes tenv diff cond k) =
+    SemToFlatGrammarRes tenv diff cond (\diff' env -> second (fmap f) $ k diff' env)
+
+toFlatGrammar :: SemToFlatGrammar c a -> FlatGrammar c a
+toFlatGrammar d =
+  case unSemToFlatGrammar d E.emptyRep of
+    SemToFlatGrammarRes _ _ _ k ->
+      let (env, r) = k id E.emptyEnv
+      in FlatGrammar env (toRHS r)
+
+instance Applicative (SemToFlatGrammar c) where
+  pure a = SemToFlatGrammar $ \tenv -> SemToFlatGrammarRes tenv id SSingleton (\_diff env -> (env, SingRHS $ PNil a))
+
+  -- It always introduces new symbols for each operands of (<*>).
+  -- Some pre- or post-processing would be useful for avoinding this.
+  d1 <*> d2 = SemToFlatGrammar $ \tenv ->
+    case unSemToFlatGrammar d1 tenv of
+      SemToFlatGrammarRes tenv1 diff1 cond1 k1 ->
+        case unSemToFlatGrammar d2 tenv1 of
+          SemToFlatGrammarRes tenv2 diff2 cond2 k2 ->
+            case (cond1, cond2) of
+              (SEmpty, _) -> SemToFlatGrammarRes tenv id SEmpty $ \_ env -> (env, EmptyRHS)
+              (_, SEmpty) -> SemToFlatGrammarRes tenv id SEmpty $ \_ env -> (env, EmptyRHS)
+              (SSingleton, SSingleton) ->
+                SemToFlatGrammarRes tenv2 (diff1 >>> diff2) SSingleton $ \df env ->
+                  let (env1, SingRHS p1) = k1 (diff2 >>> df) env
+                      (env2, SingRHS p2) = k2 df env1
+                  in (env2, SingRHS (p1 <*> p2))
+              _ ->
+                SemToFlatGrammarRes (tenv2 `E.extendRep` Proxy `E.extendRep` Proxy) (E.diffStep (E.diffStep (diff1 >>> diff2))) SSingleton $ \df env ->
+                  let (env1 , r1) = k1 (E.diffStep (E.diffStep diff2) >>> df) env
+                      (env2 , r2) = k2 (E.diffStep (E.diffStep E.diffRefl) >>> df) env1
+                      (env3, x1, _) = E.extendEnv env2 (toRHS r1)
+                      (env4, x2, _) = E.extendEnv env3 (toRHS r2)
+                  in (env4, SingRHS $ PCons (NT $ E.shift (E.diffStep E.diffRefl >>> df) x1) $ PCons (NT $ E.shift df x2) $ PNil (\x f -> f x))
+
+instance Alternative (SemToFlatGrammar c) where
+  empty = SemToFlatGrammar $ \tenv -> SemToFlatGrammarRes tenv id SEmpty (\_diff env -> (env, EmptyRHS))
+  d1 <|> d2 = SemToFlatGrammar $ \tenv ->
+    case unSemToFlatGrammar d1 tenv of
+      SemToFlatGrammarRes tenv1 diff1 cond1 k1 ->
+        case unSemToFlatGrammar d2 tenv1 of
+          SemToFlatGrammarRes tenv2 diff2 cond2 k2 ->
+            case (cond1, cond2) of
+              (SEmpty, _) -> SemToFlatGrammarRes tenv2 (diff1 >>> diff2) cond2 $ \df env ->
+                              let (env1, _) = k1 (diff2 >>> df) env
+                                  (env2, r2) = k2 df env1
+                              in (env2, r2)
+              (_, SEmpty) -> SemToFlatGrammarRes tenv2 (diff1 >>> diff2) cond1 $ \df env ->
+                              let (env1, r1) = k1 (diff2 >>> df) env
+                                  (env2, _) = k2 df env1
+                              in (env2, r1)
+              _ -> SemToFlatGrammarRes tenv2 (diff1 >>> diff2) SOther $ \df env ->
+                              let (env1, r1) = k1 (diff2 >>> df) env
+                                  (env2, r2) = k2 df env1
+                              in (env2, OtherRHS $ toProds r1 ++ toProds r2 )
+
+
 
   many = Defs.manyD
   some = Defs.someD
 
-instance Grammar c (ToFlatGrammar c) where
-  symb c = ToFlatGrammar $ \defs -> Res defs (RHS [PCons (Symb c) $ PNil id]) id
-  symbI cs = ToFlatGrammar $ \defs -> Res defs (RHS [PCons (SymbI cs) $ PNil id]) id
+instance FromSymb c (SemToFlatGrammar c) where
+  symb c = SemToFlatGrammar $ \tenv -> SemToFlatGrammarRes tenv id SSingleton (\_ env -> (env, SingRHS $ PCons (Symb c) $ PNil id))
+  symbI cs = SemToFlatGrammar $ \tenv -> SemToFlatGrammarRes tenv id SSingleton (\_ env -> (env, SingRHS $ PCons (SymbI cs) $ PNil id))
 
---  constantResult = (<$)
+data DCond b a where
+  DCondT    :: !(SCondRHS c) -> DCond (Lift c) (Lift a)
+  DCondCons :: !(SCondRHS c) -> !(DCond rb ra) -> DCond (c <* rb) (a <* ra)
 
-type Value = Defs.DTypeVal
+data DRHS c env bs as where
+  DRHST    :: !(RHSs c env b a) -> DRHS c env (Lift b) (Lift a)
+  DRHSCons :: !(RHSs c env b a) -> !(DRHS c env bb aa) -> DRHS c env (b <* bb) (a <* aa)
 
--- valueMap :: (forall b. f b -> g b) -> Value f a -> Value g a
--- valueMap f (VT a)      = VT (f a)
--- valueMap f (VCons x y) = VCons (f x) (valueMap f y)
+data DSemToFlatGrammarRes c env a =
+  forall env' b.
+  DSemToFlatGrammarRes !(E.Rep E.U env')
+                       !(E.VarT E.U env env')
+                       !(DCond b a)
+                       !(forall envf. E.VarT E.U env' envf
+                         -> E.Env E.U (RHS c envf) env
+                         -> (E.Env E.U (RHS c envf) env' , DRHS c envf b a))
 
-data Ress c env a = forall env'. Ress (Bindings c env' env') (Value (RHS c env') a) (Diff env env')
+instance Defs (SemToFlatGrammar c) where
+  newtype Fs (SemToFlatGrammar c) a =
+    DSemToFlatGrammar { unDSemToFlatGrammar :: forall env. E.Rep E.U env -> DSemToFlatGrammarRes c env a }
 
-instance Defs (ToFlatGrammar c) where
-  newtype Fs (ToFlatGrammar c) a = ToFlatGrammars {toFlatGrammars :: forall env. Bindings c env env -> Ress c env a}
+  liftDS d = DSemToFlatGrammar $ \tenv ->
+    case unSemToFlatGrammar d tenv of
+      SemToFlatGrammarRes tenv1 diff1 cond1 k1 ->
+        DSemToFlatGrammarRes tenv1 diff1 (DCondT cond1) $ \df env -> second DRHST (k1 df env)
 
-  liftDS c = ToFlatGrammars $ \defs ->
-    case toFlatGrammar c defs of
-      Res defs' r' diff' -> Ress defs' (VT r') diff'
+  unliftDS d = SemToFlatGrammar $ \tenv ->
+    case unDSemToFlatGrammar d tenv of
+      DSemToFlatGrammarRes tenv1 diff1 (DCondT cond1) k1 ->
+        SemToFlatGrammarRes tenv1 diff1 cond1 $ \df env -> second (\case { DRHST x -> x }) (k1 df env)
 
-  unliftDS c = ToFlatGrammar $ \defs ->
-    case toFlatGrammars c defs of
-      Ress defs' (VT r') diff' -> Res defs' r' diff'
 
-  consDS x y = ToFlatGrammars $ \defs -> case toFlatGrammar x defs of
-    Res defs1 r1 diff1 -> case toFlatGrammars y defs1 of
-      Ress defs2 r2 diff2 -> Ress defs2 (VCons (E.shift diff2 r1) r2) (diff2 . diff1)
+  consDS d ds = DSemToFlatGrammar $ \tenv ->
+    case unSemToFlatGrammar d tenv of
+      SemToFlatGrammarRes tenv1 diff1 cond1 k1 ->
+        case unDSemToFlatGrammar ds tenv1 of
+          DSemToFlatGrammarRes tenv2 diff2 cond2 k2 ->
+            DSemToFlatGrammarRes tenv2 (diff1 >>> diff2) (DCondCons cond1 cond2) $ \df env ->
+              let (env1, r1) = k1 (diff2 >>> df) env
+                  (env2, r2) = k2 df env1
+              in (env2, DRHSCons r1 r2)
 
-  letrDS h = ToFlatGrammars $ \defs ->
-    let (defs1, x, diff) = E.extendEnv defs (RHS []) -- a placeholder
-        argH = ToFlatGrammar $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Res defs' (E.shift diff' $ RHS [PCons (NT x) $ PNil id]) id
-     in case toFlatGrammars (h argH) $ E.mapEnv (E.shift diff) defs1 of
-          Ress defs2 (VCons r res) diff2 ->
-            let defs2' = E.updateEnv (E.shift diff2 x) r defs2
-             in Ress defs2' res (diff2 . diff)
+  letrDS h = DSemToFlatGrammar $ \tenv ->
+    let  tenva = E.extendRep tenv Proxy
+         harg = SemToFlatGrammar $ \tenv' -> SemToFlatGrammarRes tenv' E.diffRefl SSingleton $ \df env ->
+                  (env , SingRHS $ PCons (NT $ E.shift (E.diffRep tenva tenv' >>> df) (E.varZ tenv)) $ PNil id )
+    in case unDSemToFlatGrammar (h harg) tenva of
+          DSemToFlatGrammarRes tenvh diffh (DCondCons _ condh) kh -> DSemToFlatGrammarRes tenvh (E.diffStep E.diffRefl >>> diffh) condh $ \df env ->
+            let (env', x, _) = E.extendEnv env (RHS [])
+            in case kh df env' of
+              (envh, DRHSCons rh r) -> (E.updateEnv (E.shift diffh x) (toRHS rh) envh, r)
+
+
+
+
+-- -- | Interpretation of the 'GrammarD' methods to produce 'FlatGrammar's.
+
+-- -- FIXME: This implementation is inefficient due to repeated shifting.
+-- -- So, we need to abstract environments for faster manipulatoin and
+-- -- avoid re-traversal of data-structures by delaying shifting.
+-- newtype ToFlatGrammar c a = ToFlatGrammar {toFlatGrammar :: forall env. Bindings c env env -> Res c env a}
+--   deriving (Functor)
+
+-- instance Applicative (Prod c env) where
+--   pure = PNil
+--   (<*>) = go id
+--     where
+--       -- Derived from the following definition.
+--       -- PNil a <*> f = fmap a f
+--       -- PCons a as <*> r = PCons a (flip <$> as <*> r)
+--       go :: (a -> b -> r) -> Prod c env a -> Prod c env b -> Prod c env r
+--       go f (PNil a) r     = fmap (f a) r
+--       go f (PCons a as) r = PCons a (go (flip . (f .)) as r)
+
+-- instance Applicative (ToFlatGrammar c) where
+--   pure a = ToFlatGrammar $ \defs -> Res defs (RHS [PNil a]) id
+--   f <*> a = ToFlatGrammar $ \defs ->
+--     case toFlatGrammar f defs of
+--       Res defs1 rhs1 diff1 ->
+--         case toFlatGrammar a defs1 of
+--           Res defs2 rhs2 diff2 ->
+--             case (rhs1, rhs2) of
+--               (RHS [], _) -> Res defs2 (RHS []) (diff2 . diff1)
+--               (_, RHS []) -> Res defs2 (RHS []) (diff2 . diff1)
+--               (RHS [p1], RHS [p2]) -> Res defs2 (RHS [E.shift diff2 p1 <*> p2]) (diff2 . diff1)
+--               _ ->
+--                 let (defs3, x, diff3) = E.extendEnv defs2 (E.shift diff2 rhs1)
+--                     (defs4, y, diff4) = E.extendEnv (E.mapEnv (E.shift diff3) defs3) (E.shift diff3 rhs2)
+--                  in Res (E.mapEnv (E.shift diff4) defs4) (RHS [PCons (NT $ E.shift diff4 x) (PNil id) <*> PCons (NT y) (PNil id)]) (diff4 . diff3 . diff2 . diff1)
+
+-- instance Alternative (ToFlatGrammar c) where
+--   empty = ToFlatGrammar $ \defs -> Res defs (RHS []) id
+--   a1 <|> a2 = ToFlatGrammar $ \defs ->
+--     case toFlatGrammar a1 defs of
+--       Res defs1 (RHS ps1) diff1 ->
+--         case toFlatGrammar a2 defs1 of
+--           Res defs2 (RHS ps2) diff2 ->
+--             Res defs2 (RHS (map (E.shift diff2) ps1 ++ ps2)) (diff2 . diff1)
+
+--   many = Defs.manyD
+--   some = Defs.someD
+
+-- instance FromSymb c (ToFlatGrammar c) where
+--   symb c = ToFlatGrammar $ \defs -> Res defs (RHS [PCons (Symb c) $ PNil id]) id
+--   symbI cs = ToFlatGrammar $ \defs -> Res defs (RHS [PCons (SymbI cs) $ PNil id]) id
+
+-- --  constantResult = (<$)
+
+-- type Value = Defs.DTypeVal
+
+-- -- valueMap :: (forall b. f b -> g b) -> Value f a -> Value g a
+-- -- valueMap f (VT a)      = VT (f a)
+-- -- valueMap f (VCons x y) = VCons (f x) (valueMap f y)
+
+-- data Ress c env a = forall env'. Ress (Bindings c env' env') (Value (RHS c env') a) (Diff env env')
+
+-- instance Defs (ToFlatGrammar c) where
+--   newtype Fs (ToFlatGrammar c) a = ToFlatGrammars {toFlatGrammars :: forall env. Bindings c env env -> Ress c env a}
+
+--   liftDS c = ToFlatGrammars $ \defs ->
+--     case toFlatGrammar c defs of
+--       Res defs' r' diff' -> Ress defs' (VT r') diff'
+
+--   unliftDS c = ToFlatGrammar $ \defs ->
+--     case toFlatGrammars c defs of
+--       Ress defs' (VT r') diff' -> Res defs' r' diff'
+
+--   consDS x y = ToFlatGrammars $ \defs -> case toFlatGrammar x defs of
+--     Res defs1 r1 diff1 -> case toFlatGrammars y defs1 of
+--       Ress defs2 r2 diff2 -> Ress defs2 (VCons (E.shift diff2 r1) r2) (diff2 . diff1)
+
+--   letrDS h = ToFlatGrammars $ \defs ->
+--     let (defs1, x, diff) = E.extendEnv defs (RHS []) -- a placeholder
+--         argH = ToFlatGrammar $ \defs' -> let diff' = E.diffRep (E.repOf defs1) (E.repOf defs') in Res defs' (E.shift diff' $ RHS [PCons (NT x) $ PNil id]) id
+--      in case toFlatGrammars (h argH) $ E.mapEnv (E.shift diff) defs1 of
+--           Ress defs2 (VCons r res) diff2 ->
+--             let defs2' = E.updateEnv (E.shift diff2 x) r defs2
+--              in Ress defs2' res (diff2 . diff)
 
 -- | Conversion to flat grammars.
-flatten :: ToFlatGrammar c a -> FlatGrammar c a
-flatten g =
-  case toFlatGrammar g E.emptyEnv of
-    Res defs r _ -> FlatGrammar defs r
+flatten :: SemToFlatGrammar c a -> FlatGrammar c a
+flatten = toFlatGrammar
+  -- case toFlatGrammar g E.emptyEnv of
+  --   Res defs r _ -> FlatGrammar defs r
 
 -- checking productivity
 
@@ -516,17 +699,17 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs0) =
 -- is still simple, we can replace it with (snd . h) e1
 
 data Opt c g a where
-  OptSymb :: c -> Opt c g c
-  OptSymbI :: RSet c -> Opt c g c
+  OptSymb :: !c -> Opt c g c
+  OptSymbI :: !(RSet c) -> Opt c g c
   OptEmpty :: Opt c g a
   OptPure :: a -> Opt c g a
   -- OptSimple :: g a -> Opt c g a -- inlinable
-  OptOther :: g a -> Opt c g a
+  OptOther :: !(g a) -> Opt c g a
 
 -- | An interpretation of grammar methods for simplification.
 
 -- type Simplify c g = CheckProd c (Opt c g)
-type Simplify c g = Opt c (ToFlatGrammar c)
+type Simplify c g = Opt c (SemToFlatGrammar c)
 
 -- | Simplification of grammars, it performs
 --
@@ -596,7 +779,7 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Alternative (Opt c g) where
   some = Defs.someD
   {-# INLINE some #-}
 
-instance (Defs g, Ord c, Enum c, Grammar c g) => Grammar c (Opt c g) where
+instance (Defs g, Ord c, Enum c) => FromSymb c (Opt c g) where
   symb = OptSymb
   {-# INLINE symb #-}
   symbI cs = if RS.null cs then OptEmpty else OptSymbI cs
@@ -659,7 +842,7 @@ instance (Defs g, Alternative g) => Alternative (ThawSpace g) where
   {-# INLINE some #-}
 
 
-instance (Defs g, Grammar Char g) => Grammar ExChar (ThawSpace g) where
+instance (Defs g, Alternative g, FromSymb Char g) => FromSymb ExChar (ThawSpace g) where
   symb Space          = ThawSpace $ \sp _ -> sp
   symb Spaces         = ThawSpace $ \_ sps -> sps
   symb (NormalChar c) = ThawSpace $ \_ _ -> NormalChar <$> symb c
@@ -887,6 +1070,6 @@ collapseSpace = optSpaces
 {-# INLINE collapseSpace #-}
 
 -- | Thawing 'Space' and 'Spaces'.
-withSpace :: (Defs exp, Grammar Char exp) => exp () -> ToFlatGrammar ExChar a -> exp a
+withSpace :: (Defs exp, Grammar Char exp) => exp () -> SemToFlatGrammar ExChar a -> exp a
 withSpace gsp g = thawSpace gsp $ simplifyGrammar $ collapseSpace (flatten g)
 {-# INLINE withSpace #-}
