@@ -46,7 +46,8 @@ module Text.FliPpr.Internal.Type
     Repr (..),
     FliPprM,
     mfixF,
-    letr, letrs,
+    -- letr, letrs,
+    Defs.letrs,
     def,
     share,
     local,
@@ -54,7 +55,7 @@ module Text.FliPpr.Internal.Type
     reifySNat,
     -- Wit (..),
 
-    type Lift, type (<*), Defs.LetArg, -- Defs.Convertible,
+    Defs.Arg(..), -- Defs.Convertible,
     Defs,
   )
 where
@@ -69,7 +70,7 @@ import           Data.Semigroup            (Semigroup (..))
 import qualified Data.Type.Nat             as F
 import           Data.Typeable             (Proxy (..))
 import           Text.FliPpr.Doc           as D
-import           Text.FliPpr.Internal.Defs (Defs, type (<*), type Lift)
+import           Text.FliPpr.Internal.Defs (Defs)
 import qualified Text.FliPpr.Internal.Defs as Defs
 
 import           Control.Arrow             (first)
@@ -316,21 +317,21 @@ ununit = (coerce :: (arg () -> exp r -> exp r)
 -- (<?) (E x) (E y) = E (fbchoice x y)
 
 instance Defs.Defs e => Defs.Defs (E e) where
-  newtype Fs (E e) a = RE (Defs.Fs e a)
+  newtype D (E e) as a = RE (Defs.D e as a)
 
   -- liftDS (E x) = RE (Defs.liftDS x)
-  liftDS = coerce (Defs.liftDS :: e a -> Defs.Fs e (Lift a))
+  liftD = coerce (Defs.liftD :: e a -> Defs.D e '[] a )
   -- unliftDS (RE x) = E (Defs.unliftDS x)
-  unliftDS = coerce (Defs.unliftDS  :: Defs.Fs e (Lift a) -> e a)
+  unliftD = coerce (Defs.unliftD  :: Defs.D e '[] a -> e a)
     where
       _ = RE -- just to suppress unused constructor RE, which is indeed used via coerce.
 
   -- consDS (E r1) (RE r2) = RE (Defs.consDS r1 r2)
-  consDS = coerce (Defs.consDS :: e a -> Defs.Fs e b -> Defs.Fs e (a <* b))
+  consD = coerce (Defs.consD :: e a -> Defs.D e as b -> Defs.D e (a : as) b)
 
   --  unpairRules (RE e) k = RE $ unpairRules e (coerce k)
   -- letrDS h = RE $ Defs.letrDS (coerce h)
-  letrDS = coerce (Defs.letrDS :: (e a -> Defs.Fs e (a <* r)) -> Defs.Fs e r)
+  letrD = coerce (Defs.letrD :: (e a -> Defs.D e (a : as) b) -> Defs.D e as b)
 
 infixr 4 <?
 
@@ -353,7 +354,7 @@ instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A a
 
 -- | A specialized version of 'mfixDefM'
 -- mfixF :: forall exp a d. (Defs exp, Defs.DefType d, Defs.Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
-mfixF :: Defs.LetArg (E f) a => (a -> FliPprM f a) -> FliPprM f a
+mfixF :: Defs.Arg (E f) a => (a -> FliPprM f a) -> FliPprM f a
 mfixF = Defs.mfixDefM
 
 -- type DefsF exp = Defs.DTypeVal (E exp)
@@ -376,22 +377,22 @@ mfixF = Defs.mfixDefM
 --  @
 --
 
-letr :: Defs.LetArg (E f) t => (t -> FliPprM f (t, r)) -> FliPprM f r
-letr = Defs.letrGen
+-- letr :: Defs.Arg (E f) t => (t -> FliPprM f (t, r)) -> FliPprM f r
+-- letr = Defs.letr
 
 
--- letr :: (Repr arg exp ft rep, FliPprD arg exp) => (rep -> FliPprM exp (rep, r)) -> FliPprM exp r
--- letr h = Defs.letr $ \x -> do
---   (d, r) <- h (toFunction x)
---   return (fromFunction d, r)
+-- -- letr :: (Repr arg exp ft rep, FliPprD arg exp) => (rep -> FliPprM exp (rep, r)) -> FliPprM exp r
+-- -- letr h = Defs.letr $ \x -> do
+-- --   (d, r) <- h (toFunction x)
+-- --   return (fromFunction d, r)
 
--- not efficient for large list
--- letrs :: (Repr arg exp ft rep, FliPprD arg exp, Eq k) => [k] -> ((k -> rep) -> FliPprM exp (k -> rep, r)) -> FliPprM exp r
-letrs :: (Eq k, Defs.LetArg (E f) t) => [k] -> ((k -> t) -> FliPprM f (k -> t, r)) -> FliPprM f r
-letrs [] f = snd <$> f (const $ error "letrs: out of bounds")
-letrs (k:ks) f = letr $ \f1 -> letrs ks $ \frest -> do
-  (rf, rest) <- f $ \k' -> if k' == k then f1 else frest k'
-  return (rf, (rf k, rest))
+-- -- not efficient for large list
+-- -- letrs :: (Repr arg exp ft rep, FliPprD arg exp, Eq k) => [k] -> ((k -> rep) -> FliPprM exp (k -> rep, r)) -> FliPprM exp r
+-- letrs :: (Eq k, Defs.Arg (E f) t) => [k] -> ((k -> t) -> FliPprM f (k -> t, r)) -> FliPprM f r
+-- letrs [] f = snd <$> f (const $ error "letrs: out of bounds")
+-- letrs (k:ks) f = letr $ \f1 -> letrs ks $ \frest -> do
+--   (rf, rest) <- f $ \k' -> if k' == k then f1 else frest k'
+--   return (rf, (rf k, rest))
 
 -- letrs = go []
 --   where
@@ -406,8 +407,8 @@ def a b = (a,) <$> b
 -- | Spacilized version of 'Defs.share'
 -- share ::(Repr arg exp ft rep,  FliPprD arg exp) => rep -> FliPprM exp rep
 -- share = fmap toFunction . Defs.share . fromFunction
-share :: Defs.LetArg (E f) r => r -> FliPprM f r
-share e = letr $ \x -> return (e, x)
+share :: Defs.Arg (E f) r => r -> FliPprM f r
+share e = Defs.letr $ \x -> return (e, x)
 
 -- | Specialized version of 'Defs.local'
 local :: (Repr arg exp ft rep, FliPprD arg exp) => FliPprM exp rep -> rep
@@ -415,11 +416,11 @@ local = toFunction . Defs.local . fmap fromFunction
 
 -- One-level unfolding to avoid overlapping instances.
 
-instance Defs.Defs exp => Defs.LetArg (E exp) (E exp a) where
-  letrGen f = Defs.letr f
+instance Defs.Defs exp => Defs.Arg (E exp) (E exp a) where
+  letr f = Defs.letr f
 
-instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.LetArg (E exp) (A arg a -> r) where
-  letrGen f = Defs.letr $ fmap (first fromFunction) . f . toFunction
+instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E exp) (A arg a -> r) where
+  letr f = Defs.letr $ fmap (first fromFunction) . f . toFunction
 
 
 -- instance Defs.Convertible (E exp) (Defs.Lift a) (E exp a) where
@@ -550,7 +551,7 @@ newtype RName = RName Int deriving (Num, Show, Enum)
 
 newtype IName = IName Int deriving (Num, Show, Enum)
 
--- newtype Defs.PprDefs (a :: FType) = Defs.PprDefs {Defs.pprDefs :: Prec -> State (RName, IName) D.Doc}
+-- newtype Defs.PprExp (a :: FType) = Defs.PprExp {Defs.pprExp :: Prec -> State (RName, IName) D.Doc}
 
 newtype VarMFliPpr a = VarMFliPpr {runVarMFliPpr :: State (RName, IName) a}
   deriving (Functor, Applicative, Monad, MonadState (RName, IName))
@@ -582,28 +583,28 @@ pprIName n
   where
     fancyNames = "xyzwsturabcdeijklmnpqv"
 
-type PrinterI = Defs.PprDefs VarMFliPpr :: FType -> Type
+type PrinterI = Defs.Norm (Defs.PprExp VarMFliPpr :: FType -> Type)
 
 instance FliPprE (Const IName) PrinterI where
-  fapp e1 e2 = Defs.PprDefs $ \k -> do
-    d1 <- Defs.pprDefs e1 9
+  fapp e1 e2 = Defs.PprExpN $ \k -> do
+    d1 <- Defs.pprExpN e1 9
     let d2 = pprIName (getConst e2)
     return $ D.parensIf (k > 9) $ d1 D.<+> d2
 
-  farg h = Defs.PprDefs $ \k -> do
+  farg h = Defs.PprExpN $ \k -> do
     x <- newIName
-    d <- Defs.pprDefs (h $ Const x) 0
+    d <- Defs.pprExpN (h $ Const x) 0
     return $ D.parensIf (k > 0) $ D.text "\\" <> pprIName x <+> D.text "->" </> d
 
-  fcharAs a cs = Defs.PprDefs $ \k -> do
+  fcharAs a cs = Defs.PprExpN $ \k -> do
     let da = pprIName $ getConst a
     return $ parensIf (k > 9) $ da D.<+> D.text "`charAs`" D.<+> D.text (show cs)
 
-  fcase a bs = Defs.PprDefs $ \k -> do
+  fcase a bs = Defs.PprExpN $ \k -> do
     let da = pprIName $ getConst a
     ds <- forM bs $ \(Branch (PartialBij s _ _) f) -> do
       x <- newIName
-      df <- Defs.pprDefs (f $ Const x) 0
+      df <- Defs.pprExpN (f $ Const x) 0
       return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprIName x <+> D.text "->" <+> df
     return $
       parensIf (k > 9) $
@@ -611,11 +612,11 @@ instance FliPprE (Const IName) PrinterI where
           D.text "case_" <+> da
             <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
 
-  funpair a f = Defs.PprDefs $ \k -> do
+  funpair a f = Defs.PprExpN $ \k -> do
     let da = pprIName (getConst a)
     x <- newIName
     y <- newIName
-    db <- Defs.pprDefs (f (Const x) (Const y)) 0
+    db <- Defs.pprExpN (f (Const x) (Const y)) 0
     return $
       parensIf (k > 0) $
         D.align $
@@ -623,9 +624,9 @@ instance FliPprE (Const IName) PrinterI where
             D.text "let" <+> parens (pprIName x <> D.text "," <+> pprIName y) <+> D.text "=" <+> D.align da
               </> D.text "in" <+> D.align db
 
-  fununit a e = Defs.PprDefs $ \k -> do
+  fununit a e = Defs.PprExpN $ \k -> do
     let da = pprIName (getConst a)
-    de <- Defs.pprDefs e 0
+    de <- Defs.pprExpN e 0
     return $
       D.parensIf (k > 0) $
         D.align $
@@ -633,43 +634,43 @@ instance FliPprE (Const IName) PrinterI where
             D.text "let () =" <+> D.align da
               </> D.text "in" <+> D.align de
 
-  ftext s = Defs.PprDefs $ \k ->
+  ftext s = Defs.PprExpN $ \k ->
     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
 
-  fcat a b = Defs.PprDefs $ \k -> do
-    da <- Defs.pprDefs a 5
-    db <- Defs.pprDefs b 5
+  fcat a b = Defs.PprExpN $ \k -> do
+    da <- Defs.pprExpN a 5
+    db <- Defs.pprExpN b 5
     return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
 
-  fbchoice a b = Defs.PprDefs $ \k -> do
-    da <- Defs.pprDefs a 4
-    db <- Defs.pprDefs b 4
+  fbchoice a b = Defs.PprExpN $ \k -> do
+    da <- Defs.pprExpN a 4
+    db <- Defs.pprExpN b 4
     return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
 
-  fempty = Defs.PprDefs $ const $ return $ D.text "empty"
-  fline = Defs.PprDefs $ const $ return $ D.text "line"
-  flinebreak = Defs.PprDefs $ const $ return $ D.text "linebreak"
+  fempty = Defs.PprExpN $ const $ return $ D.text "empty"
+  fline = Defs.PprExpN $ const $ return $ D.text "line"
+  flinebreak = Defs.PprExpN $ const $ return $ D.text "linebreak"
 
-  fspace = Defs.PprDefs $ const $ return $ D.text "space"
-  fspaces = Defs.PprDefs $ const $ return $ D.text "spaces"
+  fspace = Defs.PprExpN $ const $ return $ D.text "space"
+  fspaces = Defs.PprExpN $ const $ return $ D.text "spaces"
 
-  fline' = Defs.PprDefs $ const $ return $ D.text "line'"
-  fnespaces' = Defs.PprDefs $ const $ return $ D.text "nespaces'"
+  fline' = Defs.PprExpN $ const $ return $ D.text "line'"
+  fnespaces' = Defs.PprExpN $ const $ return $ D.text "nespaces'"
 
-  fgroup a = Defs.PprDefs $ \k -> do
-    da <- Defs.pprDefs a 10
+  fgroup a = Defs.PprExpN $ \k -> do
+    da <- Defs.pprExpN a 10
     return $ parensIf (k > 9) $ D.text "group" <+> da
 
-  falign a = Defs.PprDefs $ \k -> do
-    da <- Defs.pprDefs a 10
+  falign a = Defs.PprExpN $ \k -> do
+    da <- Defs.pprExpN a 10
     return $ parensIf (k > 9) $ D.text "align" <+> da
 
-  fnest n a = Defs.PprDefs $ \k -> do
-    da <- Defs.pprDefs a 10
+  fnest n a = Defs.PprExpN $ \k -> do
+    da <- Defs.pprExpN a 10
     return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
 
 instance D.Pretty (FliPpr t) where
-  pprPrec _ (FliPpr m) = evalState (runVarMFliPpr $ Defs.pprDefs m 0) (0, 0)
+  pprPrec _ (FliPpr m) = evalState (runVarMFliPpr $ Defs.pprExpN m 0) (0, 0)
 
 -- type RName = Int
 
@@ -688,9 +689,9 @@ instance D.Pretty (FliPpr t) where
 --   = Printer (VCount -> Prec -> PrinterM s Doc)
 --   | Pointer (Ref s ())
 
--- Defs.pprDefs ::inter s a -> VCount -> Prec -> PrinterM s Doc
--- Defs.pprDefs (Pter f) vn k = f vn k
--- Defs.pprDefs (Pter p) _ _ = return $ pprRef p
+-- Defs.pprExp ::inter s a -> VCount -> Prec -> PrinterM s Doc
+-- Defs.pprExp (Pter f) vn k = f vn k
+-- Defs.pprExp (Pter p) _ _ = return $ pprRef p
 
 -- pprRef :: Ref s a -> Doc
 -- pprRef ref = D.text ("ppr" ++ show (refID ref))
@@ -719,20 +720,20 @@ instance D.Pretty (FliPpr t) where
 -- -- | An instance for pretty-printing FliPpr expressions themselves (not for pretty-printing interpretation).
 -- instance FliPprE (Printer s) (Printer s) where
 --   farg f = Printer $ \vn k -> do
---     df <- Defs.pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
+--     df <- Defs.pprExp (foPrinter $ pprVName vn)) (vn + 1) 0
 --     return $ D.group $ D.nest 2 $ parensIf (k > 0) $ D.text "\\" <> pprVName vn <+> D.text "->" </> df
 
 --   fapp f a = Printer $ \vn k -> do
---     df <- Defs.pprDefs f 9
---     da <- Defs.pprDefs a 10
+--     df <- Defs.pprExp f 9
+--     da <- Defs.pprExp a 10
 --     return $ parensIf (k > 9) $ df <+> da
 
 --   fcase a bs = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 10
+--     da <- Defs.pprExp a 10
 --     ds <-
 --       mapM
 --         ( \(Branch (PartialBij s _ _) f) -> do
---             df <- Defs.pprDefs (foPrinter $ pprVName vn)) (vn + 1) 0
+--             df <- Defs.pprExp (foPrinter $ pprVName vn)) (vn + 1) 0
 --             return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprVName vn <+> D.text "->" <+> df
 --         )
 --         bs
@@ -743,10 +744,10 @@ instance D.Pretty (FliPpr t) where
 --             <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
 
 --   funpair a f = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 10
+--     da <- Defs.pprExp a 10
 --     let dx = pprVName vn
 --     let dy = pprVName (vn + 1)
---     db <- Defs.pprDefs (foPrinter dx) (toPrinter dy)) (vn + 2) 0
+--     db <- Defs.pprExp (foPrinter dx) (toPrinter dy)) (vn + 2) 0
 --     return $
 --       parensIf (k > 0) $
 --         D.align $
@@ -755,8 +756,8 @@ instance D.Pretty (FliPpr t) where
 --               </> D.text "in" <+> D.align db
 
 --   fununit a e = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 10
---     de <- Defs.pprDefs e 0
+--     da <- Defs.pprExp a 10
+--     de <- Defs.pprExp e 0
 --     return $
 --       parensIf (k > 0) $
 --         D.align $
@@ -768,13 +769,13 @@ instance D.Pretty (FliPpr t) where
 --     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
 
 --   fcat a b = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 5
---     db <- Defs.pprDefs b 5
+--     da <- Defs.pprExp a 5
+--     db <- Defs.pprExp b 5
 --     return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
 
 --   fbchoice a b = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 4
---     db <- Defs.pprDefs b 4
+--     da <- Defs.pprExp a 4
+--     db <- Defs.pprExp b 4
 --     return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
 
 --   fempty = toPrinter $ D.text "empty"
@@ -788,21 +789,21 @@ instance D.Pretty (FliPpr t) where
 --   fnespaces' = toPrinter $ D.text "nespaces'"
 
 --   fgroup a = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 10
+--     da <- Defs.pprExp a 10
 --     return $ parensIf (k > 9) $ D.text "group" <+> da
 
 --   falign a = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 10
+--     da <- Defs.pprExp a 10
 --     return $ parensIf (k > 9) $ D.text "align" <+> da
 
 --   fnest n a = Printer $ \vn k -> do
---     da <- Defs.pprDefs a 10
+--     da <- Defs.pprExp a 10
 --     return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
 
 -- -- | An instance for pretty-printing recursive defined FliPpr expressions.
 -- instance FliPprD (PrinterM s) (Printer s) (Printer s) where
 --   fshare e = do
---     let md = Defs.pprDefs e
+--     let md = Defs.pprExp e
 --     (tbRef : _) <- ask
 --     r <- newRef $ ()
 --     modifyRef tbRef (M.insert r md)
@@ -810,7 +811,7 @@ instance D.Pretty (FliPpr t) where
 
 --   flocal m = Printer $ \vn k -> do
 --     tbRef <- newRef $ M.empty
---     d <- RM.local (tbRef :) $ m >>= \e -> Defs.pprDefs e 0
+--     d <- RM.local (tbRef :) $ m >>= \e -> Defs.pprExp e 0
 --     list <- M.toList <$> readRef tbRef
 --     defs <-
 --       D.group . D.align . (D.text "rec" <+>)
@@ -832,7 +833,7 @@ instance D.Pretty (FliPpr t) where
 --     where
 --       pprFliPpr :: PrinterM s (Printer s (t :: FType)) -> Prec -> RefM s Doc
 --       pprFliPpr m k =
---         runReaderT (runPrinterM $ Defs.pprDefs (fal m) 0 k) []
+--         runReaderT (runPrinterM $ Defs.pprExp (fal m) 0 k) []
 
 -- instance Show (FliPpr t) where
 --   show = show . ppr

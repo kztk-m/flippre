@@ -24,6 +24,7 @@ library
                        Text.FliPpr.Grammar, 
                        Text.FliPpr.Internal.Type, 
                        Text.FliPpr.Internal.Defs, 
+                       Text.FliPpr.Internal.HList, 
                        Text.FliPpr.Internal.PrettyPrinting,
                        Text.FliPpr.Internal.ParserGeneration,
                        Text.FliPpr.Internal.Env, 

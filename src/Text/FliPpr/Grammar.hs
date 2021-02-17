@@ -10,6 +10,7 @@
 {-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
@@ -118,21 +119,24 @@ instance Defs.VarM (NonterminalPrinterM c) where
   nestScope = id
   {-# INLINE nestScope #-}
 
-instance Functor (PprDefs (NonterminalPrinterM c)) where
-  fmap _ (PprDefs h) = PprDefs h
+instance Functor (PprExp (NonterminalPrinterM c)) where
+  fmap _ (PprExp h) = PprExp h
   {-# INLINE fmap #-}
 
-instance Applicative (PprDefs (NonterminalPrinterM c)) where
-  pure _ = PprDefs $ \_ -> return $ D.text "ε"
+deriving instance Functor (Norm (PprExp (NonterminalPrinterM c)))
+instance Applicative (PprExp (NonterminalPrinterM c)) where
+  pure _ = PprExp $ \_ -> return $ D.text "ε"
   {-# INLINE pure #-}
 
-  f <*> a = PprDefs $ \k -> (\d1 d2 -> D.parensIf (k > 9) $ d1 D.<+> D.align d2) <$> pprDefs f 9 <*> pprDefs a 10
+  f <*> a = PprExp $ \k -> (\d1 d2 -> D.parensIf (k > 9) $ d1 D.<+> D.align d2) <$> pprExp f 9 <*> pprExp a 10
   {-# INLINE (<*>) #-}
 
-instance Alternative (PprDefs (NonterminalPrinterM c)) where
-  empty = PprDefs $ \_ -> return $ D.text "⊥"
+deriving instance Applicative (Norm (PprExp (NonterminalPrinterM c)))
+
+instance Alternative (Norm (PprExp (NonterminalPrinterM c))) where
+  empty = PprExpN $ \_ -> return $ D.text "⊥"
   {-# INLINE empty #-}
-  f <|> g = PprDefs $ \k -> (\d1 d2 -> D.parensIf (k > 3) $ D.sep [d1, D.text "|", d2]) <$> pprDefs f 3 <*> pprDefs g 3
+  f <|> g = PprExpN $ \k -> (\d1 d2 -> D.parensIf (k > 3) $ D.sep [d1, D.text "|", d2]) <$> pprExpN f 3 <*> pprExpN g 3
   {-# INLINE (<|>) #-}
 
   many = Defs.manyD
@@ -140,15 +144,18 @@ instance Alternative (PprDefs (NonterminalPrinterM c)) where
   some = Defs.someD
   {-# INLINE some #-}
 
-instance Show c => FromSymb c (PprDefs (NonterminalPrinterM c)) where
-  symb c = PprDefs $ \_ -> return $ D.text (show c)
+
+instance Show c => FromSymb c (PprExp (NonterminalPrinterM c)) where
+  symb c = PprExp $ \_ -> return $ D.text (show c)
   {-# INLINE symb #-}
-  symbI cs = PprDefs $ \_ -> return $ D.text (show cs)
+  symbI cs = PprExp $ \_ -> return $ D.text (show cs)
   {-# INLINE symbI #-}
 
-pprGrammar :: Show c => PprDefs (NonterminalPrinterM c) _a -> D.Doc
+deriving instance Show c => FromSymb c (Norm (PprExp (NonterminalPrinterM c)))
+
+pprGrammar :: Show c => Norm (PprExp (NonterminalPrinterM c)) _a -> D.Doc
 pprGrammar g =
-  evalState (runNonterminalPrinterM (pprDefs g 0)) 1
+  evalState (runNonterminalPrinterM (pprExpN g 0)) 1
 
 -- | 'rule' introduces sharing. A typical use is:
 --
@@ -436,39 +443,39 @@ instance FromSymb c (SemToFlatGrammar c) where
   symb c = SemToFlatGrammar $ \tenv -> SemToFlatGrammarRes tenv id SSingleton (\_ env -> (env, SingRHS $ PCons (Symb c) $ PNil id))
   symbI cs = SemToFlatGrammar $ \tenv -> SemToFlatGrammarRes tenv id SSingleton (\_ env -> (env, SingRHS $ PCons (SymbI cs) $ PNil id))
 
-data DCond b a where
-  DCondT    :: !(SCondRHS c) -> DCond (Lift c) (Lift a)
-  DCondCons :: !(SCondRHS c) -> !(DCond rb ra) -> DCond (c <* rb) (a <* ra)
+data DCond bs br as ar where
+  DCondT    :: !(SCondRHS c) -> DCond '[] c '[] a
+  DCondCons :: !(SCondRHS c) -> !(DCond rbs rb ras ra) -> DCond (c ': rbs) rb (a ': ras) ra
 
-data DRHS c env bs as where
-  DRHST    :: !(RHSs c env b a) -> DRHS c env (Lift b) (Lift a)
-  DRHSCons :: !(RHSs c env b a) -> !(DRHS c env bb aa) -> DRHS c env (b <* bb) (a <* aa)
+data DRHS c env bs br as ar where
+  DRHST    :: !(RHSs c env b a) -> DRHS c env '[] b '[] a
+  DRHSCons :: !(RHSs c env b a) -> !(DRHS c env bs br as ar) -> DRHS c env (b ': bs) br (a ': as) ar
 
-data DSemToFlatGrammarRes c env a =
-  forall env' b.
+data DSemToFlatGrammarRes c env as a =
+  forall env' bs b.
   DSemToFlatGrammarRes !(E.Rep E.U env')
                        !(E.VarT E.U env env')
-                       !(DCond b a)
+                       !(DCond bs b as a)
                        !(forall envf. E.VarT E.U env' envf
                          -> E.Env E.U (RHS c envf) env
-                         -> (E.Env E.U (RHS c envf) env' , DRHS c envf b a))
+                         -> (E.Env E.U (RHS c envf) env' , DRHS c envf bs b as a))
 
 instance Defs (SemToFlatGrammar c) where
-  newtype Fs (SemToFlatGrammar c) a =
-    DSemToFlatGrammar { unDSemToFlatGrammar :: forall env. E.Rep E.U env -> DSemToFlatGrammarRes c env a }
+  newtype D (SemToFlatGrammar c) as a =
+    DSemToFlatGrammar { unDSemToFlatGrammar :: forall env. E.Rep E.U env -> DSemToFlatGrammarRes c env as a }
 
-  liftDS d = DSemToFlatGrammar $ \tenv ->
+  liftD d = DSemToFlatGrammar $ \tenv ->
     case unSemToFlatGrammar d tenv of
       SemToFlatGrammarRes tenv1 diff1 cond1 k1 ->
         DSemToFlatGrammarRes tenv1 diff1 (DCondT cond1) $ \df env -> second DRHST (k1 df env)
 
-  unliftDS d = SemToFlatGrammar $ \tenv ->
+  unliftD d = SemToFlatGrammar $ \tenv ->
     case unDSemToFlatGrammar d tenv of
       DSemToFlatGrammarRes tenv1 diff1 (DCondT cond1) k1 ->
         SemToFlatGrammarRes tenv1 diff1 cond1 $ \df env -> second (\case { DRHST x -> x }) (k1 df env)
 
 
-  consDS d ds = DSemToFlatGrammar $ \tenv ->
+  consD d ds = DSemToFlatGrammar $ \tenv ->
     case unSemToFlatGrammar d tenv of
       SemToFlatGrammarRes tenv1 diff1 cond1 k1 ->
         case unDSemToFlatGrammar ds tenv1 of
@@ -478,7 +485,7 @@ instance Defs (SemToFlatGrammar c) where
                   (env2, r2) = k2 df env1
               in (env2, DRHSCons r1 r2)
 
-  letrDS h = DSemToFlatGrammar $ \tenv ->
+  letrD h = DSemToFlatGrammar $ \tenv ->
     let  tenva = E.extendRep tenv Proxy
          harg = SemToFlatGrammar $ \tenv' -> SemToFlatGrammarRes tenv' E.diffRefl SSingleton $ \df env ->
                   (env , SingRHS $ PCons (NT $ E.shift (E.diffRep tenva tenv' >>> df) (E.varZ tenv)) $ PNil id )
@@ -680,7 +687,7 @@ unFlatten (FlatGrammar (defs :: Bindings c env env) rhs0) =
             then do -- FIXME: Is it OK to pass memo unchanged for performance?
                     (r, m) <- runStateT (procRHS rhs) memo
                     return (r, updateMemoS m x r)
-            else letr $ \a -> do
+            else letr1 $ \a -> do
                     (r, m) <- runStateT (procRHS rhs) (updateMemoS memo x a)
                     return (r, (a, m))
 
@@ -782,29 +789,29 @@ instance (Defs g, Ord c, Enum c) => FromSymb c (Opt c g) where
   symbI cs = if RS.null cs then OptEmpty else OptSymbI cs
   {-# INLINE symbI #-}
 
-unOptRules :: (Defs g, Grammar c g) => Fs (Opt c g) a -> Fs g a
+unOptRules :: (Defs g, Grammar c g) => D (Opt c g) as a -> D g as a
 -- unOptRules _ | trace "unOptRules" False = undefined
 unOptRules (OptRulesOther r)    = r
-unOptRules (OptLifted p)        = liftDS (unOpt p)
-unOptRules (OptRulesCons p1 p2) = consDS (unOpt p1) (unOptRules p2)
+unOptRules (OptLifted p)        = liftD (unOpt p)
+unOptRules (OptRulesCons p1 p2) = consD (unOpt p1) (unOptRules p2)
 
 instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
-  data Fs (Opt c g) _a where
-    OptRulesOther :: Fs g a -> Fs (Opt c g) a
-    OptLifted :: Opt c g a -> Fs (Opt c g) (Lift a)
-    OptRulesCons :: Opt c g a -> Fs (Opt c g) b -> Fs (Opt c g) (a <* b)
+  data D (Opt c g) _as _a where
+    OptRulesOther :: D g as a -> D (Opt c g) as a
+    OptLifted     :: Opt c g a -> D (Opt c g) '[] a
+    OptRulesCons  :: Opt c g a -> D (Opt c g) as b -> D (Opt c g) (a : as) b
 
-  liftDS p = OptLifted p
-  {-# INLINE liftDS #-}
+  liftD p = OptLifted p
+  {-# INLINE liftD #-}
 
-  unliftDS (OptLifted p)     = p
-  unliftDS (OptRulesOther r) = OptOther $ unliftDS r
-  {-# INLINE unliftDS #-}
+  unliftD (OptLifted p)     = p
+  unliftD (OptRulesOther r) = OptOther $ unliftD r
+  {-# INLINE unliftD #-}
 
-  consDS p1 p2 = OptRulesCons p1 p2
-  {-# INLINE consDS #-}
+  consD p1 p2 = OptRulesCons p1 p2
+  {-# INLINE consD #-}
 
-  letrDS h = OptRulesOther $ letrDS $ \a -> unOptRules $ h (OptOther a)
+  letrD h = OptRulesOther $ letrD $ \a -> unOptRules $ h (OptOther a)
   -- letrDS h =
   --   -- FIXME: This tries to inline definitions, but we do not need to do it at this point, as unFlatten does so.
   --   case h (OptOther empty) of
@@ -862,20 +869,20 @@ instance (Defs g, Alternative g, FromSymb Char g) => FromSymb ExChar (ThawSpace 
 --  constantResult f a = ThawSpace $ \sp sps -> constantResult f (runThawSpace a sp sps)
 
 instance Defs g => Defs (ThawSpace g) where
-  newtype Fs (ThawSpace g) a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> Fs g a}
+  newtype D (ThawSpace g) as a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> D g as a}
 
-  liftDS a = ThawSpaces $ \sp sps -> liftDS (runThawSpace a sp sps)
-  {-# INLINE liftDS #-}
+  liftD a = ThawSpaces $ \sp sps -> liftD (runThawSpace a sp sps)
+  {-# INLINE liftD #-}
 
-  unliftDS a = ThawSpace $ \sp sps -> unliftDS (runThawSpaces a sp sps)
-  {-# INLINE unliftDS #-}
+  unliftD a = ThawSpace $ \sp sps -> unliftD (runThawSpaces a sp sps)
+  {-# INLINE unliftD #-}
 
-  consDS x y = ThawSpaces $ \sp sps -> consDS (runThawSpace x sp sps) (runThawSpaces y sp sps)
-  {-# INLINE consDS #-}
+  consD x y = ThawSpaces $ \sp sps -> consD (runThawSpace x sp sps) (runThawSpaces y sp sps)
+  {-# INLINE consD #-}
 
-  letrDS k = ThawSpaces $ \sp sps ->
-    letrDS $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
-  {-# INLINE letrDS #-}
+  letrD k = ThawSpaces $ \sp sps ->
+    letrD $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
+  {-# INLINE letrD #-}
 
 thawSpace :: (Defs exp, Alternative exp) => exp () -> ThawSpace exp a -> exp a
 thawSpace sp0 g = local $ do
@@ -978,7 +985,7 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
         Just r -> return (r, memo)
         Nothing -> do
           let rhs = E.lookupEnv x defs
-          letr $ \a -> do
+          letr1 $ \a -> do
             (r, memo') <- runStateT (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a)
             return (r, (a, memo'))
 

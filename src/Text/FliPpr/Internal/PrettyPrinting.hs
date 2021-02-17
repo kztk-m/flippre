@@ -6,16 +6,21 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 
-module Text.FliPpr.Internal.PrettyPrinting where
+module Text.FliPpr.Internal.PrettyPrinting
+  (
+      pprMode, pprModeMono,
+      Ppr(..),
+  ) where
 
 import           Data.Coerce
 import           Data.Functor.Identity
 import           Text.FliPpr.Doc
 import           Text.FliPpr.Internal.Type
 
-import qualified Data.RangeSet.List        as RS
-import qualified Text.FliPpr.Internal.Defs as Defs
+import qualified Data.RangeSet.List         as RS
+import qualified Text.FliPpr.Internal.Defs  as Defs
 
+import           Text.FliPpr.Internal.HList
 data Ppr d (t :: FType) where
   PD :: !d -> Ppr d D
   PF :: !(a -> Ppr d r) -> Ppr d (a ~> r)
@@ -62,22 +67,26 @@ instance DocLike d => FliPprE Identity (Ppr d) where
   fspaces = PD empty
 
 instance DocLike d => Defs.Defs (Ppr d) where
-  newtype Fs (Ppr d) a = PprRules {pprRules :: Defs.DTypeVal (Ppr d) a}
+  data D (Ppr d) as a = PprRules (HList (Ppr d) as) (Ppr d a)
 
-  liftDS = PprRules . Defs.VT
-  unliftDS (PprRules (Defs.VT x)) = x
+  liftD a = PprRules HNil a
+  unliftD (PprRules HNil a) = a
 
-  consDS x (PprRules y) = PprRules (Defs.VCons x y)
+  consD x (PprRules xs r) = PprRules (HCons x xs) r
 
   --   unpairRules (PprRules (VCons x y)) k = k (PprRules x) (PprRules y)
 
-  letrDS h =
-    let (a,b) = k $ pprRules $ h a
-    in PprRules b
-    where
-      -- Explicit decomposer to suppress an incomplete-uni-patterns warning, for this actually complete pattern.
-      k :: Defs.DTypeVal (Ppr d) (a <* b) -> (Ppr d a, Defs.DTypeVal (Ppr d) b)
-      k (Defs.VCons x y) = (x, y)
+  letrD h =
+    let PprRules (HCons a as) r = h a
+    in PprRules as r
+
+  -- letrDS h =
+  --   let (a,b) = k $ pprRules $ h a
+  --   in PprRules b
+  --   where
+  --     -- Explicit decomposer to suppress an incomplete-uni-patterns warning, for this actually complete pattern.
+  --     k :: Defs.DTypeVal (Ppr d) (a <* b) -> (Ppr d a, Defs.DTypeVal (Ppr d) b)
+  --     k (Defs.VCons x y) = (x, y)
 
 
 -- instance DocLike d => FliPprD Identity Identity (Ppr d) where

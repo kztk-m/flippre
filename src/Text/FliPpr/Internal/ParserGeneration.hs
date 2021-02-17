@@ -14,7 +14,11 @@
 
 -- |
 -- This module implements parser-generation interpretation of FliPpr.
-module Text.FliPpr.Internal.ParserGeneration where
+module Text.FliPpr.Internal.ParserGeneration (
+  parsingMode, parsingModeMono, parsingModeSP, parsingModeWith,
+  BlockCommentSpec(..), CommentSpec (..),
+  PArg(..), PExp(..), Result(..),
+ )  where
 
 import           Control.Applicative             (liftA2, (<|>))
 import qualified Control.Applicative             as A (empty)
@@ -39,6 +43,8 @@ import           Data.Bifunctor                  (bimap)
 
 -- Due to RebindableSyntax
 import           Prelude
+
+import           Data.Kind                       (Type)
 
 ifThenElse :: Bool -> p -> p -> p
 ifThenElse True x _  = x
@@ -249,14 +255,18 @@ instance FliPprE PArg (PExp s) where
 --   ResT r (T t) = T (Err (Result r t))
 --   ResT r (a :*: b) = ResT r a :*: ResT r b
 
+type family Map (f :: FType -> Type) as where
+  Map f '[] = '[]
+  Map f (a ': as) = f a ': Map f as
 instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
-  newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Defs.Fs g (Defs.TransD (Compose Err (Result r)) a)}
+  -- newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Defs.Fs g (Defs.TransD (Compose Err (Result r)) a)}
+  newtype D (PExp g) as a = RulesG { unRulesG :: forall r. Rep r -> Defs.D g (Map (Compose Err (Result r)) as) (Err (Result r a)) }
 
-  liftDS x = RulesG $ \tenv -> Defs.liftDS (Compose <$> unPExp x tenv)
-  unliftDS (RulesG x) = PExp $ \tenv -> getCompose <$> Defs.unliftDS (x tenv)
+  liftD x = RulesG $ \tenv -> Defs.liftD (unPExp x tenv)
+  unliftD (RulesG x) = PExp $ \tenv -> Defs.unliftD (x tenv)
 
-  consDS x y = RulesG $ \tenv ->
-    Defs.consDS (Compose <$> unPExp x tenv) (unRulesG y tenv)
+  consD x y = RulesG $ \tenv ->
+    Defs.consD (Compose <$> unPExp x tenv) (unRulesG y tenv)
 
   -- unpairRules (x :: Rules (PExp g) (a :*: b)) k = RulesG $ \(tenv :: Rep r) ->
   --   case propTransDPreservesDefType @a @(Compose Err (Result r)) of
@@ -269,8 +279,8 @@ instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
   --     h :: Rep r -> Rep r' -> Compose Err (Result r) t -> Compose Err (Result r') t
   --     h tenv tenv' = Compose . fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose
 
-  letrDS h = RulesG $ \tenv ->
-    Defs.letrDS $ \a ->
+  letrD h = RulesG $ \tenv ->
+    Defs.letrD $ \a ->
       let harg = PExp $ \tenv' -> fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose <$> a
       in unRulesG (h harg) tenv
 

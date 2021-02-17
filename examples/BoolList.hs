@@ -15,7 +15,7 @@ import           Text.FliPpr
 import           Text.FliPpr.Driver.Earley as Earley
 import qualified Text.FliPpr.Grammar       as G
 
-mfix :: LetArg (E f) a => (a -> FliPprM f a) -> FliPprM f a
+mfix :: Arg (E f) a => (a -> FliPprM f a) -> FliPprM f a
 mfix = mfixF
 
 example1 :: FliPpr ([Bool] ~> D)

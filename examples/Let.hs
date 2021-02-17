@@ -26,7 +26,7 @@ import qualified Text.FliPpr.Automaton     as Automaton
 -- import           Debug.Trace
 
 
-mfix :: LetArg (E f) a => (a -> FliPprM f a) -> FliPprM f a
+mfix :: Arg (E f) a => (a -> FliPprM f a) -> FliPprM f a
 mfix = mfixF
 
 ifThenElse :: Bool -> p -> p -> p

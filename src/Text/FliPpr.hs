@@ -49,9 +49,9 @@ module Text.FliPpr
     share,
     local,
     mfixF,
-    letr, letrs,
+    letrs,
     def,
-    LetArg(..),
+    Arg(..),
 
     -- ** Pretty-Printing Combinators and Datatypes
     spaces,
@@ -238,7 +238,7 @@ isMember cs f =
 --
 -- >  rec f <- share $ arg $ \i -> ... f `app` a ...
 -- define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
-define :: LetArg (E f) r => r -> FliPprM f r
+define :: Arg (E f) r => r -> FliPprM f r
 define = share
 
 
