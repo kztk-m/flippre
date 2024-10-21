@@ -5,3 +5,6 @@
 *.profiterole.html
 *.hp
 /*.svg 
+dist-newstyle
+hie.yaml
+.hie
