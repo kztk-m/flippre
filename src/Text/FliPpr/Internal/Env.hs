@@ -221,11 +221,11 @@ instance EnvImpl UL where
 data S k
 
 instance EnvImpl S where
-  data Var S :: [k] -> k -> Type where
+  data Var S env a where
     VZ :: Var S (a : env) a
     VS :: Var S env a -> Var S (b : env) a
 
-  data Env S :: (k -> Type) -> [k] -> Type where
+  data Env S f env where
     EEnd :: Env S f '[]
     EExtend :: Env S f env -> f a -> Env S f (a : env)
 
@@ -234,7 +234,8 @@ instance EnvImpl S where
 
   newtype Rep S env = SRep (Env S Proxy env)
 
-  runVarT = runVarTT . coerce
+  -- runVarT :: forall env env' a. VarT S env env' -> Var S env a -> Var S env' a
+  runVarT x = runVarTT (coerce x)
 
   eqVar VZ VZ         = Just Refl
   eqVar (VS n) (VS m) = eqVar n m

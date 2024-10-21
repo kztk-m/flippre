@@ -23,7 +23,7 @@ data HList (f :: k -> Type) :: [k] -> Type where
 instance (forall a. Show (f a)) => Show (HList f as) where
   showsPrec _ es = showString "[" . go es . showString "]"
     where
-      go :: (forall a. Show (f a)) => HList f as -> ShowS
+      go :: (forall a. Show (f a)) => HList f as' -> ShowS
       go HNil           = id
       go (HCons a HNil) = shows a
       go (HCons a as)   = shows a . showString "," . go as

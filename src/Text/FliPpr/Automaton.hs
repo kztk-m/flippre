@@ -22,8 +22,8 @@ import qualified Data.Graph           as Graph
 import qualified Data.List            as L
 import qualified Data.Map             as M
 import           Data.Maybe           (fromJust, fromMaybe)
+import           Data.Monoid          (Any (..))
 import qualified Data.Set             as S
-
 
 import           Data.String          (IsString (..))
 

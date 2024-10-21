@@ -1,20 +1,42 @@
 cabal-version:       2.2
 name:                flippre
-version:             0.2.0
+version:             0.2.1
 synopsis:            FliPpr, embedded 
 -- description:
 homepage:            https://github.com/kztk-m/flippre
 license:             BSD-3-Clause 
 license-file:        LICENSE
 author:              Kazutaka Matsuda
-maintainer:          kztk@ecei.tohoku.ac.jp
-copyright:           2017, 2018, 2020 Kazutaka Matsuda
+maintainer:          kztk@tohoku.ac.jp
+copyright:           2017, 2018, 2020, 2024 Kazutaka Matsuda
 category:            Text 
 build-type:          Simple
 extra-source-files:  README.md
 
+common warning-flags
+    default-language: Haskell2010
+    ghc-options:
+                 -Wall
+                 -Wcompat
+                 -Widentities
+                 -Wincomplete-uni-patterns
+                 -Wincomplete-record-updates
+                 -Wredundant-constraints
+                 -Wnoncanonical-monad-instances
+    if impl(ghc >= 8.2)
+      ghc-options:       -fhide-source-paths
+    if impl(ghc >= 8.4)
+      ghc-options:       -Wmissing-export-lists
+                         -Wpartial-fields
+    if impl(ghc >= 8.8)
+      ghc-options:       -Wmissing-deriving-strategies
+                         -fwrite-ide-info
+                         -hiedir=.hie
+    if impl(ghc >= 8.10)
+      ghc-options:       -Wunused-packages  
 
 library
+  import: warning-flags
   hs-source-dirs:      src
   exposed-modules:     Text.FliPpr, 
                        Text.FliPpr.Doc, 
@@ -36,14 +58,13 @@ library
   build-depends:       base >= 4.7 && < 5, 
                        mtl  >= 2.0 && < 3, 
                        containers >= 0.5 && < 0.7,
-                       template-haskell >= 2.11 && < 2.16, 
+                       template-haskell >= 2.11 && < 2.23, 
                        Earley >= 0.11 && < 0.14, 
                        range-set-list >= 0.1 && < 0.2, 
-                       th-abstraction >= 0.2 && < 0.4, 
-                       fin >= 0.1 && < 0.2 
+                       th-abstraction >= 0.2 && < 0.8, 
+                       fin >= 0.1 && < 0.4 
                        
   default-language:    Haskell2010
-  ghc-options:         -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wpartial-fields
 
 flag build-examples
   description: wheather or not build examples

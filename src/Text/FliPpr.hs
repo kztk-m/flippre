@@ -271,7 +271,7 @@ opPrinter (Fixity a opPrec) opD ppr1 ppr2 k =
     ifParens b = if b then parens else id
 
 $(mkUn ''Bool)
-$(mkUn ''(:))
+$(mkUn ''[])
 $(mkUn ''Either)
 $(mkUn ''(,,))
 

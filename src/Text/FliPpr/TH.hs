@@ -1,4 +1,6 @@
+{-# LANGUAGE CPP              #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE PatternSynonyms  #-}
 {-# LANGUAGE TemplateHaskell  #-}
 {-# LANGUAGE TupleSections    #-}
 
@@ -14,6 +16,27 @@ import           Language.Haskell.TH.Datatype as TH
 import           Prelude                      hiding (exp)
 import           Text.FliPpr.Internal.Type
 import           Text.FliPpr.Pat              as Pat
+
+
+pattern ConP_compat :: TH.Name -> [TH.Pat] -> TH.Pat
+#if MIN_VERSION_template_haskell(2,18,0)
+pattern ConP_compat n ps <- TH.ConP n _ ps
+  where
+    ConP_compat n ps = TH.ConP n [] ps
+#else
+pattern ConP_compat n ps = TH.ConP n ps
+#endif
+
+tupE_compat :: [TH.Exp] -> TH.Exp
+unboxedTupE_compat :: [TH.Exp] -> TH.Exp
+#if MIN_VERSION_template_haskell(2,16,0)
+tupE_compat = TH.TupE . map Just
+unboxedTupE_compat = TH.UnboxedTupE . map Just
+#else
+tupE_compat = TH.TupE
+unboxedTupE_compat = TH.UnboxedTupE
+#endif
+
 
 -- | Generate "un" functions for datatypes. This does not work well for
 -- non-letter constructor names in general, except for @[]@, @(:)@, and tuples.
@@ -118,6 +141,13 @@ unGen cname = do
       (args, ret) <- parseType t2
       return (t1 : args, ret)
     parseType (TH.SigT _ _) = fail "Kind signatures are not supported yet."
+
+#if MIN_VERSION_template_haskell(2,17,0)
+    parseType (TH.AppT (TH.AppT (TH.AppT TH.MulArrowT _) t1) t2) = do
+      (args, ret) <- parseType t2
+      return (t1 : args, ret)
+#endif
+
     parseType t = return ([], t)
 
     -- numberOfArgs :: TH.Type -> Int
@@ -189,7 +219,7 @@ branch patQ expQ = do
         go (TH.VarP n) r = n : r
         go (TH.TupP ps) r = foldr go r ps
         go (TH.UnboxedTupP ps) r = foldr go r ps
-        go (TH.ConP _ ps) r = foldr go r ps
+        go (ConP_compat _ ps) r = foldr go r ps
         go (TH.InfixP p1 _ p2) r = go p1 (go p2 r)
         go (TH.UInfixP p1 _ p2) r = go p1 (go p2 r)
         go (TH.ParensP p) r = go p r
@@ -204,15 +234,15 @@ branch patQ expQ = do
     patToExp :: TH.Pat -> TH.Exp
     patToExp (TH.LitP l) = TH.LitE l
     patToExp (TH.VarP x) = TH.VarE x
-    patToExp (TH.TupP ps) = TH.TupE (map patToExp ps)
-    patToExp (TH.UnboxedTupP ps) = TH.UnboxedTupE (map patToExp ps)
-    patToExp (TH.ConP c ps) = foldl TH.AppE (TH.ConE c) $ map patToExp ps
+    patToExp (TH.TupP ps) = tupE_compat (map patToExp ps)
+    patToExp (TH.UnboxedTupP ps) = unboxedTupE_compat (map patToExp ps)
+    patToExp (ConP_compat c ps) = foldl TH.AppE (TH.ConE c) $ map patToExp ps
     patToExp (TH.InfixP p1 n p2) = TH.InfixE (Just $ patToExp p1) (TH.ConE n) (Just $ patToExp p2)
     patToExp (TH.UInfixP p1 n p2) = TH.UInfixE (patToExp p1) (TH.ConE n) (patToExp p2)
     patToExp (TH.ParensP p) = TH.ParensE (patToExp p)
     patToExp (TH.TildeP p) = patToExp p
     patToExp (TH.BangP p) = patToExp p
-    patToExp TH.WildP = TH.TupE []
+    patToExp TH.WildP = tupE_compat []
     patToExp (TH.RecP n fs) = TH.RecConE n $ map (second patToExp) fs
     patToExp (TH.ListP ps) = TH.ListE (map patToExp ps)
     patToExp (TH.SigP p t) = TH.SigE (patToExp p) t
@@ -220,7 +250,7 @@ branch patQ expQ = do
 
     makeForward' :: TH.Pat -> [TH.Name] -> Q TH.Exp
     makeForward' pat0 vs = do
-      let e = return $ foldr (\a r -> TH.TupE [TH.VarE a, r]) (TH.TupE []) vs
+      let e = return $ foldr (\a r -> tupE_compat [TH.VarE a, r]) (tupE_compat []) vs
       [|\x -> case x of $(return pat0) -> Just $(e); _ -> Nothing|]
 
     makeBackward' :: TH.Pat -> [TH.Name] -> Q TH.Exp
@@ -302,13 +332,18 @@ numberOfArgs (TH.AppT (TH.AppT ArrowT _) t2) = numberOfArgs t2 + 1
 numberOfArgs (TH.ForallT _ _ t)              = numberOfArgs t
 numberOfArgs (TH.SigT t _)                   = numberOfArgs t
 numberOfArgs (TH.ParensT t)                  = numberOfArgs t
+
+#if MIN_VERSION_template_haskell(2,17,0)
+numberOfArgs (TH.AppT (TH.AppT (TH.AppT TH.MulArrowT _) _) t2) = numberOfArgs t2 + 1
+#endif
+
 numberOfArgs _                               = 0
 
 makeForward :: TH.Name -> Int -> Bool -> Q TH.Exp
 makeForward cn n isSing = do
   vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
-  let p = return $ TH.ConP cn $ map TH.VarP vs
-  let exp = return $ foldr (\x r -> TH.TupE [TH.VarE x, r]) (TH.TupE []) vs
+  let p = return $ ConP_compat cn $ map TH.VarP vs
+  let exp = return $ foldr (\x r -> tupE_compat [TH.VarE x, r]) (tupE_compat []) vs
   if isSing
     then [|\ $(p) -> Just $(exp)|]
     else [|\x -> case x of $(p) -> Just $(exp); _ -> Nothing|]

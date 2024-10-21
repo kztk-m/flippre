@@ -22,6 +22,7 @@ module Text.FliPpr.Internal.ParserGeneration (
 
 import           Control.Applicative             (liftA2, (<|>))
 import qualified Control.Applicative             as A (empty)
+import           Control.Monad                   (join)
 import           Control.Monad.Reader            hiding (lift, mfix)
 import           Data.Foldable                   (asum)
 -- import qualified Text.FliPpr.Internal.GrammarST as G

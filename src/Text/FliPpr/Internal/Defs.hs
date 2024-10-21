@@ -341,7 +341,7 @@ pattern PprExpN :: (D.Precedence  -> m D.Doc) -> Norm (PprExp m) a
 pattern PprExpN a = Norm (PprExp a)
 
 
-pprExpN :: Norm (PprExp m) _a -> D.Precedence  -> m D.Doc
+pprExpN :: Norm (PprExp m) a -> D.Precedence  -> m D.Doc
 pprExpN = pprExp . unNorm
 
 instance VarM m => NDefs (PprExp m) where

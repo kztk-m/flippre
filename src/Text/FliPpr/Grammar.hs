@@ -153,7 +153,7 @@ instance Show c => FromSymb c (PprExp (NonterminalPrinterM c)) where
 
 deriving instance Show c => FromSymb c (Norm (PprExp (NonterminalPrinterM c)))
 
-pprGrammar :: Show c => Norm (PprExp (NonterminalPrinterM c)) _a -> D.Doc
+pprGrammar :: Show c => Norm (PprExp (NonterminalPrinterM c)) a -> D.Doc
 pprGrammar g =
   evalState (runNonterminalPrinterM (pprExpN g 0)) 1
 

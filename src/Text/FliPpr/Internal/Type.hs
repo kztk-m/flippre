@@ -63,6 +63,7 @@ where
 import           Control.Applicative       (Const (..))
 import           Control.Monad.Reader      hiding (lift, local)
 import           Control.Monad.State       hiding (lift)
+import Control.Monad (forM)
 import           Data.Coerce               (coerce)
 import qualified Data.Fin                  as F
 import           Data.Kind                 (Type)
