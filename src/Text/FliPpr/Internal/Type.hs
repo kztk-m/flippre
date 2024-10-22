@@ -61,9 +61,9 @@ module Text.FliPpr.Internal.Type
 where
 
 import           Control.Applicative       (Const (..))
+import           Control.Monad             (forM)
 import           Control.Monad.Reader      hiding (lift, local)
 import           Control.Monad.State       hiding (lift)
-import Control.Monad (forM)
 import           Data.Coerce               (coerce)
 import qualified Data.Fin                  as F
 import           Data.Kind                 (Type)
@@ -71,8 +71,8 @@ import           Data.Semigroup            (Semigroup (..))
 import qualified Data.Type.Nat             as F
 import           Data.Typeable             (Proxy (..))
 import           Text.FliPpr.Doc           as D
-import           Text.FliPpr.Internal.Defs (Defs)
 import qualified Text.FliPpr.Internal.Defs as Defs
+import           Text.FliPpr.Internal.Defs (Defs)
 
 import           Control.Arrow             (first)
 
@@ -418,7 +418,7 @@ local = toFunction . Defs.local . fmap fromFunction
 -- One-level unfolding to avoid overlapping instances.
 
 instance Defs.Defs exp => Defs.Arg (E exp) (E exp a) where
-  letr f = Defs.letr f
+  letr f = Defs.letr $ fmap (first Defs.Tip) . f . Defs.unTip
 
 instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E exp) (A arg a -> r) where
   letr f = Defs.letr $ fmap (first fromFunction) . f . toFunction
