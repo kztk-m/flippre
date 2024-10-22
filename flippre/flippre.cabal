@@ -13,7 +13,7 @@ category:            Text
 build-type:          Simple
 extra-source-files:  README.md
 
-common warning-flags
+common warnings
     default-language: Haskell2010
     ghc-options:
                  -Wall
@@ -36,7 +36,7 @@ common warning-flags
       ghc-options:       -Wunused-packages  
 
 library
-  import: warning-flags
+  import: warnings
   hs-source-dirs:      src
   exposed-modules:     Text.FliPpr, 
                        Text.FliPpr.Doc, 
@@ -65,43 +65,6 @@ library
                        fin >= 0.1 && < 0.4 
                        
   default-language:    Haskell2010
-
-flag build-examples
-  description: wheather or not build examples
-  default: False
-  manual:  True  
-
-common common-examples
-  hs-source-dirs: examples 
-  if flag(build-examples) 
-    buildable: True
-  else
-    buildable: False
-  default-language: Haskell2010
-  build-depends: base, flippre
-  ghc-options: -rtsopts -Wall -Wcompat 
-
-executable grammar-trans
-  import: common-examples 
-  main-is: G.hs
-
-executable bool-list
-  import: common-examples
-  main-is: BoolList.hs  
-
-executable arith
-  import: common-examples 
-  build-depends: deepseq 
-  main-is: Arith.hs
-
-executable arithlet
-  import: common-examples
-  build-depends: deepseq 
-  main-is: Let.hs
-
-executable simple-lang
-  import: common-examples
-  main-is: SimpleLang.hs 
   
 source-repository head
   type:     git 
