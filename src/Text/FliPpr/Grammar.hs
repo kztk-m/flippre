@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds            #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE FunctionalDependencies     #-}
@@ -58,7 +59,7 @@ where
 import           Control.Applicative       (Alternative (..), Const (..))
 import           Control.Arrow             (second)
 import           Control.Category          (Category (..), id, (.), (>>>))
-import           Control.Monad             (forM)
+import           Control.Monad             (forM, void)
 import           Control.Monad.State       (MonadState, State, StateT (..),
                                             evalState, evalStateT, get, put)
 import           Data.Foldable             (asum)
@@ -107,7 +108,7 @@ symbols = foldr (\a r -> (:) <$> symb a <*> r) (pure [])
 type GrammarD c e = (Defs e, Grammar c e)
 
 newtype NonterminalPrinterM c a = NonterminalPrinterM {runNonterminalPrinterM :: State Int a}
-  deriving (Functor, Applicative, Monad, MonadState Int)
+  deriving newtype (Functor, Applicative, Monad, MonadState Int)
 
 instance Defs.VarM (NonterminalPrinterM c) where
   newVar = do
@@ -123,7 +124,7 @@ instance Functor (PprExp (NonterminalPrinterM c)) where
   fmap _ (PprExp h) = PprExp h
   {-# INLINE fmap #-}
 
-deriving instance Functor (Norm (PprExp (NonterminalPrinterM c)))
+deriving newtype instance Functor (Norm (PprExp (NonterminalPrinterM c)))
 instance Applicative (PprExp (NonterminalPrinterM c)) where
   pure _ = PprExp $ \_ -> return $ D.text "ε"
   {-# INLINE pure #-}
@@ -131,7 +132,7 @@ instance Applicative (PprExp (NonterminalPrinterM c)) where
   f <*> a = PprExp $ \k -> (\d1 d2 -> D.parensIf (k > 9) $ d1 D.<+> D.align d2) <$> pprExp f 9 <*> pprExp a 10
   {-# INLINE (<*>) #-}
 
-deriving instance Applicative (Norm (PprExp (NonterminalPrinterM c)))
+deriving newtype instance Applicative (Norm (PprExp (NonterminalPrinterM c)))
 
 instance Alternative (Norm (PprExp (NonterminalPrinterM c))) where
   empty = PprExpN $ \_ -> return $ D.text "⊥"
@@ -151,9 +152,9 @@ instance Show c => FromSymb c (PprExp (NonterminalPrinterM c)) where
   symbI cs = PprExp $ \_ -> return $ D.text (show cs)
   {-# INLINE symbI #-}
 
-deriving instance Show c => FromSymb c (Norm (PprExp (NonterminalPrinterM c)))
+deriving newtype instance Show c => FromSymb c (Norm (PprExp (NonterminalPrinterM c)))
 
-pprGrammar :: Show c => Norm (PprExp (NonterminalPrinterM c)) a -> D.Doc
+pprGrammar :: Norm (PprExp (NonterminalPrinterM c)) a -> D.Doc
 pprGrammar g =
   evalState (runNonterminalPrinterM (pprExpN g 0)) 1
 
@@ -177,7 +178,7 @@ rule :: Defs.Defs f => f a -> DefM f (Tip (f a))
 rule = coerce . Defs.share
 
 -- | A synonym of 'runIdentity', which is named after "nonterminal" and supposed to be used with 'rule'.
-nt :: Defs.Defs f => Tip (f a) -> f a
+nt :: Tip (f a) -> f a
 nt = coerce
 
 -- | Characters with special symbols 'Space' and 'Spaces'. They will be
@@ -189,7 +190,7 @@ data ExChar
   = Space    -- ^ Special symbol denoting a single space " "
   | Spaces   -- ^ Special symbol denoting zero-or-more spaces
   | NormalChar {-# UNPACK #-} !Char -- ^ Normal charactors (which may be " ")
-  deriving (Eq, Ord)
+  deriving stock (Eq, Ord)
 
 instance Enum ExChar where
   toEnum 0 = Space
@@ -227,7 +228,7 @@ instance D.Pretty ExChar where
 
 instance Show ExChar where
   show = show . D.ppr
-  showList s = \r -> show (D.pprList s) ++ r
+  showList s r = show (D.pprList s) ++ r
 
 class CharLike c where
   -- | Injection from 'Char'
@@ -249,11 +250,11 @@ text = foldr (\c r -> (:) <$> char c <*> r) (pure [])
 
 -- | A production of the special symbol 'Space'
 space :: Grammar ExChar e => e ()
-space = () <$ symb Space
+space = void (symb Space)
 
 -- | A production of the special symbol 'Spaces'
 spaces :: Grammar ExChar e => e ()
-spaces = () <$ symb Spaces
+spaces = void (symb Spaces)
 
 type Env = E.Env E.U
 
@@ -262,7 +263,7 @@ type Var = E.Var E.U
 type Bindings c env1 env2 = Env (RHS c env1) env2
 
 newtype RHS c env a = RHS [Prod c env a]
-  deriving (Functor)
+  deriving stock Functor
 
 instance Show c => D.Pretty (RHS c env a) where
   ppr (RHS rs) =
@@ -368,7 +369,7 @@ toProds (OtherRHS prods) = prods
 
 newtype SemToFlatGrammar c a =
   SemToFlatGrammar { unSemToFlatGrammar :: forall env. E.Rep E.U env -> SemToFlatGrammarRes c env a }
-  deriving Functor
+  deriving stock Functor
 
 data SemToFlatGrammarRes c env a =
   forall env' b.
@@ -588,7 +589,7 @@ flatten = toFlatGrammar
 
 -- checking productivity
 
-removeNonProductive :: Show c => FlatGrammar c a -> FlatGrammar c a
+removeNonProductive :: FlatGrammar c a -> FlatGrammar c a
 removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
   -- trace (show $ D.text " " D.<> D.align (D.ppr $ FlatGrammar defs rhs)) $
   FlatGrammar (E.mapEnv procRHS defs) (procRHS rhs)
@@ -634,7 +635,7 @@ removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
 
 newtype MemoS g env = MemoS {lookupMemoS :: forall a. Var env a -> Maybe (g a)}
 
-unFlatten :: forall c g r. (Ord c, Enum c, GrammarD c g) => FlatGrammar c r -> g r
+unFlatten :: forall c g r. (GrammarD c g) => FlatGrammar c r -> g r
 unFlatten (FlatGrammar (defs :: Bindings c env env) rhs0) =
   local $ evalStateT (procRHS rhs0) initMemoS
   where
@@ -727,7 +728,7 @@ type Simplify c g = Opt c (SemToFlatGrammar c)
 --
 --   * A simple inlining.
 
-simplifyGrammar :: (Show c, Ord c, Enum c, GrammarD c g) => Simplify c g a -> g a
+simplifyGrammar :: (Ord c, Enum c, GrammarD c g) => Simplify c g a -> g a
 simplifyGrammar g = unOpt $ unFlatten $ removeNonProductive $ flatten $ unOpt g
 
 unOpt :: Grammar c g => Opt c g a -> g a
@@ -752,7 +753,7 @@ instance Grammar c g => Functor (Opt c g) where
   {-# INLINABLE fmap #-}
 
 instance Grammar c g => Applicative (Opt c g) where
-  pure a = OptPure a
+  pure = OptPure
   {-# INLINE pure #-}
 
   --  _ <*> _ | trace "<*>" False = undefined
@@ -783,7 +784,7 @@ instance (Defs g, Ord c, Enum c, Grammar c g) => Alternative (Opt c g) where
   some = Defs.someD
   {-# INLINE some #-}
 
-instance (Defs g, Ord c, Enum c) => FromSymb c (Opt c g) where
+instance FromSymb c (Opt c g) where
   symb = OptSymb
   {-# INLINE symb #-}
   symbI cs = if RS.null cs then OptEmpty else OptSymbI cs
@@ -795,20 +796,20 @@ unOptRules (OptRulesOther r)    = r
 unOptRules (OptLifted p)        = liftD (unOpt p)
 unOptRules (OptRulesCons p1 p2) = consD (unOpt p1) (unOptRules p2)
 
-instance (Defs g, Ord c, Enum c, Grammar c g) => Defs (Opt c g) where
+instance (Defs g, Grammar c g) => Defs (Opt c g) where
   data D (Opt c g) _as _a where
     OptRulesOther :: D g as a -> D (Opt c g) as a
     OptLifted     :: Opt c g a -> D (Opt c g) '[] a
     OptRulesCons  :: Opt c g a -> D (Opt c g) as b -> D (Opt c g) (a : as) b
 
-  liftD p = OptLifted p
+  liftD = OptLifted
   {-# INLINE liftD #-}
 
   unliftD (OptLifted p)     = p
   unliftD (OptRulesOther r) = OptOther $ unliftD r
   {-# INLINE unliftD #-}
 
-  consD p1 p2 = OptRulesCons p1 p2
+  consD = OptRulesCons
   {-# INLINE consD #-}
 
   letrD h = OptRulesOther $ letrD $ \a -> unOptRules $ h (OptOther a)
@@ -846,7 +847,7 @@ instance (Defs g, Alternative g) => Alternative (ThawSpace g) where
   {-# INLINE some #-}
 
 
-instance (Defs g, Alternative g, FromSymb Char g) => FromSymb ExChar (ThawSpace g) where
+instance (Alternative g, FromSymb Char g) => FromSymb ExChar (ThawSpace g) where
   symb Space          = ThawSpace $ \sp _ -> sp
   symb Spaces         = ThawSpace $ \_ sps -> sps
   symb (NormalChar c) = ThawSpace $ \_ _ -> NormalChar <$> symb c
@@ -924,7 +925,7 @@ updateMemo (Memo f) q1 q2 x k =
       Just Refl | q1 == q1', q2 == q2' -> Just k
       _                                -> f q1' q2' x'
 
-data Qsp = Qn | Qs | Qss deriving (Eq, Ord)
+data Qsp = Qn | Qs | Qss deriving stock (Eq, Ord)
 
 optSpaces :: forall g t. (Defs g, Grammar ExChar g) => FlatGrammar ExChar t -> g t
 optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
@@ -933,8 +934,8 @@ optSpaces (FlatGrammar (defs :: Bindings inc env env) rhs0) =
     allStates = [Qn, Qs, Qss]
 
     finalProd Qn  = pure ()
-    finalProd Qs  = () <$ symb Space
-    finalProd Qss = () <$ symb Spaces
+    finalProd Qs  = void (symb Space)
+    finalProd Qss = void (symb Spaces)
     {-# INLINE finalProd #-}
 
     transTo Qn Space           = (pure Space, Qs)

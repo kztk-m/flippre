@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GADTs                      #-}
@@ -230,7 +231,7 @@ instance EnvImpl S where
     EExtend :: Env S f env -> f a -> Env S f (a : env)
 
   newtype VarT S env env' = VarTS (VarTT S env env')
-    deriving Category
+    deriving newtype Category
 
   newtype Rep S env = SRep (Env S Proxy env)
 

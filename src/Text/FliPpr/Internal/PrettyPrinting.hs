@@ -66,10 +66,10 @@ instance DocLike d => FliPprE Identity (Ppr d) where
   fspace = PD (text " ")
   fspaces = PD empty
 
-instance DocLike d => Defs.Defs (Ppr d) where
+instance Defs.Defs (Ppr d) where
   data D (Ppr d) as a = PprRules (HList (Ppr d) as) (Ppr d a)
 
-  liftD a = PprRules HNil a
+  liftD = PprRules HNil
   unliftD (PprRules HNil a) = a
 
   consD x (PprRules xs r) = PprRules (HCons x xs) r

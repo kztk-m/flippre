@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE ConstraintKinds            #-}
 {-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -62,7 +63,6 @@ where
 
 import           Control.Applicative       (Const (..))
 import           Control.Monad             (forM)
-import           Control.Monad.Reader      hiding (lift, local)
 import           Control.Monad.State       hiding (lift)
 import           Data.Coerce               (coerce)
 import qualified Data.Fin                  as F
@@ -548,14 +548,14 @@ instance (D ~ t, FliPprE arg exp) => D.DocLike (E exp t) where
 -- Pretty printing interpretation of FliPprD for convenience, it is a sort of
 -- unembedding but we use untyped variants.
 
-newtype RName = RName Int deriving (Num, Show, Enum)
+newtype RName = RName Int deriving newtype (Num, Show, Enum)
 
-newtype IName = IName Int deriving (Num, Show, Enum)
+newtype IName = IName Int deriving newtype (Num, Show, Enum)
 
 -- newtype Defs.PprExp (a :: FType) = Defs.PprExp {Defs.pprExp :: Prec -> State (RName, IName) D.Doc}
 
 newtype VarMFliPpr a = VarMFliPpr {runVarMFliPpr :: State (RName, IName) a}
-  deriving (Functor, Applicative, Monad, MonadState (RName, IName))
+  deriving newtype (Functor, Applicative, Monad, MonadState (RName, IName))
 
 instance Defs.VarM VarMFliPpr where
   newVar = do

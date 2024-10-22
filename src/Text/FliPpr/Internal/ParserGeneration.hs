@@ -20,11 +20,11 @@ module Text.FliPpr.Internal.ParserGeneration (
   PArg(..), PExp(..), Result(..),
  )  where
 
-import           Control.Applicative             (liftA2, (<|>))
+import           Control.Applicative             (Applicative (..), (<|>))
 import qualified Control.Applicative             as A (empty)
-import           Control.Monad                   (join)
-import           Control.Monad.Reader            hiding (lift, mfix)
+import           Control.Monad                   (join, void)
 import           Data.Foldable                   (asum)
+import           Prelude                         hiding (Applicative (..))
 -- import qualified Text.FliPpr.Internal.GrammarST as G
 
 import           Data.Functor.Compose            (Compose (..))
@@ -41,9 +41,6 @@ import qualified Text.FliPpr.Internal.PartialEnv as PE
 import           Text.FliPpr.Internal.Type
 
 import           Data.Bifunctor                  (bimap)
-
--- Due to RebindableSyntax
-import           Prelude
 
 import           Data.Kind                       (Type)
 
@@ -139,7 +136,7 @@ choiceGen :: PExp s r -> PExp s r -> PExp s r
 choiceGen p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
 
 fromP :: GU s a -> PExp s D
-fromP x = PExp $ \tenv -> (return $ RD (PE.undeterminedEnv tenv)) <$ x
+fromP x = PExp $ \tenv -> return (RD (PE.undeterminedEnv tenv)) <$ x
 
 -- return (RD PE.undeterminedEnv) <$ x
 
@@ -150,11 +147,11 @@ fromP x = PExp $ \tenv -> (return $ RD (PE.undeterminedEnv tenv)) <$ x
 --     _         -> x
 
 instance FliPprE PArg (PExp s) where
-  fapp :: forall a t. In a => PExp s (a ~> t) -> PArg a -> PExp s t
+  fapp :: forall a t. PExp s (a ~> t) -> PArg a -> PExp s t
   fapp (PExp f) (PArg n) =
     PExp $ \tenv -> applySem (f tenv) (n tenv)
 
-  farg :: forall a t. In a => (PArg a -> PExp s t) -> PExp s (a ~> t)
+  farg :: forall a t. (PArg a -> PExp s t) -> PExp s (a ~> t)
   farg f = PExp $ \tenv ->
     case PE.extendRep tenv Proxy of
       (tenva, va, _vt) ->
@@ -191,7 +188,7 @@ instance FliPprE PArg (PExp s) where
   fcase _ [] = PExp $ const A.empty
   fcase ex0 (Branch p pk : bs) = branch ex0 p pk `choiceGen` fcase ex0 bs
     where
-      branch :: (In a, In b) => PArg a -> PartialBij a b -> (PArg b -> PExp s r) -> PExp s r
+      branch :: (In a) => PArg a -> PartialBij a b -> (PArg b -> PExp s r) -> PExp s r
       branch inp (PartialBij _ _ finv) k =
         PExp $ \tenv ->
           let (tenvb, vb, _) = PE.extendRep tenv Proxy
@@ -199,7 +196,7 @@ instance FliPprE PArg (PExp s) where
            in (>>= updateB finv (unPArg inp tenv)) <$> unPExp (k argB) tenvb
 
       updateB ::
-        (In a, In b) =>
+        (In a) =>
         (b -> Maybe a) ->
         Var env a ->
         Result (b : env) r ->
@@ -359,11 +356,11 @@ instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
 -- --                             fmap (mapToEnv $ PE.embedEnv tenv tenv') <$> p))
 -- --                   tenv)
 
-parsingModeMono :: In a => G.GrammarD G.ExChar g => PExp (G.Simplify G.ExChar g) (a ~> D) -> g (Err a)
+parsingModeMono :: G.GrammarD G.ExChar g => PExp (G.Simplify G.ExChar g) (a ~> D) -> g (Err a)
 parsingModeMono e =
   G.simplifyGrammar $ k <$> unPExp e PE.emptyRep
   where
-    k :: In a => Err (Result '[] (a ~> D)) -> Err a
+    k :: Err (Result '[] (a ~> D)) -> Err a
     k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s
     k (Ok a) = case a of
       RF (RD env) ->
@@ -410,7 +407,7 @@ fromCommentSpec :: G.GrammarD Char g => CommentSpec -> g ()
 fromCommentSpec (CommentSpec lc bc) = G.local $ do
   lineComment <- G.share $ case lc of
     Nothing -> A.empty
-    Just s  -> () <$ G.text s <* many (G.symbI nb) <* G.symbI br
+    Just s  -> void (G.text s) <* many (G.symbI nb) <* G.symbI br
 
   rec blockComment <- case bc of
         Nothing -> G.rule A.empty
@@ -418,12 +415,12 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
           if isNestable
             then do
               nonOpCl <- non [op, cl]
-              G.rule $ () <$ G.text op <* nonOpCl <* many (G.nt blockComment <* nonOpCl) <* G.text cl
+              G.rule $ void (G.text op) <* nonOpCl <* many (G.nt blockComment <* nonOpCl) <* G.text cl
             else do
               nonCl <- non [cl]
-              G.rule $ () <$ G.text op <* nonCl <* G.text cl
+              G.rule $ void (G.text op) <* nonCl <* G.text cl
 
-  singleSpace <- G.share $ () <$ G.symbI sp
+  singleSpace <- G.share $ void (G.symbI sp)
   return (lineComment <|> G.nt blockComment <|> singleSpace)
   where
     mfix = G.mfixDefM
@@ -432,7 +429,7 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
     many = G.manyD
 
     non :: G.GrammarD Char g => [String] -> Defs.DefM g (g ()) -- (Defs.Rules g (Defs.Lift ()))
-    non strings = G.share $ () <$ many (go strings)
+    non strings = G.share $ void (many (go strings))
       where
         go :: G.Grammar Char g => [String] -> g Char
         go ss =
@@ -489,7 +486,7 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
 --   where
 --     gsp = G.finalize $ return $ () <$ (foldr1 (<|>) $ map G.text [" ", "\n", "\r", "\t"])
 
-parsingMode :: (G.GrammarD Char g, In a) => FliPpr (a ~> D) -> g (Err a)
+parsingMode :: (G.GrammarD Char g) => FliPpr (a ~> D) -> g (Err a)
 parsingMode = parsingModeWith spec
   where
     spec = CommentSpec {lcSpec = Nothing, bcSpec = Nothing}
@@ -497,15 +494,15 @@ parsingMode = parsingModeWith spec
 -- parsingModeWith :: In a => CommentSpec -> FliPpr (a ~> D) -> G.Grammar Char (Err a)
 -- parsingModeWith = parsingModeSP . fromCommentSpec
 
-parsingModeWith :: forall g a. (G.GrammarD Char g, In a) => CommentSpec -> FliPpr (a ~> D) -> g (Err a)
+parsingModeWith :: forall g a. (G.GrammarD Char g) => CommentSpec -> FliPpr (a ~> D) -> g (Err a)
 parsingModeWith spec (FliPpr e) =
-  let g0 :: forall g'. (G.GrammarD G.ExChar g', In a) => g' (Err a)
+  let g0 :: forall g'. (G.GrammarD G.ExChar g') => g' (Err a)
       g0 = parsingModeMono e
-      g1 :: forall g'. (G.GrammarD Char g', In a) => g' (Err a)
+      g1 :: forall g'. (G.GrammarD Char g') => g' (Err a)
       g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
   in trace (show $ G.pprAsFlat g0 D.</> D.text "---------" D.</> G.pprAsFlat g1) g1
 
-parsingModeSP :: forall g a. (G.GrammarD Char g, In a) => (forall g'. G.GrammarD Char g' => g' ()) -> FliPpr (a ~> D) -> g (Err a)
+parsingModeSP :: forall g a. (G.GrammarD Char g) => (forall g'. G.GrammarD Char g' => g' ()) -> FliPpr (a ~> D) -> g (Err a)
 parsingModeSP gsp (FliPpr e) =
   G.withSpace gsp (parsingModeMono e)
 

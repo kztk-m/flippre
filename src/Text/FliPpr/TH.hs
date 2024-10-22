@@ -3,6 +3,8 @@
 {-# LANGUAGE PatternSynonyms  #-}
 {-# LANGUAGE TemplateHaskell  #-}
 {-# LANGUAGE TupleSections    #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use camelCase" #-}
 
 module Text.FliPpr.TH
   (
@@ -55,7 +57,7 @@ mkUn n = do
       (t, e) <- unGen cn
       -- let sigd = TH.SigD fn t
       -- (sigd:) <$> [d| $(TH.varP fn) = $(return e) |]
-      return $ [TH.SigD fn t, TH.ValD (TH.VarP fn) (TH.NormalB e) []]
+      return [TH.SigD fn t, TH.ValD (TH.VarP fn) (TH.NormalB e) []]
       where
         makeUnName :: String -> Q TH.Name
         makeUnName ":" = return $ TH.mkName "unCons"
@@ -256,7 +258,7 @@ branch patQ expQ = do
     makeBackward' :: TH.Pat -> [TH.Name] -> Q TH.Exp
     makeBackward' pat0 vs = do
       let p = return $ foldr (\a r -> TH.TupP [TH.VarP a, r]) (TH.TupP []) vs
-      [|\ $(p) -> Just $(return $ patToExp pat0)|]
+      [|\ $p -> Just $(return $ patToExp pat0)|]
 
     makeBody :: TH.Exp -> [TH.Name] -> Q TH.Exp
     makeBody exp vs = do
@@ -345,7 +347,7 @@ makeForward cn n isSing = do
   let p = return $ ConP_compat cn $ map TH.VarP vs
   let exp = return $ foldr (\x r -> tupE_compat [TH.VarE x, r]) (tupE_compat []) vs
   if isSing
-    then [|\ $(p) -> Just $(exp)|]
+    then [|\ $p -> Just $(exp)|]
     else [|\x -> case x of $(p) -> Just $(exp); _ -> Nothing|]
 
 makeBackward :: TH.Name -> Int -> Q TH.Exp
@@ -353,7 +355,7 @@ makeBackward cn n = do
   vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
   let p = return $ foldr (\x r -> TH.TupP [TH.VarP x, r]) (TH.TupP []) vs
   let exp = return $ foldl TH.AppE (TH.ConE cn) $ map TH.VarE vs
-  [|\ $(p) -> Just $(exp)|]
+  [|\ $p -> Just $(exp)|]
 
 isSingleton :: TH.Name -> Q Bool
 isSingleton tyname = do

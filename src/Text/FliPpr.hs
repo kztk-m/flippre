@@ -209,7 +209,7 @@ is c f =
     (\_ -> Just c)
     `Branch` (`ununit` f)
 
-isMember :: (FliPprE arg exp, Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
+isMember :: (Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
 isMember cs f =
   PartialBij
     ("isMember " ++ show cs)

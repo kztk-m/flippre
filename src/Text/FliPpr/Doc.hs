@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -- | This module implements Wadler's pretty-printing combinators.
@@ -178,13 +179,19 @@ prettys = renders 80
 
 type Width = Int
 
-newtype Indent = Indent Int deriving (Show, Num) -- Indent level
+-- Indent level
+newtype Indent = Indent Int
+  deriving stock Show
+  deriving newtype Num
 
 type Pos = Int -- Current position
 
 type Remaining = Int
 
-newtype Col = Col Int deriving (Show, Num) -- Actual Column
+-- Actual Column
+newtype Col = Col Int
+  deriving stock Show
+  deriving newtype Num
 
 data Mode = Horizontal | Vertical
 
@@ -271,7 +278,7 @@ instance Renderable d => Renderable (Norm d) where
     let (td, sd) = f empty
      in renders w (td <> sd)
 
-newtype Doc = Doc (Norm WSpec) deriving (Semigroup, Monoid, DocLike, Renderable)
+newtype Doc = Doc (Norm WSpec) deriving newtype (Semigroup, Monoid, DocLike, Renderable)
 
 instance Show Doc where
   showsPrec _ = prettys

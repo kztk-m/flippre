@@ -1,5 +1,6 @@
 {-# LANGUAGE ConstraintKinds            #-}
 {-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GADTs                      #-}
@@ -255,7 +256,8 @@ letrs (k:ks) h = letr $ \fk -> letrs ks $ \f -> do
   return (f', (f' k, r))
 
 
-newtype FromBounded b = FromBounded { getBounded :: b } deriving (Eq, Ord, Enum, Bounded, Num, Real, Integral, Show)
+newtype FromBounded b = FromBounded { getBounded :: b }
+  deriving newtype (Eq, Ord, Enum, Bounded, Num, Real, Integral, Show)
 
 letrsB :: (Eq b, Enum b, Bounded b, Arg f a) =>
           ((b -> a) -> DefM f (b -> a, r)) -> DefM f r
@@ -300,7 +302,7 @@ instance Arg f (b -> a) => Arg f (Const b x -> a) where
 --  >         b <- share $ ... a ... b ...
 --  >     ...
 --  >   where mfix = mfixDefM
-mfixDefM :: (Defs f, Arg f a) => (a -> DefM f a) -> DefM f a
+mfixDefM :: (Arg f a) => (a -> DefM f a) -> DefM f a
 mfixDefM f = letr $ \a -> (,a) <$> f a
 
 -- | 'share's computation.
@@ -355,7 +357,7 @@ instance VarM m => NDefs (PprExp m) where
             D.vcat [D.text "let" D.<+> D.align bs,
                     D.text "in" D.<+> dr ]
     where
-      go :: VarM m => [String] -> HList (PprExp m) as -> m [D.Doc]
+      go :: [String] -> HList (PprExp m) as -> m [D.Doc]
       go _ HNil                = pure[]
       go (x : xs) (HCons e es) = do
         de  <- pprExp e 0

@@ -143,7 +143,7 @@ class FliPprE arg exp => Decomp arg exp a r t | r -> t exp arg, exp -> arg, exp 
     decomp :: A arg a -> r -> E exp t
 
 instance (FliPprE arg exp) => Decomp arg exp () (E exp t) t where
-    decomp a f = ununit a f
+    decomp = ununit
 
 instance (Eq a, Eq as, Decomp arg exp as r t) => Decomp arg exp (a, as) (A arg a -> r) t where
     decomp as f = unpair as $ \a1 a2 -> decomp a2 $ f a1

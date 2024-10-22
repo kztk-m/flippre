@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 
 -- | This module implements a monad `Err` which is isomorphic to @Either Doc@.
-module Text.FliPpr.Err where
+module Text.FliPpr.Err (Err(..), err) where
 
 #if !MIN_VERSION_base(4,11,0)
 import qualified Control.Monad.Fail as Fail
