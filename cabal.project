@@ -1,3 +1,2 @@
-packages: 
-    flippre
-    flippre-examples 
+packages: */*.cabal 
+

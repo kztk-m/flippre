@@ -36,8 +36,8 @@ module Text.FliPpr.Internal.Type
     case_,
     unpair,
     ununit,
-    line',
-    space,
+    Text.FliPpr.Internal.Type.line',
+    Text.FliPpr.Internal.Type.space,
     spaces,
     nespaces,
     nespaces',
@@ -61,22 +61,28 @@ module Text.FliPpr.Internal.Type
   )
 where
 
-import           Control.Applicative       (Const (..))
-import           Control.Monad             (forM)
-import           Control.Monad.State       hiding (lift)
-import           Data.Coerce               (coerce)
-import qualified Data.Fin                  as F
-import           Data.Kind                 (Type)
-import           Data.Semigroup            (Semigroup (..))
-import qualified Data.Type.Nat             as F
-import           Data.Typeable             (Proxy (..))
-import           Text.FliPpr.Doc           as D
-import qualified Text.FliPpr.Internal.Defs as Defs
-import           Text.FliPpr.Internal.Defs (Defs)
+import           Control.Applicative  (Const (..))
+import           Control.Monad        (forM)
+import           Control.Monad.State  hiding (lift)
+import           Data.Coerce          (coerce)
+import qualified Data.Fin             as F
+import           Data.Kind            (Type)
+import           Data.Semigroup       (Semigroup (..))
+import qualified Data.Type.Nat        as F
+import           Data.Typeable        (Proxy (..))
 
-import           Control.Arrow             (first)
+import           Prettyprinter        as D
 
-import qualified Data.RangeSet.List        as RS
+import           Defs                 (Defs)
+import qualified Defs
+
+import           Text.FliPpr.Doc      as DD
+
+import           Control.Arrow        (first)
+
+import           Data.Function.Compat (applyWhen)
+import qualified Data.RangeSet.List   as RS
+import           Data.String          (IsString (..))
 
 -- | A kind for datatypes in FliPpr.
 data FType = FTypeD | Type :~> FType
@@ -248,7 +254,7 @@ space = (coerce :: exp D -> E exp D) fspace
 -- | For internal use. Use '<+>'.
 {-# INLINEABLE nespaces #-}
 nespaces :: FliPprE arg exp => E exp D
-nespaces = space <#> spaces
+nespaces = Text.FliPpr.Internal.Type.space <#> spaces
 
 -- | For internal use. Use '<+>.'.
 {-# INLINEABLE nespaces' #-}
@@ -532,7 +538,7 @@ instance (D ~ t, FliPprE arg exp) => Monoid (E exp t) where
   mappend = (Data.Semigroup.<>)
 
 -- | We can use pretty-printing combinators defined in 'Text.FliPpr.Doc' also for FliPpr expressions.
-instance (D ~ t, FliPprE arg exp) => D.DocLike (E exp t) where
+instance (D ~ t, FliPprE arg exp) => DD.DocLike (E exp t) where
   text s = E (ftext s)
   empty = E fempty
 
@@ -577,41 +583,42 @@ newRName = do
   put (i', v)
   return i
 
-pprIName :: IName -> D.Doc
+pprIName :: IName -> D.Doc ann
 pprIName n
-  | coerce n < length fancyNames = D.text [fancyNames !! coerce n]
-  | otherwise = D.text ("x" ++ show n)
+  | coerce n < length fancyNames = fromString [fancyNames !! coerce n]
+  | otherwise = fromString ("x" ++ show n)
   where
     fancyNames = "xyzwsturabcdeijklmnpqv"
 
-type PrinterI = Defs.Norm (Defs.PprExp VarMFliPpr :: FType -> Type)
+type PrinterI ann = Defs.Norm (Defs.PprExp VarMFliPpr ann :: FType -> Type)
 
-instance FliPprE (Const IName) PrinterI where
+instance FliPprE (Const IName) (PrinterI ann) where
   fapp e1 e2 = Defs.PprExpN $ \k -> do
     d1 <- Defs.pprExpN e1 9
     let d2 = pprIName (getConst e2)
-    return $ D.parensIf (k > 9) $ d1 D.<+> d2
+    return $ applyWhen (k > 9) D.parens $ d1 D.<+> d2
 
   farg h = Defs.PprExpN $ \k -> do
     x <- newIName
     d <- Defs.pprExpN (h $ Const x) 0
-    return $ D.parensIf (k > 0) $ D.text "\\" <> pprIName x <+> D.text "->" </> d
+    return $ applyWhen (k > 0) D.parens $
+      D.fillSep [fromString "\\" <> pprIName x D.<+> fromString "->", d]
 
   fcharAs a cs = Defs.PprExpN $ \k -> do
     let da = pprIName $ getConst a
-    return $ parensIf (k > 9) $ da D.<+> D.text "`charAs`" D.<+> D.text (show cs)
+    return $ applyWhen (k > 9) D.parens $ da D.<+> fromString "`charAs`" D.<+> fromString (show cs)
 
   fcase a bs = Defs.PprExpN $ \k -> do
     let da = pprIName $ getConst a
     ds <- forM bs $ \(Branch (PartialBij s _ _) f) -> do
       x <- newIName
       df <- Defs.pprExpN (f $ Const x) 0
-      return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprIName x <+> D.text "->" <+> df
+      return $ D.group $ D.nest 2 $ fromString s D.<+> fromString "$" D.<+> fromString "\\" <> pprIName x D.<+> fromString "->" D.<+> df
     return $
-      parensIf (k > 9) $
+      applyWhen (k > 9) D.parens $
         D.group $
-          D.text "case_" <+> da
-            <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
+          fromString "case_" D.<+> da
+            D.<+> fromString "[" <> D.align (D.concatWith (\x y -> D.fillSep [x <> fromString ",", y]) ds <> fromString "]")
 
   funpair a f = Defs.PprExpN $ \k -> do
     let da = pprIName (getConst a)
@@ -619,59 +626,60 @@ instance FliPprE (Const IName) PrinterI where
     y <- newIName
     db <- Defs.pprExpN (f (Const x) (Const y)) 0
     return $
-      parensIf (k > 0) $
+      applyWhen (k > 0) D.parens $
         D.align $
           D.group $
-            D.text "let" <+> parens (pprIName x <> D.text "," <+> pprIName y) <+> D.text "=" <+> D.align da
-              </> D.text "in" <+> D.align db
+            D.fillSep [
+              fromString "let" D.<+> D.parens (pprIName x <> fromString "," D.<+> pprIName y) D.<+> fromString "=" D.<+> D.align da,
+              fromString "in" D.<+> D.align db]
 
   fununit a e = Defs.PprExpN $ \k -> do
     let da = pprIName (getConst a)
     de <- Defs.pprExpN e 0
     return $
-      D.parensIf (k > 0) $
+      applyWhen (k > 0) D.parens $
         D.align $
           D.group $
-            D.text "let () =" <+> D.align da
-              </> D.text "in" <+> D.align de
+            D.fillSep[ fromString "let () =" D.<+> D.align da
+                     , fromString "in" D.<+> D.align de]
 
   ftext s = Defs.PprExpN $ \k ->
-    return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
+    return $ applyWhen (k > 9) D.parens $ fromString "text" D.<+> fromString (show s)
 
   fcat a b = Defs.PprExpN $ \k -> do
     da <- Defs.pprExpN a 5
     db <- Defs.pprExpN b 5
-    return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
+    return $ applyWhen (k > 5) D.parens $ D.group $ D.fillSep [da, fromString "<#>" D.<+> db]
 
   fbchoice a b = Defs.PprExpN $ \k -> do
     da <- Defs.pprExpN a 4
     db <- Defs.pprExpN b 4
-    return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
+    return $ applyWhen (k > 4) D.parens $ D.group $ D.fillSep [da, fromString "<?" D.<+> db]
 
-  fempty = Defs.PprExpN $ const $ return $ D.text "empty"
-  fline = Defs.PprExpN $ const $ return $ D.text "line"
-  flinebreak = Defs.PprExpN $ const $ return $ D.text "linebreak"
+  fempty = Defs.PprExpN $ const $ return $ fromString "empty"
+  fline = Defs.PprExpN $ const $ return $ fromString "line"
+  flinebreak = Defs.PprExpN $ const $ return $ fromString "linebreak"
 
-  fspace = Defs.PprExpN $ const $ return $ D.text "space"
-  fspaces = Defs.PprExpN $ const $ return $ D.text "spaces"
+  fspace = Defs.PprExpN $ const $ return $ fromString "space"
+  fspaces = Defs.PprExpN $ const $ return $ fromString "spaces"
 
-  fline' = Defs.PprExpN $ const $ return $ D.text "line'"
-  fnespaces' = Defs.PprExpN $ const $ return $ D.text "nespaces'"
+  fline' = Defs.PprExpN $ const $ return $ fromString "line'"
+  fnespaces' = Defs.PprExpN $ const $ return $ fromString "nespaces'"
 
   fgroup a = Defs.PprExpN $ \k -> do
     da <- Defs.pprExpN a 10
-    return $ parensIf (k > 9) $ D.text "group" <+> da
+    return $ applyWhen (k > 9) D.parens $ fromString "group" D.<+> da
 
   falign a = Defs.PprExpN $ \k -> do
     da <- Defs.pprExpN a 10
-    return $ parensIf (k > 9) $ D.text "align" <+> da
+    return $ applyWhen (k > 9) D.parens $ fromString "align" D.<+> da
 
   fnest n a = Defs.PprExpN $ \k -> do
     da <- Defs.pprExpN a 10
-    return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
+    return $ applyWhen (k > 9) D.parens $ fromString "nest" D.<+> D.pretty n D.<+> da
 
 instance D.Pretty (FliPpr t) where
-  pprPrec _ (FliPpr m) = evalState (runVarMFliPpr $ Defs.pprExpN m 0) (0, 0)
+  pretty (FliPpr m) = evalState (runVarMFliPpr $ Defs.pprExpN m 0) (0, 0)
 
 -- type RName = Int
 
@@ -679,8 +687,8 @@ instance D.Pretty (FliPpr t) where
 
 -- pprVName :: RName -> D.Doc
 -- pprVName n
---   | n < length fancyNames = D.text [fancyNames !! n]
---   | otherwise = D.text ("x" ++ show n)
+--   | n < length fancyNames = fromString [fancyNames !! n]
+--   | otherwise = fromString ("x" ++ show n)
 --   where
 --     fancyNames = "xyzwsturabcdeijklmnpqv"
 
@@ -695,7 +703,7 @@ instance D.Pretty (FliPpr t) where
 -- Defs.pprExp (Pter p) _ _ = return $ pprRef p
 
 -- pprRef :: Ref s a -> Doc
--- pprRef ref = D.text ("ppr" ++ show (refID ref))
+-- pprRef ref = fromString ("ppr" ++ show (refID ref))
 
 -- -- FIXME: The current implementation does not track the number of free variables.
 
@@ -722,7 +730,7 @@ instance D.Pretty (FliPpr t) where
 -- instance FliPprE (Printer s) (Printer s) where
 --   farg f = Printer $ \vn k -> do
 --     df <- Defs.pprExp (foPrinter $ pprVName vn)) (vn + 1) 0
---     return $ D.group $ D.nest 2 $ parensIf (k > 0) $ D.text "\\" <> pprVName vn <+> D.text "->" </> df
+--     return $ D.group $ D.nest 2 $ parensIf (k > 0) $ fromString "\\" <> pprVName vn <+> fromString "->" </> df
 
 --   fapp f a = Printer $ \vn k -> do
 --     df <- Defs.pprExp f 9
@@ -735,14 +743,14 @@ instance D.Pretty (FliPpr t) where
 --       mapM
 --         ( \(Branch (PartialBij s _ _) f) -> do
 --             df <- Defs.pprExp (foPrinter $ pprVName vn)) (vn + 1) 0
---             return $ D.group $ D.nest 2 $ D.text s <+> D.text "$" <+> D.text "\\" <> pprVName vn <+> D.text "->" <+> df
+--             return $ D.group $ D.nest 2 $ fromString s <+> fromString "$" <+> fromString "\\" <> pprVName vn <+> fromString "->" <+> df
 --         )
 --         bs
 --     return $
 --       parensIf (k > 9) $
 --         D.group $
---           D.text "case_" <+> da
---             <+> D.text "[" <> D.align (foldDoc (\x y -> x <> D.text "," </> y) ds <> D.text "]")
+--           fromString "case_" <+> da
+--             <+> fromString "[" <> D.align (foldDoc (\x y -> x <> fromString "," </> y) ds <> fromString "]")
 
 --   funpair a f = Printer $ \vn k -> do
 --     da <- Defs.pprExp a 10
@@ -753,8 +761,8 @@ instance D.Pretty (FliPpr t) where
 --       parensIf (k > 0) $
 --         D.align $
 --           D.group $
---             D.text "let" <+> parens (dx <> D.text "," <+> dy) <+> D.text "=" <+> D.align da
---               </> D.text "in" <+> D.align db
+--             fromString "let" <+> parens (dx <> fromString "," <+> dy) <+> fromString "=" <+> D.align da
+--               </> fromString "in" <+> D.align db
 
 --   fununit a e = Printer $ \vn k -> do
 --     da <- Defs.pprExp a 10
@@ -763,43 +771,43 @@ instance D.Pretty (FliPpr t) where
 --       parensIf (k > 0) $
 --         D.align $
 --           D.group $
---             D.text "let () =" <+> D.align da
---               </> D.text "in" <+> D.align de
+--             fromString "let () =" <+> D.align da
+--               </> fromString "in" <+> D.align de
 
 --   ftext s = Printer $ \_ k ->
---     return $ parensIf (k > 9) $ D.text "text" <+> D.text (show s)
+--     return $ parensIf (k > 9) $ fromString "text" <+> fromString (show s)
 
 --   fcat a b = Printer $ \vn k -> do
 --     da <- Defs.pprExp a 5
 --     db <- Defs.pprExp b 5
---     return $ parensIf (k > 5) $ D.group $ da </> D.text "<#>" <+> db
+--     return $ parensIf (k > 5) $ D.group $ da </> fromString "<#>" <+> db
 
 --   fbchoice a b = Printer $ \vn k -> do
 --     da <- Defs.pprExp a 4
 --     db <- Defs.pprExp b 4
---     return $ parensIf (k > 4) $ D.group $ da </> D.text "<?" <+> db
+--     return $ parensIf (k > 4) $ D.group $ da </> fromString "<?" <+> db
 
---   fempty = toPrinter $ D.text "empty"
---   fline = toPrinter $ D.text "line"
---   flinebreak = toPrinter $ D.text "linebreak"
+--   fempty = toPrinter $ fromString "empty"
+--   fline = toPrinter $ fromString "line"
+--   flinebreak = toPrinter $ fromString "linebreak"
 
---   fspace = toPrinter $ D.text "space"
---   fspaces = toPrinter $ D.text "spaces"
+--   fspace = toPrinter $ fromString "space"
+--   fspaces = toPrinter $ fromString "spaces"
 
---   fline' = toPrinter $ D.text "line'"
---   fnespaces' = toPrinter $ D.text "nespaces'"
+--   fline' = toPrinter $ fromString "line'"
+--   fnespaces' = toPrinter $ fromString "nespaces'"
 
 --   fgroup a = Printer $ \vn k -> do
 --     da <- Defs.pprExp a 10
---     return $ parensIf (k > 9) $ D.text "group" <+> da
+--     return $ parensIf (k > 9) $ fromString "group" <+> da
 
 --   falign a = Printer $ \vn k -> do
 --     da <- Defs.pprExp a 10
---     return $ parensIf (k > 9) $ D.text "align" <+> da
+--     return $ parensIf (k > 9) $ fromString "align" <+> da
 
 --   fnest n a = Printer $ \vn k -> do
 --     da <- Defs.pprExp a 10
---     return $ parensIf (k > 9) $ D.text "nest" <+> ppr n <+> da
+--     return $ parensIf (k > 9) $ fromString "nest" <+> ppr n <+> da
 
 -- -- | An instance for pretty-printing recursive defined FliPpr expressions.
 -- instance FliPprD (PrinterM s) (Printer s) (Printer s) where
@@ -815,19 +823,19 @@ instance D.Pretty (FliPpr t) where
 --     d <- RM.local (tbRef :) $ m >>= \e -> Defs.pprExp e 0
 --     list <- M.toList <$> readRef tbRef
 --     defs <-
---       D.group . D.align . (D.text "rec" <+>)
---         . D.foldDoc (\x y -> x </> D.text "and" <+> y)
+--       D.group . D.align . (fromString "rec" <+>)
+--         . D.foldDoc (\x y -> x </> fromString "and" <+> y)
 --         <$> mapM
 --           ( \(ref, mdef) -> do
 --               def <- mdef
---               return $ D.group $ D.align (pprRef ref <+> D.nest 2 (D.text "=" </> def))
+--               return $ D.group $ D.align (pprRef ref <+> D.nest 2 (fromString "=" </> def))
 --           )
 --           list
 --     return $
 --       parensIf (k > 0) $
 --         D.align $
---           D.text "let" <+> D.align defs
---             </> D.text "in" <+> d
+--           fromString "let" <+> D.align defs
+--             </> fromString "in" <+> d
 
 -- instance D.Pretty (FliPpr t) where
 --   pprPrec k (FliPpr m) = runRefM (pprFliPpr m k)

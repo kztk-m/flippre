@@ -27,8 +27,9 @@ import           Data.Maybe            (fromJust, fromMaybe)
 import           Data.Monoid           (Endo (..))
 import           Data.Typeable         (Proxy (..), (:~:) (..))
 import           Prelude               hiding (id, (.))
-import           Text.FliPpr.Doc
 import           Unsafe.Coerce         (unsafeCoerce)
+
+import           Prettyprinter         as D
 
 -- | A common implementation works in general.
 newtype VarTT i env env' = VarTT {runVarTT :: forall a. Var i env a -> Var i env' a}
@@ -316,13 +317,13 @@ foldrEnvWithVar f = flip $ appEndo . foldEnvWithVar (\k x -> Endo (f k x))
 {-# INLINE foldrEnvWithVar #-}
 
 
-pprEnv :: forall rep d f def. (EnvImpl rep, DocLike d) => (forall a. String -> f a -> d) -> Env rep f def -> d
-pprEnv pprBody = fromMaybe empty . foldrEnvWithVar h Nothing
+pprEnv :: forall rep f def ann. (EnvImpl rep) => (forall a. String -> f a -> Doc ann) -> Env rep f def -> Doc ann
+pprEnv pprBody = fromMaybe emptyDoc . foldrEnvWithVar h Nothing
   where
-    h :: forall env a. Var rep env a -> f a -> Maybe d -> Maybe d
+    h :: forall env a. Var rep env a -> f a -> Maybe (Doc ann) -> Maybe (Doc ann)
     h v body r =
       let rd = align (pprBody (showVar v) body)
       in Just $ case r of
            Nothing -> rd
-           Just d  -> d $$ rd
+           Just d  -> vcat[d, rd]
 

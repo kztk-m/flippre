@@ -33,16 +33,18 @@ import qualified Data.RangeSet.List              as RS
 import           Data.Typeable                   (Proxy (..))
 
 import           Debug.Trace
+import qualified Defs
 import qualified Text.FliPpr.Doc                 as D
 import           Text.FliPpr.Err                 (Err (..), err)
 import qualified Text.FliPpr.Grammar             as G
-import qualified Text.FliPpr.Internal.Defs       as Defs
 import qualified Text.FliPpr.Internal.PartialEnv as PE
 import           Text.FliPpr.Internal.Type
 
 import           Data.Bifunctor                  (bimap)
 
 import           Data.Kind                       (Type)
+import           Data.String                     (IsString (..))
+import qualified Prettyprinter                   as PP
 
 ifThenElse :: Bool -> p -> p -> p
 ifThenElse True x _  = x
@@ -500,7 +502,7 @@ parsingModeWith spec (FliPpr e) =
       g0 = parsingModeMono e
       g1 :: forall g'. (G.GrammarD Char g') => g' (Err a)
       g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
-  in trace (show $ G.pprAsFlat g0 D.</> D.text "---------" D.</> G.pprAsFlat g1) g1
+  in trace (show $ PP.fillSep [G.pprAsFlat g0, fromString "---------", G.pprAsFlat g1]) g1
 
 parsingModeSP :: forall g a. (G.GrammarD Char g) => (forall g'. G.GrammarD Char g' => g' ()) -> FliPpr (a ~> D) -> g (Err a)
 parsingModeSP gsp (FliPpr e) =

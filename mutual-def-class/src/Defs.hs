@@ -8,6 +8,7 @@
 {-# LANGUAGE InstanceSigs               #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE NoMonomorphismRestriction  #-}
+{-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE PatternSynonyms            #-}
 {-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
@@ -17,7 +18,7 @@
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 
-module Text.FliPpr.Internal.Defs
+module Defs
   ( -- * Definitions
     Defs (..),
     DefM (..),
@@ -52,39 +53,42 @@ module Text.FliPpr.Internal.Defs
   )
 where
 
-import           Data.Functor.Identity      (Identity (..))
+import           Data.Functor.Identity (Identity (..))
 
-import           Control.Applicative        (Alternative (..))
-import qualified Data.Fin                   as F
-import           Data.Int                   (Int8)
-import           Data.Kind                  (Type)
-import qualified Data.Type.Nat              as F
-import           Data.Word                  (Word8)
-import qualified Text.FliPpr.Doc            as D
+import           Control.Applicative   (Alternative (..))
+import qualified Data.Fin              as F
+import           Data.Int              (Int8)
+import           Data.Kind             (Type)
+import qualified Data.Type.Nat         as F
+import           Data.Word             (Word8)
 
-import           Data.Coerce                (coerce)
-import           Data.Functor.Const         (Const)
+import           Data.Coerce           (coerce)
+import           Data.Functor.Const    (Const)
 
-import           Text.FliPpr.Internal.HList
-
--- | Nested products of @f@ types.
---
---   The argument of 'VT' and the first argument of 'VCons' are intensionally lazy, as
---   we may want to use Haskell's recursive definitions to implement 'letrDS'.
-
+import           Data.String           (IsString (..))
+import           Prettyprinter         as D
 
 -- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
+--
+-- @let rec x1 = e1 and x2 = e2 in e@ is represented by:
+--
+-- @
+-- unliftD $ letrD $ \x1 -> letrD $ \x2 ->
+--   consD e1 $ consD e2 $ liftD e
+-- @
 class Defs (f :: k -> Type) where
-  -- | Interpretation of product types. We are expecting that
-  -- @Fs f a@ is isomorphic to @forall r. (DTypeVal f a -> f r) -> f r@,
-  -- but having direct interpretation would be convenient, at least to define 'letrDS'.
-  data D f :: [k] -> k -> Type
-  -- D stands for "direct style".
-
   -- By kztk @ 2020-11-26
   -- We will use the following methods for recursive definitions
   -- By kztk @ 2021-02-17
   -- Use the standard lists instead of special datatypes.
+
+  -- | @D f [a1,...,an] a@ stands for mutually-recursive definitions of
+  -- @
+  -- let rec x1 :: a1 = ...; ... ; xn :: an = ... in e :: a
+  -- @
+  -- D stands for "direct style".
+  data D f :: [k] -> k -> Type
+
 
   liftD   :: f a -> D f '[] a
   unliftD :: D f '[] a -> f a
@@ -96,6 +100,11 @@ class Defs (f :: k -> Type) where
   letrD :: (f a -> D f (a : as) r) -> D f as r
 
 newtype Norm e a = Norm { unNorm :: e a }
+
+
+data HList f as where
+  HNil :: HList f '[]
+  HCons :: f a -> HList f as -> HList f (a ': as)
 
 class NDefs (f :: k -> Type) where
   data ND f :: [k] -> k -> Type
@@ -336,40 +345,43 @@ class Monad m => VarM m where
   -- | +1 to the nesting level. This is just identity if ones to assign different names for different variables.
   nestScope :: m a -> m a
 
--- | A general pretty-printer for 'Defs' methods. Use different @m@ printing different HOAS, to avoid overlapping instance.
-newtype PprExp m _a = PprExp {pprExp :: D.Precedence -> m D.Doc}
+type Precedence = Int
 
-pattern PprExpN :: (D.Precedence  -> m D.Doc) -> Norm (PprExp m) a
+-- | A general pretty-printer for 'Defs' methods. Use different @m@ printing different HOAS, to avoid overlapping instance.
+newtype PprExp m ann _a = PprExp {pprExp :: Precedence -> m (D.Doc ann)}
+
+pattern PprExpN :: (Precedence -> m (D.Doc ann)) -> Norm (PprExp m ann) a
 pattern PprExpN a = Norm (PprExp a)
 
 
-pprExpN :: Norm (PprExp m) a -> D.Precedence  -> m D.Doc
+pprExpN :: Norm (PprExp m ann) a -> Precedence  -> m (D.Doc ann)
 pprExpN = pprExp . unNorm
 
-instance VarM m => NDefs (PprExp m) where
-  newtype ND (PprExp m) _as _a = PDefs { pdefs :: [String] -> D.Precedence  -> m D.Doc }
+instance VarM m => NDefs (PprExp m ann) where
+  newtype ND (PprExp m ann) _as _a = PDefs { pdefs :: [String] -> Precedence -> m (D.Doc ann) }
 
   defN exps r = PDefs $ \xs k -> do
     bs <- D.vcat <$> go xs exps
     dr <- pprExp r 0
 
-    pure $ D.parensIf (k > 0) $ D.align $
-            D.vcat [D.text "let" D.<+> D.align bs,
-                    D.text "in" D.<+> dr ]
+    pure $ parensIf (k > 0) $ D.align $
+            D.vcat ["let" D.<+> D.align bs,
+                    "in" D.<+> dr ]
     where
-      go :: [String] -> HList (PprExp m) as -> m [D.Doc]
+      parensIf b = if b then D.parens else id
+      go :: [String] -> HList (PprExp m ann) as -> m [D.Doc ann]
       go _ HNil                = pure[]
       go (x : xs) (HCons e es) = do
         de  <- pprExp e 0
         res <- go xs es
-        pure $ (D.text x D.<+> D.text "=" D.<+> D.align de) : res
+        pure $ (fromString x D.<+> "=" D.<+> D.align de) : res
       go _ _                   = error "Unreachable"
 
   localN d = PprExp $ \k ->
     pdefs d [] k
   letrN h = PDefs $ \xs k -> do
     x <- newVar
-    nestScope $ pdefs (h (PprExp $ \_ -> pure $ D.text x))  (x : xs) k
+    nestScope $ pdefs (h (PprExp $ \_ -> pure $ fromString x))  (x : xs) k
 
 -- data RPairD = RPairD D.Doc D.Doc | ROtherD D.Doc
 

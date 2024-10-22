@@ -56,30 +56,34 @@ module Text.FliPpr.Grammar
   )
 where
 
-import           Control.Applicative       (Alternative (..), Const (..))
-import           Control.Arrow             (second)
-import           Control.Category          (Category (..), id, (.), (>>>))
-import           Control.Monad             (forM, void)
-import           Control.Monad.State       (MonadState, State, StateT (..),
-                                            evalState, evalStateT, get, put)
-import           Data.Foldable             (asum)
+import           Control.Applicative      (Alternative (..), Const (..))
+import           Control.Arrow            (second)
+import           Control.Category         (Category (..), id, (.), (>>>))
+import           Control.Monad            (forM, void)
+import           Control.Monad.State      (MonadState, State, StateT (..),
+                                           evalState, evalStateT, get, put)
+import           Data.Foldable            (asum)
 --
 
+import           Data.Function.Compat     (applyWhen)
 
 
-import           Data.Bifunctor            (bimap)
+import           Data.Bifunctor           (bimap)
 
-import           Data.Coerce               (coerce)
-import           Data.Maybe                (mapMaybe)
-import           Data.Monoid               (Endo (..))
-import           Data.Proxy                (Proxy (Proxy))
-import           Data.RangeSet.List        (RSet)
-import qualified Data.RangeSet.List        as RS
-import           Data.Typeable             ((:~:) (..))
-import           Prelude                   hiding (id, (.))
-import qualified Text.FliPpr.Doc           as D
-import           Text.FliPpr.Internal.Defs as Defs
-import qualified Text.FliPpr.Internal.Env  as E
+import           Data.Coerce              (coerce)
+import           Data.Maybe               (mapMaybe)
+import           Data.Monoid              (Endo (..))
+import           Data.Proxy               (Proxy (Proxy))
+import           Data.RangeSet.List       (RSet)
+import qualified Data.RangeSet.List       as RS
+import           Data.Typeable            ((:~:) (..))
+import           Prelude                  hiding (id, (.))
+import qualified Prettyprinter            as D
+import qualified Text.FliPpr.Internal.Env as E
+
+import           Data.String              (IsString (..))
+import           Defs
+
 
 -- import Debug.Trace (trace)
 -- import Text.Printf (printf)
@@ -120,24 +124,24 @@ instance Defs.VarM (NonterminalPrinterM c) where
   nestScope = id
   {-# INLINE nestScope #-}
 
-instance Functor (PprExp (NonterminalPrinterM c)) where
+instance Functor (PprExp (NonterminalPrinterM c) ann) where
   fmap _ (PprExp h) = PprExp h
   {-# INLINE fmap #-}
 
-deriving newtype instance Functor (Norm (PprExp (NonterminalPrinterM c)))
-instance Applicative (PprExp (NonterminalPrinterM c)) where
-  pure _ = PprExp $ \_ -> return $ D.text "ε"
+deriving newtype instance Functor (Norm (PprExp (NonterminalPrinterM c) ann))
+instance Applicative (PprExp (NonterminalPrinterM c) ann) where
+  pure _ = PprExp $ \_ -> return $ fromString "ε"
   {-# INLINE pure #-}
 
-  f <*> a = PprExp $ \k -> (\d1 d2 -> D.parensIf (k > 9) $ d1 D.<+> D.align d2) <$> pprExp f 9 <*> pprExp a 10
+  f <*> a = PprExp $ \k -> (\d1 d2 -> applyWhen (k > 9) D.parens  $ d1 D.<+> D.align d2) <$> pprExp f 9 <*> pprExp a 10
   {-# INLINE (<*>) #-}
 
-deriving newtype instance Applicative (Norm (PprExp (NonterminalPrinterM c)))
+deriving newtype instance Applicative (Norm (PprExp (NonterminalPrinterM c) ann))
 
-instance Alternative (Norm (PprExp (NonterminalPrinterM c))) where
-  empty = PprExpN $ \_ -> return $ D.text "⊥"
+instance Alternative (Norm (PprExp (NonterminalPrinterM c) ann)) where
+  empty = PprExpN $ \_ -> return $ fromString "⊥"
   {-# INLINE empty #-}
-  f <|> g = PprExpN $ \k -> (\d1 d2 -> D.parensIf (k > 3) $ D.sep [d1, D.text "|", d2]) <$> pprExpN f 3 <*> pprExpN g 3
+  f <|> g = PprExpN $ \k -> (\d1 d2 -> applyWhen (k > 3) D.parens $ D.sep [d1, fromString "|", d2]) <$> pprExpN f 3 <*> pprExpN g 3
   {-# INLINE (<|>) #-}
 
   many = Defs.manyD
@@ -146,15 +150,15 @@ instance Alternative (Norm (PprExp (NonterminalPrinterM c))) where
   {-# INLINE some #-}
 
 
-instance Show c => FromSymb c (PprExp (NonterminalPrinterM c)) where
-  symb c = PprExp $ \_ -> return $ D.text (show c)
+instance Show c => FromSymb c (PprExp (NonterminalPrinterM c) ann) where
+  symb c = PprExp $ \_ -> return $ fromString (show c)
   {-# INLINE symb #-}
-  symbI cs = PprExp $ \_ -> return $ D.text (show cs)
+  symbI cs = PprExp $ \_ -> return $ fromString (show cs)
   {-# INLINE symbI #-}
 
-deriving newtype instance Show c => FromSymb c (Norm (PprExp (NonterminalPrinterM c)))
+deriving newtype instance Show c => FromSymb c (Norm (PprExp (NonterminalPrinterM c) ann))
 
-pprGrammar :: Norm (PprExp (NonterminalPrinterM c)) a -> D.Doc
+pprGrammar :: Norm (PprExp (NonterminalPrinterM c) ann) a -> D.Doc ann
 pprGrammar g =
   evalState (runNonterminalPrinterM (pprExpN g 0)) 1
 
@@ -212,23 +216,23 @@ instance Enum ExChar where
   pred Space = error "pred: no predecessor"
 
 instance D.Pretty ExChar where
-  ppr (NormalChar c) = D.ppr c
-  ppr Space          = D.text "_"
-  ppr Spaces         = D.text "<spaces>"
+  pretty (NormalChar c) = D.pretty c
+  pretty Space          = fromString "_"
+  pretty Spaces         = fromString "<spaces>"
 
-  pprList = uncurry pprList' . chars []
+  prettyList = uncurry pprList' . chars []
     where
       chars s (NormalChar c : cs) = chars (c : s) cs
       chars s r                   = (reverse s, r)
 
-      pprList' [] [] = D.text ""
-      pprList' [] (c : cs) = case cs of [] -> D.ppr c; _ -> D.ppr c D.<+> D.pprList cs
-      pprList' s [] = D.ppr s
-      pprList' s r = D.ppr s D.<+> D.pprList r
+      pprList' [] [] = fromString ""
+      pprList' [] (c : cs) = case cs of [] -> D.pretty c; _ -> D.pretty c D.<+> D.prettyList cs
+      pprList' s [] = D.pretty s
+      pprList' s r = D.pretty s D.<+> D.prettyList r
 
 instance Show ExChar where
-  show = show . D.ppr
-  showList s r = show (D.pprList s) ++ r
+  show = show . D.pretty
+  showList s r = show (D.prettyList s) ++ r
 
 class CharLike c where
   -- | Injection from 'Char'
@@ -266,32 +270,32 @@ newtype RHS c env a = RHS [Prod c env a]
   deriving stock Functor
 
 instance Show c => D.Pretty (RHS c env a) where
-  ppr (RHS rs) =
-    D.punctuate (D.line D.<> D.text "|" D.<> D.text " ") $ map D.ppr rs
+  pretty (RHS rs) =
+    D.hsep $ D.punctuate (D.line D.<> fromString "|" D.<> fromString " ") $ map D.pretty rs
 
 -- | Flat grammars. This definion basically follows what appears in:
 --   Arthur I. Baars, S. Doaitse Swierstra, Marcos Viera: Typed Transformations of Typed Grammars: The Left Corner Transform. Electron. Notes Theor. Comput. Sci. 253(7): 51-64 (2010).
 data FlatGrammar c a = forall env. FlatGrammar !(Bindings c env env) !(RHS c env a)
 
-pprAsFlat :: Show c => SemToFlatGrammar c a -> D.Doc
-pprAsFlat = D.ppr . flatten
+pprAsFlat :: Show c => SemToFlatGrammar c a -> D.Doc ann
+pprAsFlat = D.pretty . flatten
 
 instance Show c => D.Pretty (FlatGrammar c a) where
-  ppr (FlatGrammar bs r) =
-    D.align (E.pprEnv pprDef bs D.</> pprDefN (D.text "Start") r)
+  pretty (FlatGrammar bs r) =
+    D.align (E.pprEnv pprDef bs <> D.line <> pprDefN (fromString "Start") r)
     where
-      pprDef x rhs = D.text ("N" ++ x) D.<+> D.group (D.align (D.text "=" D.<+> D.ppr rhs))
-      pprDefN n rhs = D.hsep [n, D.text "=", D.align (D.ppr rhs)]
+      pprDef x rhs = fromString ("N" ++ x) D.<+> D.group (D.align (fromString "=" D.<+> D.pretty rhs))
+      pprDefN n rhs = D.hsep [n, fromString "=", D.align (D.pretty rhs)]
 
 data Prod c env a = PNil !a | forall b. PCons !(Symb c env b) !(Prod c env (b -> a))
 
 instance Show c => D.Pretty (Prod c env a) where
-  ppr (PNil _) = D.text "ε"
-  ppr (PCons s r) = go (D.ppr s) r
+  pretty (PNil _) = fromString "ε"
+  pretty (PCons s r) = go (D.pretty s) r
     where
-      go :: forall b. D.Doc -> Prod c env b -> D.Doc
+      go :: forall b ann. D.Doc ann -> Prod c env b -> D.Doc ann
       go d (PNil _)      = d
-      go d (PCons ss rr) = d D.<+> go (D.ppr ss) rr
+      go d (PCons ss rr) = d D.<+> go (D.pretty ss) rr
 
 instance Functor (Prod c env) where
   fmap f (PNil a)    = PNil (f a)
@@ -304,9 +308,9 @@ data Symb c env a where
   SymbI :: !(RSet c) -> Symb c env c
 
 instance Show c => D.Pretty (Symb c env a) where
-  ppr (NT x)     = D.text ("N" ++ E.showVar x)
-  ppr (Symb c)   = D.text (show c)
-  ppr (SymbI cs) = D.text (show cs)
+  pretty (NT x)     = fromString ("N" ++ E.showVar x)
+  pretty (Symb c)   = fromString (show c)
+  pretty (SymbI cs) = fromString (show cs)
 
 instance E.Shiftable E.U (Symb c) where
   shift diff (NT x)  = NT (E.shift diff x)
@@ -591,7 +595,7 @@ flatten = toFlatGrammar
 
 removeNonProductive :: FlatGrammar c a -> FlatGrammar c a
 removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
-  -- trace (show $ D.text " " D.<> D.align (D.ppr $ FlatGrammar defs rhs)) $
+  -- trace (show $ fromString " " D.<> D.align (D.pretty $ FlatGrammar defs rhs)) $
   FlatGrammar (E.mapEnv procRHS defs) (procRHS rhs)
   where
     prodTable = check initTable
@@ -613,12 +617,12 @@ removeNonProductive (FlatGrammar (defs :: Bindings c env0 env0) rhs) =
     checkDefs :: Env (RHS c env') env -> Env (Const Bool) env' -> Env (Const Bool) env
     checkDefs es env = E.mapEnv (Const . checkRHS env) es
 
-    -- pprMP mp = E.pprEnv (\s d -> D.hsep [D.text s, D.text "=", D.text (show $ getConst d)]) mp :: D.Doc
+    -- pprMP mp = E.pprEnv (\s d -> D.hsep [fromString s, fromString "=", fromString (show $ getConst d)]) mp :: D.Doc
 
     check mp =
       let mp' = checkDefs defs mp
           flag = appEndo (getConst $ E.zipWithA (\(Const b1) (Const b2) -> Const $ Endo (\x -> x || (b1 /= b2))) mp mp') False
-       in -- trace (show $ D.text "  " D.<> D.align (pprMP mp D.</> pprMP mp' D.</> D.text "flag: " D.<> D.text (show flag))) $
+       in -- trace (show $ fromString "  " D.<> D.align (pprMP mp D.</> pprMP mp' D.</> fromString "flag: " D.<> fromString (show flag))) $
           if flag then check mp' else mp'
 
     procRHS :: RHS c env0 a -> RHS c env0 a

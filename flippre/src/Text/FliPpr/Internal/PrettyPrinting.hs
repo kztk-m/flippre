@@ -18,7 +18,7 @@ import           Text.FliPpr.Doc
 import           Text.FliPpr.Internal.Type
 
 import qualified Data.RangeSet.List         as RS
-import qualified Text.FliPpr.Internal.Defs  as Defs
+import qualified Defs
 
 import           Text.FliPpr.Internal.HList
 data Ppr d (t :: FType) where
