@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE RecursiveDo           #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
@@ -13,10 +14,13 @@ module Text.FliPpr.Driver.Earley (asEarley, parse) where
 import           Data.Foldable            (asum)
 import qualified Data.RangeSet.List       as RS
 import qualified Text.Earley              as E
-import           Text.FliPpr.Doc          as D
+
 import           Text.FliPpr.Err
 import qualified Text.FliPpr.Grammar      as G
 import qualified Text.FliPpr.Internal.Env as Env
+
+import           Data.String              (IsString (..))
+import qualified Prettyprinter            as PP
 
 toEarley :: Ord c => G.FlatGrammar c a -> E.Grammar r (E.Prod r c c a)
 toEarley (G.FlatGrammar defs rhs) = do
@@ -58,13 +62,13 @@ parse g = \str ->
     (as@(_ : _), _) -> sequence as
     ([], E.Report i es v) ->
       err $
-        D.hsep
-          [ D.text "Error: parse error",
-            D.align $
-              D.vsep
-                [ D.text "at position" <+> ppr i,
-                  D.text "expecting:" <+> D.text (show es),
-                  D.text "near:" <+> D.text (show v)
+        PP.hsep
+          [ "Error: parse error",
+            PP.align $
+              PP.vsep
+                [ "at position" PP.<+> PP.pretty i,
+                  "expecting:" PP.<+> fromString (show es),
+                  "near:" PP.<+> fromString (show v)
                 ]
           ]
   where

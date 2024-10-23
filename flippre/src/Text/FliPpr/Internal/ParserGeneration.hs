@@ -5,6 +5,7 @@
 {-# LANGUAGE InstanceSigs              #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE OverloadedStrings         #-}
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE RebindableSyntax          #-}
 {-# LANGUAGE RecursiveDo               #-}
@@ -34,7 +35,6 @@ import           Data.Typeable                   (Proxy (..))
 
 import           Debug.Trace
 import qualified Defs
-import qualified Text.FliPpr.Doc                 as D
 import           Text.FliPpr.Err                 (Err (..), err)
 import qualified Text.FliPpr.Grammar             as G
 import qualified Text.FliPpr.Internal.PartialEnv as PE
@@ -44,6 +44,7 @@ import           Data.Bifunctor                  (bimap)
 
 import           Data.Kind                       (Type)
 import           Data.String                     (IsString (..))
+
 import qualified Prettyprinter                   as PP
 
 ifThenElse :: Bool -> p -> p -> p
@@ -78,7 +79,7 @@ data Result env t where
   RD :: Env env -> Result env D
   RF :: Result (a ': env) t -> Result env (a ~> t)
 
-{-# ANN applySem "HLint: ignore Avoid lambda using `infix`" #-}
+{-# ANN applySem ("HLint: ignore Avoid lambda using `infix`" :: String)#-}
 
 applySem ::
   GU s (Err (Result r (a ~> t))) ->
@@ -125,11 +126,13 @@ tryUpdateEnv k (Just v0) env =
       return env'
     Nothing ->
       err
-        ( D.text "The same variable is updated twice:"
-            D.$$ D.text "updating position" D.<+> pprVar k D.<+> D.text "in" D.<+> PE.pprEnv env
+        ( PP.vcat[
+            "The same variable is updated twice:",
+            "updating position" PP.<+> pprVar k PP.<+> "in" PP.<+> PE.pprEnv env
+        ]
         )
   where
-    pprVar v = D.ppr (PE.toIndex v)
+    pprVar v = PP.pretty (PE.toIndex v)
 
 choice :: PExp s D -> PExp s D -> PExp s D
 choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
@@ -229,7 +232,7 @@ instance FliPprE PArg (PExp s) where
       merge :: Env env -> Env env -> Err (Env env)
       merge e e' =
         case PE.mergeEnv mergeEqI e e' of
-          Nothing -> err $ D.text "Merge failed: update is consistent."
+          Nothing -> err "Merge failed: update is consistent."
           Just env ->
             -- trace (show $ D.text "merging" D.<+> pprEnv e D.<+> pprEnv e' D.<+> D.nest 2 (D.text "->" D.</> pprEnv env)) $
             return env
@@ -363,13 +366,13 @@ parsingModeMono e =
   G.simplifyGrammar $ k <$> unPExp e PE.emptyRep
   where
     k :: Err (Result '[] (a ~> D)) -> Err a
-    k (Fail s) = err $ D.text "Inverse computation fails: " D.</> s
+    k (Fail s) = err $ PP.vsep ["Inverse computation fails: ", s]
     k (Ok a) = case a of
       RF (RD env) ->
         let (v, _) = PE.popEnv env
         in case v of
              Just (EqI u) -> return u
-             Nothing      -> err $ D.text "Input is unused in evaluation."
+             Nothing      -> err "Input is unused in evaluation."
 
 -- parsingModeMono :: In a => (forall s. PM s (PExp s (a ~> D))) -> G.Grammar G.ExChar (Err a)
 -- parsingModeMono m = G.finalize $ do

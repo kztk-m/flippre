@@ -22,6 +22,7 @@ import qualified Text.FliPpr.Grammar       as G
 
 import           Data.String               (fromString)
 
+import           Prettyprinter             (Doc)
 import           Text.Printf
 
 newtype Name = Name String
@@ -128,7 +129,7 @@ parseExp = \s -> case p s of
         -- This assignment is important; otherwise, gExp is evaluated again for calls of parseExp.
         p = E.parse gExp
 
-pprExp :: Exp -> Doc
+pprExp :: Exp -> Doc ann
 pprExp = pprMode (flippr $ fromFunction <$> flipprExp)
 
 exp1 :: Exp
@@ -142,7 +143,7 @@ exp1 =
 
 main :: IO ()
 main = do
-    let s = render 80 (pprExp exp1)
+    let s = show (pprExp exp1)
     putStrLn "`pprExp exp1` results in ..."
     putStrLn s
     let e = parseExp s

@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE OverloadedStrings      #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 
 -- | This module implements basic operations on automata.
@@ -31,7 +32,7 @@ import           Control.Arrow        (second)
 import           Control.Monad.Writer
 import           Data.Bifunctor       (bimap)
 
-import           Text.FliPpr.Doc      as D hiding (empty)
+import           Prettyprinter        as PP
 
 -- import           Debug.Trace
 
@@ -42,39 +43,39 @@ data NFANE c q =
             transNFAne  :: M.Map q [(RSet c, q)] -- ^ transitions
           }
 
-pprRSet :: (Eq c, Show c) => RSet c -> D.Doc
-pprRSet = D.brackets . go . RS.toRangeList
+pprRSet :: (Eq c, Show c) => RSet c -> Doc ann
+pprRSet = PP.brackets . go . RS.toRangeList
     where
         go []     = mempty
         go ((a,a'):r)
-            | a == a'   = D.text (show a) D.<> go r
-            | otherwise = D.text (show a) D.<> D.text "-" D.<> D.text (show a') D.<> go r
+            | a == a'   = fromString (show a) <> go r
+            | otherwise = fromString (show a) <> "-" <> fromString (show a') <> go r
 
 
-pprTr :: (Show q, Eq c, Show c) => [(q, [(RSet c, q)])] -> D.Doc
-pprTr = D.punctuate (D.text ";" <> D.line) . map (\(q, dsts) ->
-            D.hsep[ D.text (show q), D.text "->", D.group $ D.align $ D.punctuate (D.line D.<> D.text "|" D.<+> mempty) $ map (\(cs,q') -> D.hsep [pprRSet cs, D.text (show q')] ) dsts ])
+pprTr :: (Show q, Eq c, Show c) => [(q, [(RSet c, q)])] -> Doc ann
+pprTr = PP.hcat . PP.punctuate (";" <> PP.line) . map (\(q, dsts) ->
+            PP.hsep[ fromString (show q), "->", PP.group $ PP.align $ PP.hcat $ PP.punctuate (PP.line <> "|" PP.<+> mempty) $ map (\(cs,q') -> PP.hsep [pprRSet cs, fromString (show q')] ) dsts ])
 
-pprTrMap :: (Show q, Eq c, Show c) => M.Map q [(RSet c, q)] -> D.Doc
+pprTrMap :: (Show q, Eq c, Show c) => M.Map q [(RSet c, q)] -> Doc ann
 pprTrMap = pprTr . M.toList
 
-instance (Show q, Eq c, Show c) => D.Pretty (NFANE c q) where
-    ppr (NFANE is fs tr) =
-        D.vsep [ D.text "Initial(s):" D.<+> D.text (show is),
-                 D.text "Final(s):  " D.<+> D.text (show fs),
-                 D.vsep [D.text "Transition(s):", D.nest 2 (D.align (pprTrMap tr)) ]]
+instance (Show q, Eq c, Show c) => Pretty (NFANE c q) where
+    pretty (NFANE is fs tr) =
+        PP.vsep [ "Initial(s):" PP.<+> fromString (show is),
+                 "Final(s):  " PP.<+> fromString (show fs),
+                 PP.vsep ["Transition(s):", PP.nest 2 (PP.align (pprTrMap tr)) ]]
 
 data NFA c q = NFA (NFANE c q) (M.Map q [q]) -- ^ a pair of NFA without epsilon rules, and epsilon rules.
 
-instance (Show q, Eq c, Show c) => D.Pretty (NFA c q) where
-    ppr (NFA (NFANE is fs tr) eps) =
-        D.vsep [ D.text "Initial(s):" D.<+> D.text (show is),
-                 D.text "Final(s):  " D.<+> D.text (show fs),
-                 D.vsep [D.text "Transition(s):", D.nest 2 (D.align (pprTrMap tr)) ],
-                 D.vsep [D.text "Eps rule(s):", D.nest 2 (D.align (pprEps $ M.toList eps)) ]
+instance (Show q, Eq c, Show c) => Pretty (NFA c q) where
+    pretty (NFA (NFANE is fs tr) eps) =
+       PP.vsep [ "Initial(s):" PP.<+> fromString (show is),
+                 "Final(s):  " PP.<+> fromString (show fs),
+                 PP.vsep ["Transition(s):", PP.nest 2 (PP.align (pprTrMap tr)) ],
+                 PP.vsep ["Eps rule(s):", PP.nest 2 (PP.align (pprEps $ M.toList eps)) ]
                  ]
         where
-            pprEps = D.vsep . map (\(q,qs) -> D.hsep [ D.text (show q), D.text "->", D.text (show qs) ])
+            pprEps = PP.vsep . map (\(q,qs) -> PP.hsep [ fromString (show q), "->", fromString (show qs) ])
 
 
 type DFA c = DFAImpl c Word
@@ -86,12 +87,12 @@ data DFAImpl c q =
           transDFAImpl    :: M.Map q [(RSet c, q)] -- ^ transitions
           }
 
-instance (Show q, Eq c, Show c) => D.Pretty (DFAImpl c q) where
-    ppr (DFAImpl i0 qs fs tr) =
-        D.vsep [ D.text "State(s):" D.<+> D.text (show qs),
-                 D.text "Initial: " D.<+> D.text (show i0),
-                 D.text "Final(s):" D.<+> D.text (show fs),
-                 D.sep [D.text "Transition(s):", D.nest 2 (D.align (pprTrMap tr)) ] ]
+instance (Show q, Eq c, Show c) => Pretty (DFAImpl c q) where
+    pretty (DFAImpl i0 qs fs tr) =
+        PP.vsep [ "State(s):" PP.<+> fromString (show qs),
+                  "Initial: " PP.<+> fromString (show i0),
+                  "Final(s):" PP.<+> fromString (show fs),
+                  PP.sep ["Transition(s):", PP.nest 2 (PP.align (pprTrMap tr)) ] ]
 
 
 

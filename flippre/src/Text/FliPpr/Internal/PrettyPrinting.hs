@@ -97,10 +97,10 @@ instance Defs.Defs (Ppr d) where
 --   let x = fmap2 (\k -> runRec k x) defs
 --   in k x
 
-pprModeMono :: Ppr Doc (a ~> D) -> a -> Doc
+pprModeMono :: Ppr d (a ~> D) -> a -> d
 pprModeMono (PF h) a =
   case h a of
     PD d -> d
 
-pprMode :: FliPpr (a ~> D) -> a -> Doc
+pprMode :: DocLike d => FliPpr (a ~> D) -> a -> d
 pprMode (FliPpr e) = pprModeMono e

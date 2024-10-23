@@ -537,9 +537,11 @@ instance (D ~ t, FliPprE arg exp) => Monoid (E exp t) where
   mempty = spaces
   mappend = (Data.Semigroup.<>)
 
+instance (D ~ t, FliPprE arg exp) => IsString (E exp t) where
+  fromString = E . ftext
+
 -- | We can use pretty-printing combinators defined in 'Text.FliPpr.Doc' also for FliPpr expressions.
 instance (D ~ t, FliPprE arg exp) => DD.DocLike (E exp t) where
-  text s = E (ftext s)
   empty = E fempty
 
   (<+>) x y = x `hardcat` text " " `hardcat` spaces `hardcat` y

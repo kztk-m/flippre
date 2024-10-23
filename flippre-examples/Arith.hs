@@ -18,6 +18,8 @@ import           Text.FliPpr.Driver.Earley as E
 
 import           Data.Word
 
+import           Prettyprinter             (Doc)
+
 {-# ANN module "HLint: ignore Avoid lambda using `infix`" #-}
 {-# ANN module "HLint: ignore Use section" #-}
 
@@ -91,7 +93,7 @@ pExp = flippr $ do
       PartialBij "dm10" (\x -> if x < 10 then Nothing else Just (divMod x 10)) (\(d, r) -> Just (10 * d + r))
         `Branch` \z -> unpair z f
 
-pprExp :: Exp -> Doc
+pprExp :: Exp -> Doc ann
 pprExp = pprMode pExp
 
 parseExp :: [Char] -> Err [Exp]

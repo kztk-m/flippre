@@ -23,6 +23,8 @@ import           Data.String               (fromString)
 import qualified Text.FliPpr.Automaton     as Automaton
 
 
+import           Prettyprinter             (Doc)
+
 -- import           Debug.Trace
 
 
@@ -115,7 +117,7 @@ grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/"
 -- makeParser p =
 --   Earley.parse $ parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> p)
 
-pprExp :: Exp -> Doc
+pprExp :: Exp -> Doc ann
 pprExp = pprMode (flippr $ fromFunction <$> pExp)
 
 parseExp :: [Char] -> Err [Exp]

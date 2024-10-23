@@ -55,7 +55,7 @@ common deps
 executable arith
     import: warnings, deps 
     main-is: Arith.hs 
-    build-depends: deepseq
+    build-depends: deepseq, prettyprinter
 
 executable boollist 
     import: warnings, deps
@@ -68,8 +68,9 @@ executable grammar
 executable arithlet
     import: warnings, deps
     main-is: Let.hs
-    build-depends: deepseq
+    build-depends: deepseq, prettyprinter
 
 executable simple-lang 
     import: warnings, deps 
     main-is:  SimpleLang.hs 
+    build-depends: prettyprinter

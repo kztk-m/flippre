@@ -1,19 +1,23 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE GADTs             #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE TypeOperators     #-}
 
 -- |
 -- Partial environment. Unlike @Env@, this module is for non-recursive environment
 -- of which entry can be missing.
 module Text.FliPpr.Internal.PartialEnv where
 
-import Control.Category
-import Data.Kind
-import Data.Typeable (Proxy, (:~:) (..))
-import qualified Text.FliPpr.Doc as D
-import Unsafe.Coerce
+import           Control.Category
+import           Data.Kind
+import           Data.Typeable    (Proxy, (:~:) (..))
+-- import qualified Text.FliPpr.Doc as D
+import           Unsafe.Coerce
+
+import           Data.String      (IsString (..))
+import qualified Prettyprinter    as PP
 
 newtype VarT i env env' = VarT {runVarT :: forall a. Var i env a -> Var i env' a}
 
@@ -68,7 +72,7 @@ class PartialEnvImpl i where
 
   -- for debugging
   toIndex :: Var i env a -> Int
-  pprEnv :: Env i t env' -> D.Doc
+  pprEnv :: Env i t env' -> PP.Doc ann
 
 data U
 
@@ -97,7 +101,7 @@ instance PartialEnvImpl U where
       go :: Int -> EnvImpl -> Maybe Untype
       go 0 (EExt v _) = v
       go n (EExt _ e) = go (n -1) e
-      go _ _ = Nothing
+      go _ _          = Nothing
 
   updateEnv mg (VarU i) v (EnvU es) = EnvU <$> go i es
     where
@@ -147,8 +151,8 @@ instance PartialEnvImpl U where
     in (unsafeCast <$> v, EnvU e)
     where
       go (EExt v e) = (v, e)
-      go EUndet = (Nothing, EUndet)
-      go EEmp = error "Cannot happen"
+      go EUndet     = (Nothing, EUndet)
+      go EEmp       = error "Cannot happen"
 
   embedVar (RepU k) (RepU k') (VarU i) = VarU (i + (k' - k))
   embedEnv (RepU k) (RepU k') (EnvU env) = EnvU (go (k' - k))
@@ -157,12 +161,12 @@ instance PartialEnvImpl U where
       go n = EExt Nothing (go (n -1))
 
   toIndex (VarU i) = i
-  pprEnv (EnvU impl) = D.group $ D.text "<" D.<> go (0 :: Int) impl D.<> D.text ">"
+  pprEnv (EnvU impl) = PP.group $ "<" <> go (0 :: Int) impl <> ">"
     where
-      go _ EEmp = D.empty
-      go _ EUndet = D.text "???"
+      go _ EEmp = mempty
+      go _ EUndet = "???"
       go n (EExt b r) =
-        (D.ppr n D.<> D.text ":" D.<> maybe (D.text "_") (const $ D.text "*") b) D.</> go (n + 1) r
+        PP.fillSep [PP.pretty n <> ":" <> maybe "_" (const "*") b, go (n + 1) r]
 
 data UB
 
@@ -170,9 +174,9 @@ data BEnv = BEnd | BSkip Int BEnv | BExt Untype BEnv
   deriving (Show)
 
 bskip :: Int -> BEnv -> BEnv
-bskip 0 e = e
+bskip 0 e           = e
 bskip n (BSkip m e) = BSkip (n + m) e
-bskip n e = BSkip n e
+bskip n e           = BSkip n e
 
 bskip' :: Int -> BEnv -> BEnv
 bskip' 0 e = e
@@ -230,7 +234,7 @@ instance PartialEnvImpl UB where
   extendEnv (EnvUB env) v =
     let newenv = case v of
           Just val -> EnvUB (BExt (Untype val) env)
-          Nothing -> EnvUB (bskip 1 env)
+          Nothing  -> EnvUB (bskip 1 env)
     in (newenv, VarUB 0, VarT (\(VarUB i) -> VarUB (i + 1)))
 
   emptyRep = RepUB 0
@@ -246,17 +250,17 @@ instance PartialEnvImpl UB where
     let (v, e) = go env
     in (unsafeCast <$> v, EnvUB e)
     where
-      go (BExt v e) = (Just v, e)
+      go (BExt v e)  = (Just v, e)
       go (BSkip n e) = (Nothing, bskip' (n -1) e)
-      go BEnd = error "Cannot happen"
+      go BEnd        = error "Cannot happen"
 
   embedVar (RepUB k) (RepUB k') (VarUB i) = VarUB (i + (k' - k))
   embedEnv (RepUB k) (RepUB k') (EnvUB env) = EnvUB $ bskip (k' - k) env
 
   toIndex (VarUB i) = i
-  pprEnv (EnvUB impl) = D.group $ D.text "<" D.<> go (0 :: Int) impl D.<> D.text ">"
+  pprEnv (EnvUB impl) = PP.group $ "<" <> go (0 :: Int) impl <> ">"
     where
-      go _ BEnd = D.empty
-      go n (BSkip m e) = D.text "_" D.<> D.brackets (D.text (show m)) D.</> go (n + m) e
+      go _ BEnd = mempty
+      go n (BSkip m e) = PP.fillSep [ "_" <> PP.brackets (fromString (show m)), go (n + m) e]
       go n (BExt _ r) =
-        (D.ppr n D.<> D.text ":" D.<> D.text "*") D.</> go (n + 1) r
+        PP.fillSep [ PP.pretty n <> ":" <> "*",  go (n + 1) r]

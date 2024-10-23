@@ -7,11 +7,12 @@ module Text.FliPpr.Err (Err(..), err) where
 import qualified Control.Monad.Fail as Fail
 #endif
 
-import           Text.FliPpr.Doc    as D
+import           Data.String        (IsString (..))
+import qualified Prettyprinter      as PP
 
 -- | A datatype to handling errors, isomorphic to @Either Doc@.
 data Err a = Ok !a       -- ^ successfull result
-           | Fail !D.Doc -- ^ failed result with an error messange.
+           | Fail !(PP.Doc ()) -- ^ failed result with an error message.
 
 instance Functor Err where
   fmap f (Ok a)   = Ok (f a)
@@ -22,7 +23,7 @@ instance Applicative Err where
   pure = Ok
   {-# INLINE pure #-}
   Fail d <*> Ok _    = Fail d
-  Fail d <*> Fail d' = Fail (d D.$$ d')
+  Fail d <*> Fail d' = Fail (PP.vcat[d, d'])
   Ok   _ <*> Fail d  = Fail d
   Ok   f <*> Ok a    = Ok (f a)
   {-# INLINABLE (<*>) #-}
@@ -39,13 +40,13 @@ instance Monad Err where
 #endif
 
 instance MonadFail Err where
-  fail = Fail . D.text
+  fail = Fail . fromString
 
 instance Show a => Show (Err a) where
   show (Ok a)   = "Ok " ++ show a
-  show (Fail s) = show (D.text "Error: " <+> D.align s)
+  show (Fail s) = show (fromString "Error: " PP.<+> PP.align s)
 
 -- | A synonym of 'Fail'.
-err :: D.Doc -> Err a
+err :: PP.Doc () -> Err a
 err = Fail
 {-# INLINE err #-}
