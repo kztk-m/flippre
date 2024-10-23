@@ -5,6 +5,7 @@ resolver: lts-22.27
 packages:
 - flippre
 - flippre-examples 
+- mutual-def-class
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
