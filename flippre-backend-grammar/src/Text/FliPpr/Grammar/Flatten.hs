@@ -14,6 +14,11 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
+-- | This module transforms grammars into flattened form.
+-- The transformation consists of two steps:
+--
+--   1. Unembedding ('freeze')
+--   2. A-normalization ('flatten')
 module Text.FliPpr.Grammar.Flatten (flatten, freeze) where
 
 import Control.Applicative (Alternative (..), Const (..))
@@ -43,6 +48,13 @@ data FreeGrammarExp c env a where
   FPure :: a -> FreeGrammarExp c env a
   FAlt :: FreeGrammarExp c env a -> FreeGrammarExp c env a -> FreeGrammarExp c env a
   FEmp :: FreeGrammarExp c env a
+  -- | Corresponding to the follwing typing rule.
+  --
+  -- @
+  --   Γ |- d : Dec ε B
+  --  ------------------
+  --   Γ |- local d : B
+  -- @
   UnliftT :: FreeGrammarD c env '[] r -> FreeGrammarExp c env r
 
 prettyE :: (Show c) => Int -> Env (Const Int) env -> FreeGrammarExp c env a -> Doc ann
@@ -84,8 +96,29 @@ prettyD k xs (LetrT d) =
     n = U.lenEnv xs
 
 data FreeGrammarD c env as r where
+  -- | Construct corresponding to the following rule
+  --
+  -- @
+  --   Γ |- e : A    Γ |- d : Dec Δ B
+  --   -------------------------------
+  --     Γ |- e |> d : Dec (A, Δ) B
+  -- @
   ConsT :: FreeGrammarExp c env a -> FreeGrammarD c env as r -> FreeGrammarD c env (a : as) r
+  -- | Construct corresponding to the following rule
+  --
+  -- @
+  --      Γ |- e : A
+  --   ----------------------
+  --   Γ |- ret e : Dec ε A
+  -- @
   LiftT :: FreeGrammarExp c env r -> FreeGrammarD c env '[] r
+  -- | Construct corresponding to the folowing rule
+  --
+  -- @
+  --  Γ, x : A |- d : Dec (A, Δ) B
+  --  -----------------------------
+  --    Γ |- letr x. d : Dec Δ B
+  -- @
   LetrT :: FreeGrammarD c (a : env) (a : as) r -> FreeGrammarD c env as r
 
 instance (Show c, env ~ '[]) => Pretty (FreeGrammarD c env as r) where
@@ -257,6 +290,10 @@ freeze h =
 -- liftD (letrD (\ x_0 -> consD (pure _ <*> symb 'a' <*> x_0
 --                              <|> pure _) (liftD x_0)))
 
+--------------------
+-- A Normalization
+--------------------
+
 newtype DiffF env1 env2
   = DiffF {shift :: forall a. Ix env1 a -> Ix env2 a}
 
@@ -288,7 +325,35 @@ unsize EmptyRHS = MkRHS []
 unsize (SingRHS p) = MkRHS [p]
 unsize (OtherRHS ps) = MkRHS ps
 
--- | A type representing an A-normalization result.
+-- | A type representing an A-normalization result. The basic idea is to hold
+-- definitions @ds@ and resulting expression @e@ in the A-normalized form @let
+-- ds in e@. Here, @ds@ corresponds to production rules of a grammar and @e@ to
+-- the right-hand of the start symbol.
+--
+-- Very roughly speaking, the translation should behave as:
+--
+-- @
+--    e1 --aNormalize--> ds1 / e1'
+--    e2 --aNormalize--> ds2 / e2'
+-- --------------------------------------------------------
+--    e1 <|> e2 --aNormalize--> ds1 ++ ds2 / e1' ++ e2'
+-- @
+--
+-- However, this is not straight forward as @ds1@ and @ds2@ may refer to
+-- different environments. Also, we want to avoid concatenation of declarations:
+-- since they are represented by heterogeneous lists, and concatenating them
+-- comes also with type-level appends.
+--
+-- To address the situation, we:
+--
+--    * Enforce that @ds1@ and @ds2@ are index by the final environment, which
+--      is made available only after A-normalization is over. Hence, we
+--      universally quantify the type of the final environment, and pass around
+--      the witness that it is at least as large as other environments involved.
+--
+--    * Use difference lists. Thus, for example, @ds1@ has type @Env (RHS c
+--      envf) env1 -> Env (RHS c envf) env2@, where @env1@ is universally
+--      quantified while @env2@ is existentially quantified.
 data ANormalizeRes c env1 a
   = forall env2 s.
     ANormalizeRes
@@ -322,7 +387,9 @@ data ANormalizeResD c env1 as r
 
 aNormalize ::
   FreeGrammarExp c env a
+  -- ^ Expression to normalize
   -> DiffF env env1
+  -- ^ specifies @env1@.
   -> ANormalizeRes c env1 a
 aNormalize (FSymb c) _diff0 = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (Symb c)))
 aNormalize (FSymbI cs) _ = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (SymbI cs)))
