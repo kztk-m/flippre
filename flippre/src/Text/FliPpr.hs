@@ -1,156 +1,156 @@
-{-# LANGUAGE DataKinds                 #-}
-{-# LANGUAGE FlexibleContexts          #-}
-{-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE FunctionalDependencies    #-}
-{-# LANGUAGE GADTs                     #-}
-{-# LANGUAGE KindSignatures            #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE TemplateHaskell           #-}
-{-# LANGUAGE TypeOperators             #-}
-{-# LANGUAGE UndecidableInstances      #-}
 
-module Text.FliPpr
-  ( -- * Types
-    A,
-    E,
-    FliPprE,
-    FliPprD,
-    FliPpr,
-    FliPprM,
-    Branch (..),
-    PartialBij (..),
-    In,
-    Err (..),
+module Text.FliPpr (
+  -- * Types
+  A,
+  E,
+  FliPprE,
+  FliPprD,
+  FliPpr,
+  FliPprM,
+  Branch (..),
+  PartialBij (..),
+  In,
+  Err (..),
 
-    -- * Syntax
+  -- * Syntax
 
-    -- ** Types
-    FType (..),
-    type D,
-    type (~>),
+  -- ** Types
+  FType (..),
+  type D,
+  type (~>),
 
-    -- ** To wrap-up
-    flippr,
+  -- ** To wrap-up
+  flippr,
 
-    -- ** Lambda
-    app,
-    arg,
-    (@@),
+  -- ** Lambda
+  app,
+  arg,
+  (@@),
 
-    -- ** Biased choice
-    (<?),
+  -- ** Biased choice
+  (<?),
 
-    -- ** Case
-    case_,
-    unpair,
-    ununit,
+  -- ** Case
+  case_,
+  unpair,
+  ununit,
 
-    -- ** knot-tying
-    share,
-    local,
-    mfixF,
-    letrs,
-    def,
-    Arg(..),
+  -- ** knot-tying
+  share,
+  local,
+  mfixF,
+  letrs,
+  def,
+  Arg (..),
 
-    -- ** Pretty-Printing Combinators and Datatypes
-    spaces,
-    space,
-    (<#>),
-    line',
-    module Text.FliPpr.Doc,
+  -- ** Pretty-Printing Combinators and Datatypes
+  spaces,
+  space,
+  (<#>),
+  line',
+  module Text.FliPpr.Doc,
 
-    -- ** Derived Combinators
-    (<+>.),
-    (</>.),
+  -- ** Derived Combinators
+  (<+>.),
+  (</>.),
 
-    -- ** Easy Definition
-    define,
-    Repr (..),
-    --    defineR,
-    -- defines,
+  -- ** Easy Definition
+  define,
+  Repr (..),
+  --    defineR,
+  -- defines,
 
-    -- ** Pattern-like expressions
-    module Text.FliPpr.Pat,
+  -- ** Pattern-like expressions
+  module Text.FliPpr.Pat,
 
-    -- ** Template Haskell
-    un,
-    branch,
-    mkUn,
-    pat,
+  -- ** Template Haskell
+  un,
+  branch,
+  mkUn,
+  pat,
 
-    -- ** Predefined Deconstructors
-    unTrue,
-    unFalse,
-    unNil,
-    unCons,
-    unLeft,
-    unRight,
-    unTuple3,
+  -- ** Predefined Deconstructors
+  unTrue,
+  unFalse,
+  unNil,
+  unCons,
+  unLeft,
+  unRight,
+  unTuple3,
 
-    -- * Finite natural numbers (mostly, imported from "fin")
-    FinNE,
-    F.Fin (..),
-    F.SNat (..),
-    F.SNatI (..),
-    F.Nat0,
-    F.Nat1,
-    F.Nat2,
-    F.Nat3,
-    F.Nat4,
-    F.Nat5,
-    F.Nat6,
-    F.Nat7,
-    F.Nat8,
-    F.Nat9,
-    reifySNat,
+  -- * Finite natural numbers (mostly, imported from "fin")
+  FinNE,
+  F.Fin (..),
+  F.SNat (..),
+  F.SNatI (..),
+  F.Nat0,
+  F.Nat1,
+  F.Nat2,
+  F.Nat3,
+  F.Nat4,
+  F.Nat5,
+  F.Nat6,
+  F.Nat7,
+  F.Nat8,
+  F.Nat9,
+  reifySNat,
 
+  -- * Evaluator
+  pprMode,
+  parsingMode,
+  parsingModeWith,
+  parsingModeSP,
+  CommentSpec (..),
+  BlockCommentSpec (..),
+  G.Grammar,
 
-    -- * Evaluator
-    pprMode,
-    parsingMode,
-    parsingModeWith,
-    parsingModeSP,
-    CommentSpec (..),
-    BlockCommentSpec (..),
-    G.Grammar,
-
-    -- * Utils
-    textAs, RS.RSet,
-    Fixity (..),
-    Assoc (..),
-    Prec,
-    opPrinter,
-    is, isMember,
-  )
+  -- * Utils
+  textAs,
+  RS.RSet,
+  Fixity (..),
+  Assoc (..),
+  Prec,
+  opPrinter,
+  is,
+  isMember,
+)
 where
 
-import qualified Data.Fin                              as F
-import qualified Data.Map                              as M
-import           Data.Maybe                            (fromMaybe)
-import qualified Data.Set                              as S
-import qualified Data.Type.Nat                         as F
-import           Text.FliPpr.Doc
-import           Text.FliPpr.Err
-import qualified Text.FliPpr.Grammar                   as G
-import           Text.FliPpr.Internal.ParserGeneration
-import           Text.FliPpr.Internal.PrettyPrinting
-import           Text.FliPpr.Internal.Type
-import           Text.FliPpr.Pat
-import           Text.FliPpr.TH
+import qualified Data.Fin as F
+import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
+import qualified Data.Set as S
+import qualified Data.Type.Nat as F
+import Text.FliPpr.Doc
+import qualified Text.FliPpr.Grammar as G
+import Text.FliPpr.Grammar.Err
+import Text.FliPpr.Internal.ParserGeneration
+import Text.FliPpr.Internal.PrettyPrinting
+import Text.FliPpr.Internal.Type
+import Text.FliPpr.Pat
+import Text.FliPpr.TH
 
-import qualified Data.RangeSet.List                    as RS
-import           Text.FliPpr.Automaton                 as A
-
+import qualified Data.RangeSet.List as RS
+import Text.FliPpr.Automaton as A
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
 --   it behaves as '<>'.
-(<+>.) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
+(<+>.) :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
 x <+>. y = x <#> nespaces' <#> y
 
 -- | In pretty-printing, '</>.' behaves as '</>', but in parser construction,
 --   it behaves as '<>'.
-(</>.) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
+(</>.) :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
 x </>. y = x <#> line' <#> y
 
 infixr 4 <+>.
@@ -238,9 +238,8 @@ isMember cs f =
 --
 -- >  rec f <- share $ arg $ \i -> ... f `app` a ...
 -- define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
-define :: Arg (E f) r => r -> FliPprM f r
+define :: (Arg (E f) r) => r -> FliPprM f r
 define = share
-
 
 -- | Precedence.
 type Prec = Int
@@ -250,23 +249,26 @@ data Fixity = Fixity Assoc Prec
 
 -- | Operator's associativity.
 data Assoc
-  = AssocL -- ^ left associative
-  | AssocR -- ^ right associative
-  | AssocN -- ^ non-associative
+  = -- | left associative
+    AssocL
+  | -- | right associative
+    AssocR
+  | -- | non-associative
+    AssocN
 
 opPrinter ::
   (DocLike d, Ord n, Num n) =>
-  Fixity ->
-  (d -> d -> d) ->
-  (n -> d) ->
-  (n -> d) ->
-  (n -> d)
+  Fixity
+  -> (d -> d -> d)
+  -> (n -> d)
+  -> (n -> d)
+  -> (n -> d)
 opPrinter (Fixity a opPrec) opD ppr1 ppr2 k =
   let (dl, dr) = case a of
         AssocL -> (0, 1)
         AssocR -> (1, 0)
         AssocN -> (0, 0)
-   in ifParens (k > fromIntegral opPrec) $ opD (ppr1 (fromIntegral opPrec + dl)) (ppr2 (fromIntegral opPrec + dr))
+  in  ifParens (k > fromIntegral opPrec) $ opD (ppr1 (fromIntegral opPrec + dl)) (ppr2 (fromIntegral opPrec + dr))
   where
     ifParens b = if b then parens else id
 
@@ -277,7 +279,6 @@ $(mkUn ''(,,))
 
 -- | @textAs x r@ serves as @text x@ in pretty-printing, but
 -- in parsing it serves as @r@ of which parsing result is used to update @x$.
-
 textAs :: (FliPprD arg exp) => A arg String -> A.DFA Char -> E exp D
 textAs = flip textAs'
 
@@ -285,8 +286,14 @@ textAs' :: (FliPprD arg exp) => A.DFA Char -> A arg [Char] -> E exp D
 textAs' (A.DFAImpl i qs fs tr) = local $
   letr $ \abort ->
     def abort $
-  letrs (S.toList qs) $ \f ->
-    def (\q s -> case_ s [ unNil  $ if q `S.member` fs then text "" else abort,
-                           unCons $ \c r ->
-                             case_ c [ isMember cs $ \c' -> charAs c' cs <#> f q' r | (cs, q') <- fromMaybe [] $ M.lookup q tr  ]] ) $
-  return (f i)
+      letrs (S.toList qs) $ \f ->
+        def
+          ( \q s ->
+              case_
+                s
+                [ unNil $ if q `S.member` fs then text "" else abort
+                , unCons $ \c r ->
+                    case_ c [isMember cs $ \c' -> charAs c' cs <#> f q' r | (cs, q') <- fromMaybe [] $ M.lookup q tr]
+                ]
+          )
+          $ return (f i)

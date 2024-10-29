@@ -1,7 +1,7 @@
 cabal-version:       2.2
-name:                flippre
+name:                flippre-backend-grammar 
 version:             0.2.1
-synopsis:            FliPpr, embedded 
+synopsis:            FliPpr, embedded: Backend for CFGs
 -- description:
 homepage:            https://github.com/kztk-m/flippre
 license:             BSD-3-Clause 
@@ -11,7 +11,6 @@ maintainer:          kztk@tohoku.ac.jp
 copyright:           2017, 2018, 2020, 2024 Kazutaka Matsuda
 category:            Text 
 build-type:          Simple
-extra-source-files:  README.md
 
 common warnings
     default-language: Haskell2010
@@ -39,32 +38,30 @@ library
   import: warnings
   hs-source-dirs:      src
   exposed-modules:     
-    Text.FliPpr, 
-    Text.FliPpr.Doc, 
-    Text.FliPpr.TH, 
-    Text.FliPpr.Internal.Type, 
-    Text.FliPpr.Internal.HList, 
-    Text.FliPpr.Internal.PrettyPrinting,
-    Text.FliPpr.Internal.ParserGeneration,
-    Text.FliPpr.Internal.Env, 
-    Text.FliPpr.Internal.PartialEnv
-    Text.FliPpr.Automaton 
-    Text.FliPpr.Pat 
+    Text.FliPpr.Grammar.Err, 
+    Text.FliPpr.Grammar.Types, 
+    Text.FliPpr.Grammar.ExChar, 
+    Text.FliPpr.Grammar.Flatten, 
+    Text.FliPpr.Grammar.UnFlatten,
+    Text.FliPpr.Grammar.Simplify, 
+    Text.FliPpr.Grammar.Driver.Earley, 
+    Text.FliPpr.Grammar
 
+  other-modules:
+    Text.FliPpr.Grammar.Internal.Util 
                                  
   build-depends:       
     base >= 4.7 && < 5, 
     base-compat >= 0.13,                    
     mtl  >= 2.0 && < 3, 
-    containers >= 0.5 && < 0.7,
-    template-haskell >= 2.11 && < 2.23, 
+    -- containers >= 0.5 && < 0.7,
+    -- template-haskell >= 2.11 && < 2.23, 
     Earley >= 0.11 && < 0.14, 
     range-set-list >= 0.1 && < 0.2, 
-    th-abstraction >= 0.2 && < 0.8, 
-    fin >= 0.1 && < 0.4,
     prettyprinter >= 1.7 && < 1.8, 
+    split ^>= 0.2, 
     mutual-def-class, 
-    flippre-backend-grammar 
+    embedding-by-unembedding 
     
   default-language:    Haskell2010
   

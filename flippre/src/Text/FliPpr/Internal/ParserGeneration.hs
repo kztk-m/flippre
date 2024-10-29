@@ -1,54 +1,61 @@
-{-# LANGUAGE DataKinds                 #-}
-{-# LANGUAGE FlexibleContexts          #-}
-{-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE GADTs                     #-}
-{-# LANGUAGE InstanceSigs              #-}
-{-# LANGUAGE MultiParamTypeClasses     #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE OverloadedStrings         #-}
-{-# LANGUAGE RankNTypes                #-}
-{-# LANGUAGE RebindableSyntax          #-}
-{-# LANGUAGE RecursiveDo               #-}
-{-# LANGUAGE ScopedTypeVariables       #-}
-{-# LANGUAGE TypeFamilyDependencies    #-}
-{-# LANGUAGE TypeOperators             #-}
 
 -- |
 -- This module implements parser-generation interpretation of FliPpr.
 module Text.FliPpr.Internal.ParserGeneration (
-  parsingMode, parsingModeMono, parsingModeSP, parsingModeWith,
-  BlockCommentSpec(..), CommentSpec (..),
-  PArg(..), PExp(..), Result(..),
- )  where
+  parsingMode,
+  parsingModeMono,
+  parsingModeSP,
+  parsingModeWith,
+  BlockCommentSpec (..),
+  CommentSpec (..),
+  PArg (..),
+  PExp (..),
+  Result (..),
+) where
 
-import           Control.Applicative             (Applicative (..), (<|>))
-import qualified Control.Applicative             as A (empty)
-import           Control.Monad                   (join, void)
-import           Data.Foldable                   (asum)
-import           Prelude                         hiding (Applicative (..))
+import Control.Applicative (Applicative (..), (<|>))
+import qualified Control.Applicative as A (empty)
+import Control.Monad (join, void)
+import Data.Foldable (asum)
+import Prelude hiding (Applicative (..))
+
 -- import qualified Text.FliPpr.Internal.GrammarST as G
 
-import           Data.Functor.Compose            (Compose (..))
-import           Data.Functor.Identity           (Identity (..))
-import qualified Data.RangeSet.List              as RS
-import           Data.Typeable                   (Proxy (..))
+import Data.Functor.Compose (Compose (..))
+import Data.Functor.Identity (Identity (..))
+import qualified Data.RangeSet.List as RS
+import Data.Typeable (Proxy (..))
 
-import           Debug.Trace
+import Debug.Trace
 import qualified Defs
-import           Text.FliPpr.Err                 (Err (..), err)
-import qualified Text.FliPpr.Grammar             as G
+import qualified Text.FliPpr.Grammar as G
+import Text.FliPpr.Grammar.Err (Err (..), err)
 import qualified Text.FliPpr.Internal.PartialEnv as PE
-import           Text.FliPpr.Internal.Type
+import Text.FliPpr.Internal.Type
 
-import           Data.Bifunctor                  (bimap)
+import Data.Bifunctor (bimap)
 
-import           Data.Kind                       (Type)
-import           Data.String                     (IsString (..))
+import Data.Kind (Type)
+import Data.String (IsString (..))
 
-import qualified Prettyprinter                   as PP
+import qualified Prettyprinter as PP
 
 ifThenElse :: Bool -> p -> p -> p
-ifThenElse True x _  = x
+ifThenElse True x _ = x
 ifThenElse False _ y = y
 
 -- import Debug.Trace
@@ -62,7 +69,7 @@ type Env = PE.Env PEImpl EqI
 type Var = PE.Var PEImpl
 
 data EqI a where
-  EqI :: Eq a => a -> EqI a
+  EqI :: (Eq a) => a -> EqI a
 
 mergeEqI :: EqI a -> EqI a -> Maybe (EqI a)
 mergeEqI (EqI a) (EqI b)
@@ -71,20 +78,19 @@ mergeEqI (EqI a) (EqI b)
 
 newtype PArg a = PArg {unPArg :: forall r. Rep r -> Var r a}
 
-newtype PExp e t = PExp {unPExp :: forall r. G.Grammar G.ExChar e => Rep r -> e (Err (Result r t))}
+newtype PExp e t = PExp {unPExp :: forall r. (G.Grammar G.ExChar e) => Rep r -> e (Err (Result r t))}
 
-type GU e a = G.Grammar G.ExChar e => e a
+type GU e a = (G.Grammar G.ExChar e) => e a
 
 data Result env t where
   RD :: Env env -> Result env D
   RF :: Result (a ': env) t -> Result env (a ~> t)
 
-{-# ANN applySem ("HLint: ignore Avoid lambda using `infix`" :: String)#-}
-
+{-# ANN applySem ("HLint: ignore Avoid lambda using `infix`" :: String) #-}
 applySem ::
-  GU s (Err (Result r (a ~> t))) ->
-  Var r a ->
-  GU s (Err (Result r t))
+  GU s (Err (Result r (a ~> t)))
+  -> Var r a
+  -> GU s (Err (Result r t))
 applySem g v = (>>= \res -> appSem res v) <$> g
 
 appSem :: Result r (a ~> t) -> Var r a -> Err (Result r t)
@@ -92,22 +98,22 @@ appSem (RF res) v =
   mapToEnvA
     ( \env ->
         let (a, e) = PE.popEnv env
-         in tryUpdateEnv v a e
+        in  tryUpdateEnv v a e
     )
     res
 
 mapToEnvA ::
-  Applicative f =>
-  (Env env -> f (Env env')) ->
-  Result env t ->
-  f (Result env' t)
+  (Applicative f) =>
+  (Env env -> f (Env env'))
+  -> Result env t
+  -> f (Result env' t)
 mapToEnvA f (RD e) = RD <$> f e
 mapToEnvA f (RF e0) =
   RF
     <$> mapToEnvA
       ( \env ->
           let (a, e) = PE.popEnv env
-           in extEnv a <$> f e
+          in  extEnv a <$> f e
       )
       e0
   where
@@ -126,10 +132,10 @@ tryUpdateEnv k (Just v0) env =
       return env'
     Nothing ->
       err
-        ( PP.vcat[
-            "The same variable is updated twice:",
-            "updating position" PP.<+> pprVar k PP.<+> "in" PP.<+> PE.pprEnv env
-        ]
+        ( PP.vcat
+            [ "The same variable is updated twice:"
+            , "updating position" PP.<+> pprVar k PP.<+> "in" PP.<+> PE.pprEnv env
+            ]
         )
   where
     pprVar v = PP.pretty (PE.toIndex v)
@@ -161,34 +167,34 @@ instance FliPprE PArg (PExp s) where
     case PE.extendRep tenv Proxy of
       (tenva, va, _vt) ->
         let a = PArg $ \tenv' -> PE.embedVar tenva tenv' va
-         in fmap RF <$> unPExp (f a) tenva
+        in  fmap RF <$> unPExp (f a) tenva
 
   funpair ::
     forall a b r.
     (In a, In b) =>
-    PArg (a, b) ->
-    (PArg a -> PArg b -> PExp s r) ->
-    PExp s r
+    PArg (a, b)
+    -> (PArg a -> PArg b -> PExp s r)
+    -> PExp s r
   funpair inp f = PExp $ \tenv ->
     let (tenva, va, _) = PE.extendRep tenv Proxy
         (tenvb, vb, _) = PE.extendRep tenva Proxy
         argA = PArg $ \tenv' -> PE.embedVar tenva tenv' va
         argB = PArg $ \tenv' -> PE.embedVar tenvb tenv' vb
-     in (>>= updateP (unPArg inp tenv)) <$> unPExp (f argA argB) tenvb
+    in  (>>= updateP (unPArg inp tenv)) <$> unPExp (f argA argB) tenvb
     where
       updateP :: Var env (a, b) -> Result (b : a : env) r -> Err (Result env r)
       updateP v = mapToEnvA $
         \eab ->
           let (b, ea) = PE.popEnv eab
               (a, e) = PE.popEnv ea
-           in tryUpdateEnv v (liftA2 pair a b) e
+          in  tryUpdateEnv v (liftA2 pair a b) e
 
       pair :: EqI a -> EqI b -> EqI (a, b)
       pair (EqI a) (EqI b) = EqI (a, b)
 
   fununit (PArg a) e = PExp $ \tenv ->
     let pos = a tenv
-     in (>>= mapToEnvA (tryUpdateEnv pos (Just (EqI ())))) <$> unPExp e tenv
+    in  (>>= mapToEnvA (tryUpdateEnv pos (Just (EqI ())))) <$> unPExp e tenv
 
   fcase _ [] = PExp $ const A.empty
   fcase ex0 (Branch p pk : bs) = branch ex0 p pk `choiceGen` fcase ex0 bs
@@ -198,33 +204,33 @@ instance FliPprE PArg (PExp s) where
         PExp $ \tenv ->
           let (tenvb, vb, _) = PE.extendRep tenv Proxy
               argB = PArg $ \tenv' -> PE.embedVar tenvb tenv' vb
-           in (>>= updateB finv (unPArg inp tenv)) <$> unPExp (k argB) tenvb
+          in  (>>= updateB finv (unPArg inp tenv)) <$> unPExp (k argB) tenvb
 
       updateB ::
         (In a) =>
-        (b -> Maybe a) ->
-        Var env a ->
-        Result (b : env) r ->
-        Err (Result env r)
+        (b -> Maybe a)
+        -> Var env a
+        -> Result (b : env) r
+        -> Err (Result env r)
       updateB finv v = mapToEnvA $ \eb ->
         let (b, e) = PE.popEnv eb
             a = fmap EqI $ b >>= \(EqI bb) -> finv bb
-        in tryUpdateEnv v a e
+        in  tryUpdateEnv v a e
 
   fcharAs a cs = PExp $ \tenv ->
     let x = unPArg a tenv
-    in (\ c -> do { env <- tryUpdateEnv x (Just $ EqI $ unNormalChar c) (PE.undeterminedEnv tenv); return $ RD env })
-       <$> G.symbI (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
+    in  (\c -> do env <- tryUpdateEnv x (Just $ EqI $ unNormalChar c) (PE.undeterminedEnv tenv); return $ RD env)
+          <$> G.symbI (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
     where
       unNormalChar (G.NormalChar c) = c
-      unNormalChar _                = error "Cannot happen."
+      unNormalChar _ = error "Cannot happen."
 
   ftext s = fromP $ G.text s
 
   fcat f g = PExp $ \tenv ->
     let p = unPExp f tenv
         q = unPExp g tenv
-     in (\x y -> join (liftA2 k x y)) <$> p <*> q
+    in  (\x y -> join (liftA2 k x y)) <$> p <*> q
     where
       k :: Result env D -> Result env D -> Err (Result env D)
       k (RD env) (RD env') = RD <$> merge env env'
@@ -263,7 +269,7 @@ type family Map (f :: FType -> Type) as where
   Map f (a ': as) = f a ': Map f as
 instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
   -- newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Defs.Fs g (Defs.TransD (Compose Err (Result r)) a)}
-  newtype D (PExp g) as a = RulesG { unRulesG :: forall r. Rep r -> Defs.D g (Map (Compose Err (Result r)) as) (Err (Result r a)) }
+  newtype D (PExp g) as a = RulesG {unRulesG :: forall r. Rep r -> Defs.D g (Map (Compose Err (Result r)) as) (Err (Result r a))}
 
   liftD x = RulesG $ \tenv -> Defs.liftD (unPExp x tenv)
   unliftD (RulesG x) = PExp $ \tenv -> Defs.unliftD (x tenv)
@@ -285,7 +291,7 @@ instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
   letrD h = RulesG $ \tenv ->
     Defs.letrD $ \a ->
       let harg = PExp $ \tenv' -> fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose <$> a
-      in unRulesG (h harg) tenv
+      in  unRulesG (h harg) tenv
 
 -- newtype PM s a = PM {runPM :: forall env. ReaderT (Rep env) (RefM s) a}
 
@@ -361,18 +367,18 @@ instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
 -- --                             fmap (mapToEnv $ PE.embedEnv tenv tenv') <$> p))
 -- --                   tenv)
 
-parsingModeMono :: G.GrammarD G.ExChar g => PExp (G.Simplify G.ExChar g) (a ~> D) -> g (Err a)
+parsingModeMono :: (G.GrammarD G.ExChar g) => (forall f. (G.GrammarD G.ExChar f) => PExp f (a ~> D)) -> g (Err a)
 parsingModeMono e =
-  G.simplifyGrammar $ k <$> unPExp e PE.emptyRep
+  G.simplify $ k <$> unPExp e PE.emptyRep
   where
     k :: Err (Result '[] (a ~> D)) -> Err a
     k (Fail s) = err $ PP.vsep ["Inverse computation fails: ", s]
     k (Ok a) = case a of
       RF (RD env) ->
         let (v, _) = PE.popEnv env
-        in case v of
-             Just (EqI u) -> return u
-             Nothing      -> err "Input is unused in evaluation."
+        in  case v of
+              Just (EqI u) -> return u
+              Nothing -> err "Input is unused in evaluation."
 
 -- parsingModeMono :: In a => (forall s. PM s (PExp s (a ~> D))) -> G.Grammar G.ExChar (Err a)
 -- parsingModeMono m = G.finalize $ do
@@ -391,28 +397,29 @@ parsingModeMono e =
 --                 Nothing -> err $ D.text "Input is unused in evaluation."
 
 data BlockCommentSpec = BlockCommentSpec
-  { -- | The opening string for block comments
-    bcOpen     :: String,
-    -- | The closing string for block comments
-    bcClose    :: String,
-    -- | Nestable or not
-    bcNestable :: Bool
+  { bcOpen :: String
+  -- ^ The opening string for block comments
+  , bcClose :: String
+  -- ^ The closing string for block comments
+  , bcNestable :: Bool
+  -- ^ Nestable or not
   }
 
-data CommentSpec = -- | Spec for block comments.
-  CommentSpec
-  { -- | Starting string for line comments
-    lcSpec :: Maybe String,
-    -- | Spec for block comments.
-    bcSpec :: Maybe BlockCommentSpec
-  }
+data CommentSpec
+  = -- | Spec for block comments.
+    CommentSpec
+    { lcSpec :: Maybe String
+    -- ^ Starting string for line comments
+    , bcSpec :: Maybe BlockCommentSpec
+    -- ^ Spec for block comments.
+    }
 
 -- | Make a grammar that represents a single space
-fromCommentSpec :: G.GrammarD Char g => CommentSpec -> g ()
+fromCommentSpec :: (G.GrammarD Char g) => CommentSpec -> g ()
 fromCommentSpec (CommentSpec lc bc) = G.local $ do
   lineComment <- G.share $ case lc of
     Nothing -> A.empty
-    Just s  -> void (G.text s) <* many (G.symbI nb) <* G.symbI br
+    Just s -> void (G.text s) <* many (G.symbI nb) <* G.symbI br
 
   rec blockComment <- case bc of
         Nothing -> G.rule A.empty
@@ -430,13 +437,13 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
   where
     mfix = G.mfixDefM
 
-    many :: G.GrammarD c g => g a -> g [a]
+    many :: (G.GrammarD c g) => g a -> g [a]
     many = G.manyD
 
-    non :: G.GrammarD Char g => [String] -> Defs.DefM g (g ()) -- (Defs.Rules g (Defs.Lift ()))
+    non :: (G.GrammarD Char g) => [String] -> Defs.DefM g (g ()) -- (Defs.Rules g (Defs.Lift ()))
     non strings = G.share $ void (many (go strings))
       where
-        go :: G.Grammar Char g => [String] -> g Char
+        go :: (G.Grammar Char g) => [String] -> g Char
         go ss =
           G.symbI (RS.complement firsts)
             <|> if any null rests
@@ -494,7 +501,7 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
 parsingMode :: (G.GrammarD Char g) => FliPpr (a ~> D) -> g (Err a)
 parsingMode = parsingModeWith spec
   where
-    spec = CommentSpec {lcSpec = Nothing, bcSpec = Nothing}
+    spec = CommentSpec{lcSpec = Nothing, bcSpec = Nothing}
 
 -- parsingModeWith :: In a => CommentSpec -> FliPpr (a ~> D) -> G.Grammar Char (Err a)
 -- parsingModeWith = parsingModeSP . fromCommentSpec
@@ -505,9 +512,9 @@ parsingModeWith spec (FliPpr e) =
       g0 = parsingModeMono e
       g1 :: forall g'. (G.GrammarD Char g') => g' (Err a)
       g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
-  in trace (show $ PP.fillSep [G.pprAsFlat g0, fromString "---------", G.pprAsFlat g1]) g1
+  in  trace (show $ PP.fillSep [G.pprAsFlat g0, fromString "---------", G.pprAsFlat g1]) g1
 
-parsingModeSP :: forall g a. (G.GrammarD Char g) => (forall g'. G.GrammarD Char g' => g' ()) -> FliPpr (a ~> D) -> g (Err a)
+parsingModeSP :: forall g a. (G.GrammarD Char g) => (forall g'. (G.GrammarD Char g') => g' ()) -> FliPpr (a ~> D) -> g (Err a)
 parsingModeSP gsp (FliPpr e) =
   G.withSpace gsp (parsingModeMono e)
 

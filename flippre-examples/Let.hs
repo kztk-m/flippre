@@ -1,38 +1,34 @@
-{-# LANGUAGE DataKinds                 #-}
-{-# LANGUAGE FlexibleContexts          #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE RankNTypes                #-}
-{-# LANGUAGE RebindableSyntax          #-}
-{-# LANGUAGE RecursiveDo               #-}
-{-# LANGUAGE TemplateHaskell           #-}
-{-# LANGUAGE TypeOperators             #-}
-
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- To suppress warnings caused by TH code.
-{-# LANGUAGE MonoLocalBinds            #-}
+{-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
 
+import Control.DeepSeq
+import System.CPUTime
+import Text.FliPpr
+import qualified Text.FliPpr.Grammar as G
+import Text.FliPpr.Grammar.Driver.Earley as Earley
+import Prelude
 
-import           Control.DeepSeq
-import           Prelude
-import           System.CPUTime
-import           Text.FliPpr
-import           Text.FliPpr.Driver.Earley as Earley
-import qualified Text.FliPpr.Grammar       as G
+import Data.String (fromString)
 
-import           Data.String               (fromString)
+import qualified Text.FliPpr.Automaton as Automaton
 
-import qualified Text.FliPpr.Automaton     as Automaton
-
-
-import           Prettyprinter             (Doc)
+import Prettyprinter (Doc)
 
 -- import           Debug.Trace
 
-
-mfix :: Arg (E f) a => (a -> FliPprM f a) -> FliPprM f a
+mfix :: (Arg (E f) a) => (a -> FliPprM f a) -> FliPprM f a
 mfix = mfixF
 
 ifThenElse :: Bool -> p -> p -> p
-ifThenElse True t _  = t
+ifThenElse True t _ = t
 ifThenElse False _ f = f
 
 type Name = String
@@ -49,7 +45,7 @@ data Exp
 
 $(mkUn ''Exp)
 
-mkPprInt :: FliPprD a e => FliPprM e (A a Int -> E e D)
+mkPprInt :: (FliPprD a e) => FliPprM e (A a Int -> E e D)
 mkPprInt =
   share $ \x -> case_ x [atoi $ \s -> textAs s numbers]
   where
@@ -65,7 +61,7 @@ mkPprInt =
 keywords :: [String]
 keywords = ["let", "in"]
 
-mkPprVar :: FliPprD a e => FliPprM e (A a String -> E e D)
+mkPprVar :: (FliPprD a e) => FliPprM e (A a String -> E e D)
 mkPprVar =
   share $ \x -> textAs x ident
   where
@@ -74,16 +70,15 @@ mkPprVar =
     ident = smallAlpha <> Automaton.star alphaNum `Automaton.difference` Automaton.unions (map fromString keywords)
 
 {-# ANN opP "HLint: ignore Avoid lambda using `infix`" #-}
-
 opP :: (DocLike d, Num n, Ord n) => Fixity -> (d -> d -> d) -> (n -> a -> d) -> (n -> b -> d) -> n -> a -> b -> d
 opP fixity f p1 p2 k x y = opPrinter fixity f (\k' -> p1 k' x) (\k' -> p2 k' y) k
 
-manyParens :: FliPprD a e => E e D -> E e D
+manyParens :: (FliPprD a e) => E e D -> E e D
 manyParens d = local $ do
   rec x <- define $ d <? parens x
   return x
 
-pExp :: FliPprD arg exp => FliPprM exp (A arg Exp -> E exp D)
+pExp :: (FliPprD arg exp) => FliPprM exp (A arg Exp -> E exp D)
 pExp = do
   pprInt <- mkPprInt
   pprVar <- mkPprVar
@@ -94,23 +89,24 @@ pExp = do
         manyParens $
           case_
             e
-            [ unNum pprInt,
-              unVar pprVar,
-              unSub $ opP (Fixity AssocL 1) (op "-") pprE pprE k,
-              unAdd $ opP (Fixity AssocL 1) (op "+") pprE pprE k,
-              unDiv $ opP (Fixity AssocL 2) (op "/") pprE pprE k,
-              unMul $ opP (Fixity AssocL 2) (op "*") pprE pprE k,
-              unLet $ \x e1 e2 ->
+            [ unNum pprInt
+            , unVar pprVar
+            , unSub $ opP (Fixity AssocL 1) (op "-") pprE pprE k
+            , unAdd $ opP (Fixity AssocL 1) (op "+") pprE pprE k
+            , unDiv $ opP (Fixity AssocL 2) (op "/") pprE pprE k
+            , unMul $ opP (Fixity AssocL 2) (op "*") pprE pprE k
+            , unLet $ \x e1 e2 ->
                 parensIf (k > 0) $
                   group $
-                    text "let" <+> pprVar x <> text "="
+                    text "let" <+> pprVar x
+                      <> text "="
                       <> nest 2 (line' <> pprE 0 e1)
                       <> line
                       <> text "in" <+> pprE 0 e2
             ]
   return (\x -> spaces <> pprE (0 :: FinNE Nat4) x <> spaces)
 
-grammar :: G.GrammarD Char g => g (Err Exp)
+grammar :: (G.GrammarD Char g) => g (Err Exp)
 grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pExp)
 
 -- makeParser :: In t => (forall a e. FliPprD a e => FliPprM e (A a t -> E e D)) -> String -> Err [t]
@@ -126,7 +122,7 @@ parseExp =
 
 parseExp' :: [Char] -> [Exp]
 parseExp' s = case parseExp s of
-  Ok r   -> r
+  Ok r -> r
   Fail e -> error (show e)
 
 exp1 :: Exp
@@ -144,7 +140,8 @@ exp1 =
                   else Let "x" r (Var "x")
     )
     (Num 0)
-    $ take 100 $ cycle [2 .. 21]
+    $ take 100
+    $ cycle [2 .. 21]
 
 countTime :: String -> IO a -> IO a
 countTime str comp = do

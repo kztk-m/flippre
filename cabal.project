@@ -1,2 +1,6 @@
 packages: */*.cabal 
 
+source-repository-package
+    type: git 
+    location: https://github.com/kztk-m/EbU.git
+    tag: 004b27bdf0bb229a62a2c127cbff542f3b75fe28

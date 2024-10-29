@@ -1,26 +1,30 @@
-{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE RebindableSyntax          #-}
-{-# LANGUAGE RecursiveDo               #-}
 
 -- import Text.FliPpr.Internal.GrammarST as G
 
-import           Control.Applicative (Alternative (..))
-import           Data.Foldable       (asum)
-import           Prelude
-import           Text.FliPpr.Grammar as G
+import Control.Applicative (Alternative (..))
+import Data.Foldable (asum)
+import Text.FliPpr.Grammar as G
+import qualified Text.FliPpr.Grammar.UnFlatten as G
+import Prelude
 
-_example1 :: GrammarD ExChar g => g ()
+_example1 :: (GrammarD ExChar g) => g ()
 _example1 = G.local $ do
   rec p <-
         G.rule $
-          text "(" *> G.nt p <* text ")" <* G.nt p
-            <|> pure ()
+          text "("
+            *> G.nt p
+            <* text ")"
+            <* G.nt p
+              <|> pure ()
   return $ G.nt p
   where
     mfix = G.mfixDefM
 
-_example2 :: GrammarD ExChar g => g [ExChar]
+_example2 :: (GrammarD ExChar g) => g [ExChar]
 _example2 = G.local $ do
   rec alpha <- G.rule $ foldr1 (<|>) $ map char ['a' .. 'z']
       alphas <- G.rule $ (:) <$> G.nt alpha <*> G.nt alphaStar
@@ -29,7 +33,7 @@ _example2 = G.local $ do
   where
     mfix = G.mfixDefM
 
-_example3 :: GrammarD ExChar g => g [ExChar]
+_example3 :: (GrammarD ExChar g) => g [ExChar]
 _example3 = G.local $ do
   rec alphas <- do
         alpha <- G.rule $ foldr1 (<|>) $ map char ['a' .. 'z']
@@ -39,7 +43,7 @@ _example3 = G.local $ do
   where
     mfix = G.mfixDefM
 
-_example4 :: GrammarD ExChar g => g ()
+_example4 :: (GrammarD ExChar g) => g ()
 _example4 = G.local $ do
   rec alphas <- do
         alpha <- G.rule $ foldr1 (<|>) $ map char ['a' .. 'z']
@@ -54,9 +58,17 @@ _example4 = G.local $ do
 
 main :: IO ()
 main = do
-  print $ G.pprAsFlat _example4
+  let ex = _example4
+  print $ G.pprAsFlat ex
+
+  let ex' = G.simplify ex
   putStrLn "--- after simplification ---"
-  print $ G.pprAsFlat $ G.simplifyGrammar _example4
+  print $ G.pprAsFlat ex'
+
+  let ex'' = G.withSpace (G.simplify $ () <$ asum (map G.symb " \t\r\n")) ex'
 
   putStrLn "--- after manipulation of spaces ---"
-  print (G.pprAsFlat $ G.withSpace (simplifyGrammar $ () <$ asum (map G.symb " \t\r\n")) $ G.simplifyGrammar _example4)
+  print $ G.pprAsFlat ex''
+
+  putStrLn "--- further simplification ---"
+  print $ G.pprAsFlat $ G.simplify ex''
