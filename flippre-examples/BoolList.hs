@@ -52,7 +52,7 @@ gsp = () <$ G.text " "
 main :: IO ()
 main = do
   let s = "[True,   False, True, (False ), ( (True))  ]"
-  let g :: (G.GrammarD Char g) => g (Err [Bool])
+  let g :: (G.GrammarD Char g) => g (Err ann [Bool])
       g = parsingModeSP gsp example1
   print $ G.pprGrammar @Char g
   print $ G.pprAsFlat g

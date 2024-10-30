@@ -56,7 +56,7 @@ asEarley g = toEarley $ G.flatten g
 --   > parseG = parse g
 --
 --   to avoid the re-interpretatin of g.
-parse :: forall c a. (Show c, Ord c) => (forall g. (G.GrammarD c g) => g (Err a)) -> [c] -> Err [a]
+parse :: forall c a ann. (Show c, Ord c) => (forall g. (G.GrammarD c g) => g (Err ann a)) -> [c] -> Err ann [a]
 parse g = \str ->
   case E.fullParses pp str of
     (as@(_ : _), _) -> sequence as
@@ -72,7 +72,7 @@ parse g = \str ->
                 ]
           ]
   where
-    gr :: E.Grammar r (E.Prod r c c (Err a))
+    gr :: E.Grammar r (E.Prod r c c (Err ann a))
     gr = asEarley g
-    pp :: E.Parser c [c] (Err a)
+    pp :: E.Parser c [c] (Err ann a)
     pp = E.parser gr

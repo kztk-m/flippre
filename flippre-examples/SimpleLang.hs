@@ -147,7 +147,7 @@ flipprExp = do
       )
       $ return (pExp 0)
 
-gExp :: (G.GrammarD Char g) => g (Err Exp)
+gExp :: (G.GrammarD Char g) => g (Err ann Exp)
 gExp = parsingModeWith (CommentSpec (Just "--") (Just $ BlockCommentSpec "{-" "-}" True)) (flippr $ fromFunction <$> flipprExp)
 
 parseExp :: [Char] -> Exp

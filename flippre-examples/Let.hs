@@ -106,7 +106,7 @@ pExp = do
             ]
   return (\x -> spaces <> pprE (0 :: FinNE Nat4) x <> spaces)
 
-grammar :: (G.GrammarD Char g) => g (Err Exp)
+grammar :: (G.GrammarD Char g) => g (Err ann Exp)
 grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pExp)
 
 -- makeParser :: In t => (forall a e. FliPprD a e => FliPprM e (A a t -> E e D)) -> String -> Err [t]
@@ -116,7 +116,7 @@ grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/"
 pprExp :: Exp -> Doc ann
 pprExp = pprMode (flippr $ fromFunction <$> pExp)
 
-parseExp :: [Char] -> Err [Exp]
+parseExp :: [Char] -> Err ann [Exp]
 parseExp =
   Earley.parse grammar
 

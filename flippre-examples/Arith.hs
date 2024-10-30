@@ -95,7 +95,7 @@ pExp = flippr $ do
 pprExp :: Exp -> Doc ann
 pprExp = pprMode pExp
 
-parseExp :: [Char] -> Err [Exp]
+parseExp :: [Char] -> Err ann [Exp]
 parseExp =
   E.parse $ parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) pExp
 

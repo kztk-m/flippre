@@ -78,7 +78,7 @@ mergeEqI (EqI a) (EqI b)
 
 newtype PArg a = PArg {unPArg :: forall r. Rep r -> Var r a}
 
-newtype PExp e t = PExp {unPExp :: forall r. (G.Grammar G.ExChar e) => Rep r -> e (Err (Result r t))}
+newtype PExp ann e t = PExp {unPExp :: forall r. (G.Grammar G.ExChar e) => Rep r -> e (Err ann (Result r t))}
 
 type GU e a = (G.Grammar G.ExChar e) => e a
 
@@ -88,12 +88,12 @@ data Result env t where
 
 {-# ANN applySem ("HLint: ignore Avoid lambda using `infix`" :: String) #-}
 applySem ::
-  GU s (Err (Result r (a ~> t)))
+  GU s (Err ann (Result r (a ~> t)))
   -> Var r a
-  -> GU s (Err (Result r t))
+  -> GU s (Err ann (Result r t))
 applySem g v = (>>= \res -> appSem res v) <$> g
 
-appSem :: Result r (a ~> t) -> Var r a -> Err (Result r t)
+appSem :: Result r (a ~> t) -> Var r a -> Err ann (Result r t)
 appSem (RF res) v =
   mapToEnvA
     ( \env ->
@@ -123,7 +123,7 @@ mapToEnvA f (RF e0) =
 mapToEnv :: (Env env -> Env env') -> Result env t -> Result env' t
 mapToEnv f = runIdentity . mapToEnvA (Identity . f)
 
-tryUpdateEnv :: Var env a -> Maybe (EqI a) -> Env env -> Err (Env env)
+tryUpdateEnv :: Var env a -> Maybe (EqI a) -> Env env -> Err ann (Env env)
 tryUpdateEnv _ Nothing env = return env
 tryUpdateEnv k (Just v0) env =
   case PE.updateEnv mergeEqI k v0 env of
@@ -140,13 +140,13 @@ tryUpdateEnv k (Just v0) env =
   where
     pprVar v = PP.pretty (PE.toIndex v)
 
-choice :: PExp s D -> PExp s D -> PExp s D
+choice :: PExp ann s D -> PExp ann s D -> PExp ann s D
 choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
 
-choiceGen :: PExp s r -> PExp s r -> PExp s r
+choiceGen :: PExp ann s r -> PExp ann s r -> PExp ann s r
 choiceGen p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
 
-fromP :: GU s a -> PExp s D
+fromP :: GU s a -> PExp ann s D
 fromP x = PExp $ \tenv -> return (RD (PE.undeterminedEnv tenv)) <$ x
 
 -- return (RD PE.undeterminedEnv) <$ x
@@ -157,12 +157,12 @@ fromP x = PExp $ \tenv -> return (RD (PE.undeterminedEnv tenv)) <$ x
 --     Just Refl -> Just (EqI ())
 --     _         -> x
 
-instance FliPprE PArg (PExp s) where
-  fapp :: forall a t. PExp s (a ~> t) -> PArg a -> PExp s t
+instance FliPprE PArg (PExp ann s) where
+  fapp :: forall a t. PExp ann s (a ~> t) -> PArg a -> PExp ann s t
   fapp (PExp f) (PArg n) =
     PExp $ \tenv -> applySem (f tenv) (n tenv)
 
-  farg :: forall a t. (PArg a -> PExp s t) -> PExp s (a ~> t)
+  farg :: forall a t. (PArg a -> PExp ann s t) -> PExp ann s (a ~> t)
   farg f = PExp $ \tenv ->
     case PE.extendRep tenv Proxy of
       (tenva, va, _vt) ->
@@ -170,11 +170,11 @@ instance FliPprE PArg (PExp s) where
         in  fmap RF <$> unPExp (f a) tenva
 
   funpair ::
-    forall a b r.
+    forall a b r ann.
     (In a, In b) =>
     PArg (a, b)
-    -> (PArg a -> PArg b -> PExp s r)
-    -> PExp s r
+    -> (PArg a -> PArg b -> PExp ann s r)
+    -> PExp ann s r
   funpair inp f = PExp $ \tenv ->
     let (tenva, va, _) = PE.extendRep tenv Proxy
         (tenvb, vb, _) = PE.extendRep tenva Proxy
@@ -182,7 +182,7 @@ instance FliPprE PArg (PExp s) where
         argB = PArg $ \tenv' -> PE.embedVar tenvb tenv' vb
     in  (>>= updateP (unPArg inp tenv)) <$> unPExp (f argA argB) tenvb
     where
-      updateP :: Var env (a, b) -> Result (b : a : env) r -> Err (Result env r)
+      updateP :: Var env (a, b) -> Result (b : a : env) r -> Err ann (Result env r)
       updateP v = mapToEnvA $
         \eab ->
           let (b, ea) = PE.popEnv eab
@@ -199,7 +199,7 @@ instance FliPprE PArg (PExp s) where
   fcase _ [] = PExp $ const A.empty
   fcase ex0 (Branch p pk : bs) = branch ex0 p pk `choiceGen` fcase ex0 bs
     where
-      branch :: (In a) => PArg a -> PartialBij a b -> (PArg b -> PExp s r) -> PExp s r
+      branch :: (In a) => PArg a -> PartialBij a b -> (PArg b -> PExp ann s r) -> PExp ann s r
       branch inp (PartialBij _ _ finv) k =
         PExp $ \tenv ->
           let (tenvb, vb, _) = PE.extendRep tenv Proxy
@@ -211,7 +211,7 @@ instance FliPprE PArg (PExp s) where
         (b -> Maybe a)
         -> Var env a
         -> Result (b : env) r
-        -> Err (Result env r)
+        -> Err ann (Result env r)
       updateB finv v = mapToEnvA $ \eb ->
         let (b, e) = PE.popEnv eb
             a = fmap EqI $ b >>= \(EqI bb) -> finv bb
@@ -232,10 +232,10 @@ instance FliPprE PArg (PExp s) where
         q = unPExp g tenv
     in  (\x y -> join (liftA2 k x y)) <$> p <*> q
     where
-      k :: Result env D -> Result env D -> Err (Result env D)
+      k :: Result env D -> Result env D -> Err ann (Result env D)
       k (RD env) (RD env') = RD <$> merge env env'
 
-      merge :: Env env -> Env env -> Err (Env env)
+      merge :: Env env -> Env env -> Err ann (Env env)
       merge e e' =
         case PE.mergeEnv mergeEqI e e' of
           Nothing -> err "Merge failed: update is consistent."
@@ -267,9 +267,9 @@ instance FliPprE PArg (PExp s) where
 type family Map (f :: FType -> Type) as where
   Map f '[] = '[]
   Map f (a ': as) = f a ': Map f as
-instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
+instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp ann g) where
   -- newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Defs.Fs g (Defs.TransD (Compose Err (Result r)) a)}
-  newtype D (PExp g) as a = RulesG {unRulesG :: forall r. Rep r -> Defs.D g (Map (Compose Err (Result r)) as) (Err (Result r a))}
+  newtype D (PExp ann g) as a = RulesG {unRulesG :: forall r. Rep r -> Defs.D g (Map (Compose (Err ann) (Result r)) as) (Err ann (Result r a))}
 
   liftD x = RulesG $ \tenv -> Defs.liftD (unPExp x tenv)
   unliftD (RulesG x) = PExp $ \tenv -> Defs.unliftD (x tenv)
@@ -367,11 +367,11 @@ instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp g) where
 -- --                             fmap (mapToEnv $ PE.embedEnv tenv tenv') <$> p))
 -- --                   tenv)
 
-parsingModeMono :: (G.GrammarD G.ExChar g) => (forall f. (G.GrammarD G.ExChar f) => PExp f (a ~> D)) -> g (Err a)
+parsingModeMono :: (G.GrammarD G.ExChar g) => (forall f. (G.GrammarD G.ExChar f) => PExp ann f (a ~> D)) -> g (Err ann a)
 parsingModeMono e =
   G.simplify $ k <$> unPExp e PE.emptyRep
   where
-    k :: Err (Result '[] (a ~> D)) -> Err a
+    k :: Err ann (Result '[] (a ~> D)) -> Err ann a
     k (Fail s) = err $ PP.vsep ["Inverse computation fails: ", s]
     k (Ok a) = case a of
       RF (RD env) ->
@@ -498,7 +498,7 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
 --   where
 --     gsp = G.finalize $ return $ () <$ (foldr1 (<|>) $ map G.text [" ", "\n", "\r", "\t"])
 
-parsingMode :: (G.GrammarD Char g) => FliPpr (a ~> D) -> g (Err a)
+parsingMode :: (G.GrammarD Char g) => FliPpr (a ~> D) -> g (Err ann a)
 parsingMode = parsingModeWith spec
   where
     spec = CommentSpec{lcSpec = Nothing, bcSpec = Nothing}
@@ -506,15 +506,15 @@ parsingMode = parsingModeWith spec
 -- parsingModeWith :: In a => CommentSpec -> FliPpr (a ~> D) -> G.Grammar Char (Err a)
 -- parsingModeWith = parsingModeSP . fromCommentSpec
 
-parsingModeWith :: forall g a. (G.GrammarD Char g) => CommentSpec -> FliPpr (a ~> D) -> g (Err a)
+parsingModeWith :: forall g a ann. (G.GrammarD Char g) => CommentSpec -> FliPpr (a ~> D) -> g (Err ann a)
 parsingModeWith spec (FliPpr e) =
-  let g0 :: forall g'. (G.GrammarD G.ExChar g') => g' (Err a)
+  let g0 :: forall g'. (G.GrammarD G.ExChar g') => g' (Err ann a)
       g0 = parsingModeMono e
-      g1 :: forall g'. (G.GrammarD Char g') => g' (Err a)
+      g1 :: forall g'. (G.GrammarD Char g') => g' (Err ann a)
       g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
   in  trace (show $ PP.fillSep [G.pprAsFlat g0, fromString "---------", G.pprAsFlat g1]) g1
 
-parsingModeSP :: forall g a. (G.GrammarD Char g) => (forall g'. (G.GrammarD Char g') => g' ()) -> FliPpr (a ~> D) -> g (Err a)
+parsingModeSP :: forall g a ann. (G.GrammarD Char g) => (forall g'. (G.GrammarD Char g') => g' ()) -> FliPpr (a ~> D) -> g (Err ann a)
 parsingModeSP gsp (FliPpr e) =
   G.withSpace gsp (parsingModeMono e)
 
