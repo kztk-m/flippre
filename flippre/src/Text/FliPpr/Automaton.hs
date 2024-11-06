@@ -222,8 +222,10 @@ minimizeImpl dfa =
             in if maximum part < maximum part' then go part' else part'
 
 canonizeDst :: (Ord c, Enum c, Ord q) => [(RSet c, q)] -> [(RSet c, q)]
-canonizeDst = L.sortBy (compare `on` (RS.findMin . fst)) . map swap . M.toList . M.fromListWith RS.union . map swap
+canonizeDst = L.sortBy (compare `on` (RS.findMin . fst)) . filter (not . RS.null . fst) . unionsTransToTheSameDst
     where
+        unionsTransToTheSameDst :: (Ord c, Enum c, Ord q) => [(RSet c, q)] -> [(RSet c, q)]
+        unionsTransToTheSameDst = map swap . M.toList . M.fromListWith RS.union . map swap
         swap (a, b) = (b, a)
 
 determinizeImpl :: forall c q. (Ord c, Enum c, Ord q) => NFANE c q -> DFAImpl c (S.Set q)
