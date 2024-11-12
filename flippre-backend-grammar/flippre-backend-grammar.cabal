@@ -1,6 +1,6 @@
 cabal-version:       2.2
 name:                flippre-backend-grammar 
-version:             0.2.1
+version:             0.2.2
 synopsis:            FliPpr, embedded: Backend for CFGs
 -- description:
 homepage:            https://github.com/kztk-m/flippre

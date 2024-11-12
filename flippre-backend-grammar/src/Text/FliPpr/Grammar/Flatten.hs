@@ -3,16 +3,15 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | This module transforms grammars into flattened form.
 -- The transformation consists of two steps:
@@ -22,16 +21,15 @@
 module Text.FliPpr.Grammar.Flatten (flatten, freeze) where
 
 import Control.Applicative (Alternative (..), Const (..))
-import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 
 import Data.RangeSet.List (RSet)
 
 import Defs
-import Unembedding as U
-import Unembedding.Env (Env (..), Ix (..))
+import Unembedding (Dim' (..), EnvI, LiftVariables (..), Variables (..))
+import qualified Unembedding as U
 
-import Control.Category
+import Control.Category (Category (..))
 import Prelude hiding (id, (.))
 import qualified Prelude (id, (.))
 
@@ -124,136 +122,30 @@ data FreeGrammarD c env as r where
 instance (Show c, env ~ '[]) => Pretty (FreeGrammarD c env as r) where
   pretty = prettyD 0 ENil
 
-data UType = ExpT Type | DeclT [Type] Type
+newtype WrapD c env asr = WrapD (FreeGrammarD c env (Fst asr) (Snd asr))
 
--- | Witness that @as@ must has the form of @[ExpT a1,..., ExpT an]@, where @as' = [a1,...,an]@.
-data ComesFromExpT (as :: [UType]) (as' :: [Type]) where
-  NilOk :: ComesFromExpT '[] '[]
-  ConsOk :: ComesFromExpT as as' -> ComesFromExpT (ExpT a : as) (a : as')
+type family Fst (p :: (k1, k2)) :: k1 where
+  Fst '(a, b) = a
 
-data UExp c (env :: [Type]) (u :: UType) where
-  FromE :: FreeGrammarExp c env a -> UExp c env (ExpT a)
-  FromD :: FreeGrammarD c env as r -> UExp c env (DeclT as r)
+type family Snd (p :: (k1, k2)) :: k2 where
+  Snd '(a, b) = b
 
-unFromE :: UExp c env (ExpT a) -> FreeGrammarExp c env a
-unFromE (FromE e) = e
-
-unFromD :: UExp c env (DeclT as r) -> FreeGrammarD c env as r
-unFromD (FromD d) = d
-
-newtype USem c uenv u
-  = USem {unUSem :: forall env. ComesFromExpT uenv env -> UExp c env u}
-
-instance LiftVariables (USem c) where
-  newtype Var (USem c) env a = VarUSem (Ix env a)
+instance LiftVariables (FreeGrammarExp c) where
+  newtype Var (FreeGrammarExp c) env a = VarFE (Ix env a)
     deriving newtype Variables
 
-  liftVar (VarUSem x0) = USem $ \wit -> conv wit x0 (FromE . FNT)
-    where
-      conv ::
-        ComesFromExpT uenv env
-        -> Ix uenv a
-        -> (forall b. (a ~ ExpT b) => Ix env b -> r)
-        -> r
-      conv w (IxS x) = case w of
-        ConsOk w' -> \k -> conv w' x $ \x' -> k (IxS x')
-      conv w IxZ = case w of
-        ConsOk _ -> \k -> k IxZ
-
--- These functions are costly.
--- TODO: Avoid them as possible by providing FromSymb, Applicative, Alternative instances fo
--- EnvI (USem c) instead of EnvI (FreeGrammarExp c).
-liftExp :: EnvI (FreeGrammarExp c) a -> EnvI (USem c) (ExpT a)
-liftExp (EnvI f) = EnvI $ \tenv -> USem $ \wit -> FromE $ f (convTEnv tenv wit)
-  where
-    convTEnv :: TEnv as -> ComesFromExpT as as' -> TEnv as'
-    convTEnv ENil NilOk = ENil
-    convTEnv (ECons _ ps) (ConsOk w) = ECons Proxy (convTEnv ps w)
-
-unliftExp :: EnvI (USem c) (ExpT a) -> EnvI (FreeGrammarExp c) a
-unliftExp (EnvI f) = EnvI $ \tenv -> genTEnv tenv $ \wit tenv' ->
-  unFromE (unUSem (f tenv') wit)
-  where
-    genTEnv :: TEnv as -> (forall as'. ComesFromExpT as' as -> TEnv as' -> r) -> r
-    genTEnv ENil = \k -> k NilOk ENil
-    genTEnv w0 = \k -> case w0 of
-      ECons _ w ->
-        genTEnv w $ \wit tenv -> k (ConsOk wit) (ECons Proxy tenv)
-
--- newtype EnvIT c u = EnvIT (forall a. (u ~ ExpT a) => EnvI (USem c) u)
-
--- toEnvIT :: EnvI (USem c) (ExpT a) -> EnvIT c (ExpT a)
--- toEnvIT = EnvIT
-
--- instance Defs (EnvIT c) where
---   newtype D (EnvIT c) us u
---     = DEnvI
---     { runDEnvI ::
---         forall as r.
---         (ExpT r ~ u) =>
---         ComesFromExpT us as
---         -> EnvI (USem c) (DeclT as r)
---     }
-
---   consD (EnvIT e) (DEnvI d) = DEnvI $ \(ConsOk dwit) -> U.liftFO2 consT' e (d dwit)
---     where
---       consT' :: USem c env (ExpT a) -> USem c env (DeclT as r) -> USem c env (DeclT (a : as) r)
---       consT' (USem fe) (USem fd) = USem $ \wit ->
---         FromD (ConsT (unFromE $ fe wit) (unFromD $ fd wit))
-
---   liftD (EnvIT e) = DEnvI $ \(NilOk) -> U.liftFO1 liftT' e
---     where
---       liftT' :: USem c env (ExpT a) -> USem c env (DeclT '[] a)
---       liftT' (USem fe) = USem $ \wit -> FromD $ LiftT (unFromE $ fe wit)
-
---   unliftD (DEnvI d) = EnvIT $ U.liftFO1 unliftT' (d NilOk)
---     where
---       unliftT' :: USem c env (DeclT '[] r) -> USem c env (ExpT r)
---       unliftT' (USem fd) = USem $ \wit ->
---         let FromD d1 = fd wit
---         in  FromE $ UnliftT d1
-
---   letrD :: forall a as r. (EnvIT c a -> D (EnvIT c) (a : as) r) -> D (EnvIT c) as r
---   letrD h = DEnvI $ \dwit ->
---     U.liftSOn (ol1 :. End) letrT' (h' dwit)
---     where
---       h' :: (r ~ ExpT r1) => ComesFromExpT as as1 -> EnvI (USem c) (ExpT a0) -> EnvI (USem c) (DeclT (a0 : as1) r1)
---       h' dwit x = runDEnvI (h (toEnvIT x)) (ConsOk dwit)
-
---       letrT' :: USem c (ExpT a' : env) (DeclT (a' : as') r') -> USem c env (DeclT as' r')
---       letrT' (USem fd) = USem $ \wit ->
---         let FromD d1 = fd (ConsOk wit)
---         in  FromD $ LetrT d1
+  liftVar (VarFE ix) = FNT ix
 
 instance Defs (EnvI (FreeGrammarExp c)) where
-  newtype D (EnvI (FreeGrammarExp c)) as r = DD {runDD :: EnvI (USem c) (DeclT as r)}
+  newtype D (EnvI (FreeGrammarExp c)) as r = DD {runDD :: EnvI (WrapD c) '(as, r)}
 
-  consD e (DD d) = DD $ U.liftFO2 consT' (liftExp e) d
-    where
-      consT' :: USem c env (ExpT a) -> USem c env (DeclT as r) -> USem c env (DeclT (a : as) r)
-      consT' (USem fe) (USem fd) = USem $ \wit ->
-        FromD (ConsT (unFromE $ fe wit) (unFromD $ fd wit))
+  consD e0 (DD d0) = DD $ U.liftFO2' (\e (WrapD d) -> WrapD $ ConsT e d) e0 d0
 
-  liftD e = DD $ U.liftFO1 liftT' (liftExp e)
-    where
-      liftT' :: USem c env (ExpT a) -> USem c env (DeclT '[] a)
-      liftT' (USem fe) = USem $ \wit ->
-        FromD $ LiftT (unFromE $ fe wit)
+  liftD = DD . U.liftFO1' (WrapD . LiftT)
 
-  unliftD (DD d) = unliftExp $ U.liftFO1 unliftT' d
-    where
-      unliftT' :: USem c env (DeclT '[] r) -> USem c env (ExpT r)
-      unliftT' (USem fd) = USem $ \wit ->
-        let FromD d1 = fd wit
-        in  FromE $ UnliftT d1
+  unliftD = U.liftFO1' (\(WrapD d) -> UnliftT d) . runDD
 
-  letrD h = DD $ U.liftSOn (ol1 :. End) letrT' $ \x ->
-    runDD (h (unliftExp x))
-    where
-      letrT' :: USem c (ExpT a : env) (DeclT (a : as) r) -> USem c env (DeclT as r)
-      letrT' (USem fd) = USem $ \wit ->
-        let FromD d1 = fd (ConsOk wit)
-        in  FromD $ LetrT d1
+  letrD h = DD $ U.liftSOn' (U.ol1 ::. U.End') Proxy (\(WrapD d) -> WrapD (LetrT d)) (runDD . h)
 
 instance FromSymb c (EnvI (FreeGrammarExp c)) where
   symb c = U.liftFO0 (FSymb c)
@@ -275,10 +167,11 @@ instance Alternative (EnvI (FreeGrammarExp c)) where
 freeze ::
   (forall e. (GrammarD c e) => e a)
   -> FreeGrammarExp c '[] a
-freeze h =
-  let USem x = U.runClose (liftExp h)
-      FromE r = x NilOk
-  in  r
+freeze = U.runClose
+
+-- let USem x = U.runClose (liftExp h)
+--     FromE r = x NilOk
+-- in  r
 
 -- >>> pretty $ freeze $ symb 'a'
 -- symb 'a'
