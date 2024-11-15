@@ -131,10 +131,9 @@ type family Snd (p :: (k1, k2)) :: k2 where
   Snd '(a, b) = b
 
 instance LiftVariables (FreeGrammarExp c) where
-  newtype Var (FreeGrammarExp c) env a = VarFE (Ix env a)
-    deriving newtype Variables
+  type Var (FreeGrammarExp c) = Ix
 
-  liftVar (VarFE ix) = FNT ix
+  liftVar = FNT
 
 instance Defs (EnvI (FreeGrammarExp c)) where
   newtype D (EnvI (FreeGrammarExp c)) as r = DD {runDD :: EnvI (WrapD c) '(as, r)}

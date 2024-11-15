@@ -10,7 +10,9 @@ packages:
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-extra-deps: []
+extra-deps: 
+- git: https://github.com/kztk-m/EbU.git
+  commit: 90c6ff890cca3d4836fa6c027aeb6f284f56ed84
 
 # Override default flag values for local packages and extra-deps
 flags: {}
