@@ -128,7 +128,7 @@ pprExp = do
                           let argList a = case_ a [ unNil $ text ""
                                                   , unCons $ \x xs -> pExp x <> case_ xs
                                                       [ unNil $ text ""
-                                                      , unCons $ \_ _ -> text "," <+>. argList xs ]
+                                                      , unCons $ \_ _ -> text "," <+>. argList xs ] -- lookahead to see if comma is needed
                                                   ]
                           in identExp f <> text "(" <> argList args <> text ")"
                        ]
