@@ -5,6 +5,7 @@
 
 -- To suppress warnings caused by TH code.
 {-# LANGUAGE MonoLocalBinds            #-}
+{-# LANGUAGE RebindableSyntax          #-}
 
 
 import           Prelude
@@ -13,7 +14,11 @@ import           Numeric (showHex, showOct)
 import           Text.FliPpr
 import           Text.FliPpr.Grammar.Driver.Earley as E
 import qualified Text.FliPpr.Automaton     as AM
-import Prettyprinter (Doc, pretty)
+import Prettyprinter (Doc)
+
+-- necessary for recursions within do blocks
+mfix :: (Arg (E f) a) => (a -> FliPprM f a) -> FliPprM f a
+mfix = mfixF
 
 
 -- Code for defining the automata for int literals
@@ -95,7 +100,7 @@ pprFloat = do
   where
     atof = Branch (PartialBij "atof" (Just . show) (Just . readFloat))
 
-data Literal = IntL IntLit | FloatL FloatLit -- missing: Char, String
+data Literal = IntL IntLit | FloatL FloatLit -- TODO missing: Char, String
              deriving (Show, Eq)
 
 $(mkUn ''Literal)
@@ -110,29 +115,166 @@ pprLit = do
 
 data Exp = LitExp Literal | IdentExp String | FunctionCall String [Exp]
           deriving (Show, Eq)
-
 $(mkUn ''Exp)
 
+
+
+
+-- type StructDeclList = [(TypeSpecifierQualifier, StructDecl)]
+
+data TypeSpecifier = TVoid | TChar | TShort | TInt | TLong | TFloat | TDouble | TSigned | TUnsigned
+                   -- | TStruct String StructDeclList | TAnonStruct StructDeclList -- | TUnion String StructDeclList
+                   -- | TEnum String
+                   | TName String
+                   deriving (Show, Eq)
+
+data TypeQualifier = TConst | TVolatile
+                    deriving (Show, Eq)
+
+
+$(mkUn ''TypeSpecifier)
+$(mkUn ''TypeQualifier)
+
+data Decl = DPointer Pointer
+          | DirectDecl DirectDecl
+          deriving (Show, Eq)
+
+data DirectDecl = DIdent String | DArray DirectDecl Exp | DFunction DirectDecl [String] -- | DProto  more stuff with types here
+                deriving (Show, Eq)
+
+data Pointer = Pointer [TypeQualifier] Decl
+              deriving (Show, Eq)
+
+$(mkUn ''Decl)
+$(mkUn ''DirectDecl)
+$(mkUn ''Pointer)
+
+pprTypeQualifier :: FliPprD a e => FliPprM e (A a TypeQualifier -> E e D)
+pprTypeQualifier = do
+  const <- define $ text "const"
+  volatile <- define $ text "volatile"
+  return $ \x -> case_ x [ unTConst const
+                         , unTVolatile volatile
+                         ]
+
+
+list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+list p = do 
+  rec list' <- define $ \xs -> case_ xs
+                           [ unNil $ text ""
+                           , unCons $ \t ts -> case_ ts [ unNil $ p t
+                                            , unCons $ \_ _ -> p t <+> list' ts
+                                            ]
+                           ]
+  return list'
+
+
+
+commaSep :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+commaSep p = do
+  rec commaSep' <- define $ \xs -> case_ xs
+                           [ unCons $ \t ts -> case_ ts [ unNil $ p t
+                                                        , unCons $ \_ _ -> p t <> text "," <+>. commaSep' ts
+                                                        ]
+                           ]
+  return $ \xs -> case_ xs [ unNil $ text ""
+                           , unCons $ \_ _ -> commaSep' xs
+                           ]
+
+pprDecl :: FliPprD a e => FliPprM e (A a Decl -> E e D)
+pprDecl = do
+  pExp <- pprExp
+  pTypeQualifier <- pprTypeQualifier
+  typeQualifierList <- list pTypeQualifier
+  identList <- commaSep (`textAs` ident)
+  rec pDirectDecl <- define $ \x -> case_ x [ unDIdent $ \i -> textAs i ident
+                                            , unDArray $ \d e -> pDirectDecl d <> text "[" <> pExp e <> text "]"
+                                            , unDFunction $ \d args -> pDirectDecl d <> text "(" <> identList args <> text ")"
+                                            ]
+      pointer <- define $ \p ->
+                             case_ p [ unPointer $ \qs innerD -> 
+                                         case_ qs [
+                                             unCons $ \_ _ -> (text "*" <> typeQualifierList qs <+> pDecl innerD)
+                                                            <? (typeQualifierList qs <+> pDecl innerD <> text "[]")
+                                           , unNil $ (text "*" <> pDecl innerD)
+                                                     <? (pDecl innerD <> text "[]")
+                                           ]
+                                      ]
+      pDecl <- define $ \x -> case_ x [ unDirectDecl $ \d -> pDirectDecl d
+                                      , unDPointer pointer
+                                      ]
+  return pDecl
+
+expDecl :: Decl
+expDecl = DPointer (Pointer [TConst, TVolatile] (DPointer $ Pointer [TConst] (DirectDecl $ DArray (DIdent "x") (LitExp $ IntL $ Int 42))))
+
+pprTypeSpecQualList :: FliPprD a e => FliPprM e (A a [TypeSpecifier] -> E e D)
+pprTypeSpecQualList = do
+  void <- define $ text "void"
+  char <- define $ text "char"
+  short <- define $ text "short"
+  int <- define $ text "int"
+  long <- define $ text "long"
+  float <- define $ text "float"
+  double <- define $ text "double"
+  signed <- define $ text "signed"
+  unsigned <- define $ text "unsigned"
+  pExp <- pprExp
+  rec pTypeSpecQualList <- define $ \x -> case_ x [ unNil $ text ""
+                                                  , unCons $ \t ts -> case_ ts [ unNil $ pType t
+                                                                               , unCons $ \_ _ -> pType t <+> pTypeSpecQualList ts]
+                                                  ]
+      {-structDecl <- define $ \t -> 
+      structDeclList <- define $ \x -> case_ x [ unNil $ text ""
+                                               , unCons $ \t ts -> case_ ts [ unNil $ structDecl t
+                                                                           , unCons $ \_ _ -> structDecl <> line <> structDeclList ts
+                                                                           ]
+                                               ]-}
+      --struct <- define $ \name decls -> text "struct" <+>. textAs name ident <+>. text "{" <+>. structDeclList decls <+> text "}"
+      --anonStruct <- define $ \decls -> text "struct" <+>. text "{" <+>. structDeclList decls <+>. text "}"
+      pType <- define $ \x -> case_ x [ unTVoid void
+                         , unTChar char
+                         , unTShort short
+                         , unTInt int
+                         , unTLong long
+                         , unTFloat float
+                         , unTDouble double
+                         , unTSigned signed
+                         , unTUnsigned unsigned
+                         --, unTStruct $ \n decls -> struct n decls
+                         --, unTAnonStruct $ \decls -> anonStruct decls
+                         , unTName $ \n -> textAs n ident
+                         ]
+  return pTypeSpecQualList
+
+
+
+keywords :: [String]
+keywords = ["void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "const", "volatile"]
 ident :: AM.DFA Char
-ident = AM.unions [AM.range 'A' 'z', AM.singleton '_']
-      <> AM.star (AM.unions [AM.range 'A' 'z', digit, AM.singleton '_'])
+ident = (AM.unions [AM.range 'a' 'z', AM.range 'A' 'Z', AM.singleton '_']
+      <> AM.star (AM.unions [AM.range 'a' 'z', AM.range 'A' 'Z', digit, AM.singleton '_']))
+      `AM.difference`
+      AM.unions (map AM.string keywords)
 
 
-pprExp :: FliPprD a e => FliPprM e (A a Exp -> E e D)
+pprExp :: (FliPprD a e) => FliPprM e (A a Exp -> E e D)
 pprExp = do
   lit <- pprLit
   identExp <- define $ \x -> textAs x ident
-  let pExp l = case_ l [ unLitExp lit
-                       , unIdentExp identExp
-                       , unFunctionCall $ \f args ->
-                          let argList a = case_ a [ unNil $ text ""
-                                                  , unCons $ \x xs -> pExp x <> case_ xs
-                                                      [ unNil $ text ""
-                                                      , unCons $ \_ _ -> text "," <+>. argList xs ] -- lookahead to see if comma is needed
-                                                  ]
-                          in identExp f <> text "(" <> argList args <> text ")"
-                       ]
+  rec argList <- define $ \a -> case_ a [ unCons $ \x xs -> pExp x <> case_ xs
+                                          [ unNil $ text ""
+                                          , unCons $ \_ _ -> text "," <+>. argList xs ]
+                                        ]
+      pExp <- define $ \l -> case_ l [ unLitExp lit
+                                     , unIdentExp identExp
+                                     , unFunctionCall $ \f args -> identExp f <#> text "("
+                                                      <> case_ args [ unNil $ text "" -- TODO: arbitrary whitespace
+                                                                    , unCons $ \_ _ -> argList args
+                                                                    ] <> text ")"
+                                     ]
   return pExp
+
 
 exp1 :: Exp
 exp1 = FunctionCall "f" [LitExp $ IntL $ Int 42, LitExp $ FloatL $ Float 3.14, FunctionCall "g" []]
@@ -142,3 +284,20 @@ pprProgram = pprMode (flippr $ fromFunction <$> pprExp)
 
 parseProgram :: [Char] -> Err ann [Exp]
 parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprExp)
+
+
+pprProgram' :: Decl -> Doc ann
+pprProgram' = pprMode (flippr $ fromFunction <$> pprDecl)
+
+parseProgram' :: [Char] -> Err ann [Decl]
+parseProgram' = E.parse $ parsingMode (flippr $ fromFunction <$> pprDecl)
+
+
+{-
+pprProgram' :: [TypeSpecifierQualifier] -> Doc ann
+pprProgram' = pprMode (flippr $ fromFunction <$> pprTypeSpecQualList)
+
+
+parseProgram' :: [Char] -> Err ann [[TypeSpecifierQualifier]]
+parseProgram' = E.parse $ parsingMode (flippr $ fromFunction <$> pprTypeSpecQualList)
+-}

@@ -10,7 +10,7 @@ module Text.FliPpr.Automaton
         DFA, DFAImpl(..), NFA(..), NFANE(..), Regex(..),
 
         -- * Derived operators
-        range, plus, intersections, unions,
+        range, plus, intersections, unions, string,
     )
     where
 
@@ -373,6 +373,12 @@ unions = foldr union empty
 -- | The intersection of given sets.
 intersections :: Regex c r => [r] -> r
 intersections = foldr intersection full
+
+-- | Regex that matches a single letter string.
+string :: Regex c r => [c] -> r
+string []     = empty
+string [x]    = singleton x
+string (x:xs) = singleton x <> string xs
 
 emptyNFA :: Bounded c => NFA c Word
 emptyNFA = NFA (NFANE S.empty S.empty M.empty) M.empty
