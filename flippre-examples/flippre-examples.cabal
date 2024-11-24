@@ -78,5 +78,7 @@ executable simple-lang
 
 executable c
     import: warnings, deps
-    main-is: C.hs
+    hs-source-dirs: c
+    main-is: c/C.hs
     build-depends: prettyprinter
+    other-modules: Helper, Literals
