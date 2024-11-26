@@ -14,8 +14,7 @@ import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Driver.Earley as Earley
 import Prelude
 
-mfix :: (Arg (E f) a) => (a -> FliPprM f a) -> FliPprM f a
-mfix = mfixF
+import Text.FliPpr.Mfix (mfix) -- for RebindableSyntax (used with RecursiveDo)
 
 example1 :: FliPpr ([Bool] ~> D)
 example1 = flippr $ do

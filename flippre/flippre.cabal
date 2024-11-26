@@ -40,6 +40,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     
     Text.FliPpr, 
+    Text.FliPpr.Mfix, 
     Text.FliPpr.Doc, 
     Text.FliPpr.TH, 
     Text.FliPpr.Internal.Type, 

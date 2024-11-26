@@ -19,6 +19,8 @@ import Data.Word
 
 import Prettyprinter (Doc)
 
+import Text.FliPpr.Mfix (mfix) -- for RebindableSyntax (used with RecursiveDo)
+
 {-# ANN module "HLint: ignore Avoid lambda using `infix`" #-}
 {-# ANN module "HLint: ignore Use section" #-}
 
@@ -82,8 +84,6 @@ pExp = flippr $ do
 
   return $ fromFunction (ppr (0 :: Word8))
   where
-    mfix = mfixF
-
     lt10 :: (FliPprE arg exp) => (A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
     lt10 f = Branch (PartialBij "lt10" (\x -> if x < 10 then Just x else Nothing) Just) f
 

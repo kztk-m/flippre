@@ -22,10 +22,9 @@ import qualified Text.FliPpr.Automaton as Automaton
 
 import Prettyprinter (Doc)
 
--- import           Debug.Trace
+import Text.FliPpr.Mfix -- for RebindableSyntax (used together with RecursiveDo)
 
-mfix :: (Arg (E f) a) => (a -> FliPprM f a) -> FliPprM f a
-mfix = mfixF
+-- import           Debug.Trace
 
 ifThenElse :: Bool -> p -> p -> p
 ifThenElse True t _ = t
