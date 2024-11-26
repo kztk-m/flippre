@@ -71,7 +71,7 @@ import           Data.Semigroup       (Semigroup (..))
 import qualified Data.Type.Nat        as F
 import           Data.Typeable        (Proxy (..))
 
-import           Prettyprinter        as D
+import qualified Prettyprinter        as D
 
 import           Defs                 (Defs)
 import qualified Defs
@@ -544,7 +544,7 @@ instance (D ~ t, FliPprE arg exp) => IsString (E exp t) where
 instance (D ~ t, FliPprE arg exp) => DD.DocLike (E exp t) where
   empty = E fempty
 
-  (<+>) x y = x `hardcat` text " " `hardcat` spaces `hardcat` y
+  (<+>) x y = x `hardcat` space `hardcat` spaces `hardcat` y
 
   line = E fline
   linebreak = E flinebreak
