@@ -112,20 +112,20 @@ space = void (symb Space)
 spaces :: (Grammar ExChar e) => e ()
 spaces = void (symb Spaces)
 
-newtype ThawSpace g a = ThawSpace {runThawSpace :: g ExChar -> g ExChar -> g a}
+newtype ThawSpaceSem g a = ThawSpace {runThawSpace :: g ExChar -> g ExChar -> g a}
 
-instance (Functor g) => Functor (ThawSpace g) where
+instance (Functor g) => Functor (ThawSpaceSem g) where
   fmap f x = ThawSpace $ \sp sps -> fmap f (runThawSpace x sp sps)
   {-# INLINE fmap #-}
 
-instance (Applicative g) => Applicative (ThawSpace g) where
+instance (Applicative g) => Applicative (ThawSpaceSem g) where
   pure a = ThawSpace $ \_ _ -> pure a
   {-# INLINE pure #-}
 
   f <*> g = ThawSpace $ \sp sps -> runThawSpace f sp sps <*> runThawSpace g sp sps
   {-# INLINE (<*>) #-}
 
-instance (Defs g, Alternative g) => Alternative (ThawSpace g) where
+instance (Defs g, Alternative g) => Alternative (ThawSpaceSem g) where
   empty = ThawSpace $ \_ _ -> empty
   {-# INLINE empty #-}
 
@@ -137,7 +137,7 @@ instance (Defs g, Alternative g) => Alternative (ThawSpace g) where
   some = Defs.someD
   {-# INLINE some #-}
 
-instance (Alternative g, FromSymb Char g) => FromSymb ExChar (ThawSpace g) where
+instance (Alternative g, FromSymb Char g) => FromSymb ExChar (ThawSpaceSem g) where
   symb Space = ThawSpace $ \sp _ -> sp
   symb Spaces = ThawSpace $ \_ sps -> sps
   symb (NormalChar c) = ThawSpace $ \_ _ -> NormalChar <$> symb c
@@ -160,8 +160,8 @@ instance (Alternative g, FromSymb Char g) => FromSymb ExChar (ThawSpace g) where
 
 --  constantResult f a = ThawSpace $ \sp sps -> constantResult f (runThawSpace a sp sps)
 
-instance (Defs g) => Defs (ThawSpace g) where
-  newtype D (ThawSpace g) as a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> D g as a}
+instance (Defs g) => Defs (ThawSpaceSem g) where
+  newtype D (ThawSpaceSem g) as a = ThawSpaces {runThawSpaces :: g ExChar -> g ExChar -> D g as a}
 
   liftD a = ThawSpaces $ \sp sps -> liftD (runThawSpace a sp sps)
   {-# INLINE liftD #-}
@@ -176,7 +176,7 @@ instance (Defs g) => Defs (ThawSpace g) where
     letrD $ \a -> runThawSpaces (k $ ThawSpace $ \_ _ -> a) sp sps
   {-# INLINE letrD #-}
 
-thawSpace :: (Defs exp, Alternative exp) => exp () -> ThawSpace exp a -> exp a
+thawSpace :: (Defs exp, Alternative exp) => exp () -> ThawSpaceSem exp a -> exp a
 thawSpace sp0 g = local $ do
   sp <- share (Space <$ sp0)
   sps <- share (Spaces <$ many sp)
