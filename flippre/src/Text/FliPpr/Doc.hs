@@ -1,39 +1,39 @@
-{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -- | This module implements Wadler's pretty-printing combinators.
 --   We do not use the existing well-designed libraries because we want to make
 --   pretty-printing combinators class methods, so that FliPpr programs can use
 --   the combinators, with different meanings in forward and backward execution.
-module Text.FliPpr.Doc
-  ( DocLike (..),
-    hang,
-    foldDoc,
-    hcat,
-    vcat,
-    cat,
-    hsep,
-    vsep,
-    sep,
-    (<$$>),
-    ($$),
-    (</>),
-    (//),
-    punctuate,
-    (<>),
-    parens,
-    braces,
-    brackets,
-    parensIf,
-  )
+module Text.FliPpr.Doc (
+  DocLike (..),
+  hang,
+  foldDoc,
+  hcat,
+  vcat,
+  cat,
+  hsep,
+  vsep,
+  sep,
+  (<$$>),
+  ($$),
+  (</>),
+  (//),
+  punctuate,
+  (<>),
+  parens,
+  braces,
+  brackets,
+  parensIf,
+)
 where
 
-import           Control.Arrow  (second)
-import           Data.Coerce    (coerce)
-import           Data.Semigroup ()
+import Control.Arrow (second)
+import Data.Coerce (coerce)
+import Data.Semigroup ()
 
-import           Data.String    (IsString (..))
-import qualified Prettyprinter  as PP
+import Data.String (IsString (..))
+import qualified Prettyprinter as PP
 
 -- -- | Though we define 'Precedence' as 'Rational', FliPpr assumes that the set of precedences is finite in order to generate finite CFGs.
 -- type Precedence = Rational
@@ -71,12 +71,12 @@ import qualified Prettyprinter  as PP
 -- instance Pretty Double where ppr = text . show
 
 -- | A type class that provides pretty-printing combinators.
-class (Semigroup d, Monoid d, IsString d) => DocLike d where
+class (Semigroup d, IsString d) => DocLike d where
   text :: String -> d
   text = fromString
 
   empty :: d
-  empty = mempty
+  empty = text ""
 
   (<+>) :: d -> d -> d
   x <+> y = x <> text " " <> y
@@ -101,19 +101,19 @@ class (Semigroup d, Monoid d, IsString d) => DocLike d where
 
 -- will be ignored in parsing
 
-hang :: DocLike d => Int -> d -> d -> d
+hang :: (DocLike d) => Int -> d -> d -> d
 hang n x y = group (nest n (x $$ y))
 
-($$) :: DocLike d => d -> d -> d
+($$) :: (DocLike d) => d -> d -> d
 x $$ y = align (x <> linebreak <> y)
 
-(<$$>) :: DocLike d => d -> d -> d
+(<$$>) :: (DocLike d) => d -> d -> d
 x <$$> y = x <> linebreak <> y
 
-(</>) :: DocLike d => d -> d -> d
+(</>) :: (DocLike d) => d -> d -> d
 x </> y = x <> line <> y
 
-(//) :: DocLike d => d -> d -> d
+(//) :: (DocLike d) => d -> d -> d
 x // y = align (x <> line <> y)
 
 infixr 5 <$$>
@@ -124,45 +124,45 @@ infixr 5 </>
 
 infixr 5 //
 
-foldDoc :: DocLike d => (d -> d -> d) -> [d] -> d
-foldDoc _ []       = empty
-foldDoc _ [d]      = d
+foldDoc :: (DocLike d) => (d -> d -> d) -> [d] -> d
+foldDoc _ [] = empty
+foldDoc _ [d] = d
 foldDoc f (d : ds) = f d (foldDoc f ds)
 
-hcat :: DocLike d => [d] -> d
+hcat :: (DocLike d) => [d] -> d
 hcat = foldDoc (<>)
 
-vcat :: DocLike d => [d] -> d
+vcat :: (DocLike d) => [d] -> d
 vcat = foldDoc ($$)
 
-cat :: DocLike d => [d] -> d
+cat :: (DocLike d) => [d] -> d
 cat = group . vcat
 
-vsep :: DocLike d => [d] -> d
+vsep :: (DocLike d) => [d] -> d
 vsep = foldDoc (</>)
 
-hsep :: DocLike d => [d] -> d
+hsep :: (DocLike d) => [d] -> d
 hsep = foldDoc (<+>)
 
-sep :: DocLike d => [d] -> d
+sep :: (DocLike d) => [d] -> d
 sep = group . vsep
 
-parens :: DocLike d => d -> d
+parens :: (DocLike d) => d -> d
 parens d = text "(" <> d <> text ")"
 
-brackets :: DocLike d => d -> d
+brackets :: (DocLike d) => d -> d
 brackets d = text "[" <> d <> text "]"
 
-braces :: DocLike d => d -> d
+braces :: (DocLike d) => d -> d
 braces d = text "{" <> d <> text "}"
 
-parensIf :: DocLike d => Bool -> d -> d
-parensIf True  = parens
+parensIf :: (DocLike d) => Bool -> d -> d
+parensIf True = parens
 parensIf False = id
 
-punctuate :: DocLike d => d -> [d] -> d
-punctuate _op []      = empty
-punctuate _op [d]     = d
+punctuate :: (DocLike d) => d -> [d] -> d
+punctuate _op [] = empty
+punctuate _op [d] = d
 punctuate op (d : ds) = d <> op <> punctuate op ds
 
 instance DocLike (PP.Doc ann) where
@@ -173,9 +173,6 @@ instance DocLike (PP.Doc ann) where
 
   nest = PP.nest
   group = PP.group
-
-
-
 
 -- class DocLike d => Renderable d where
 --   render :: Width -> d -> String

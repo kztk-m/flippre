@@ -566,12 +566,6 @@ infixr 5 <#>
 instance (D ~ t, FliPprE arg exp) => Semigroup (E exp t) where
   (<>) x y = x `hardcat` (spaces `hardcat` y)
 
--- FIXME: This instance does not satisify the laws. Maybe, we should remove Monoid from the
--- superclass of DocLike.
-instance (D ~ t, FliPprE arg exp) => Monoid (E exp t) where
-  mempty = spaces
-  mappend = (Data.Semigroup.<>)
-
 instance (D ~ t, FliPprE arg exp) => IsString (E exp t) where
   fromString = E . ftext
 
