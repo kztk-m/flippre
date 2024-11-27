@@ -63,6 +63,10 @@ module Text.FliPpr (
   -- ** Derived Combinators
   (<+>.),
   (</>.),
+  foldPpr,
+  foldPprL,
+  foldPprShared,
+  foldPprLShared,
 
   -- ** Easy Definition
   define,
@@ -141,6 +145,7 @@ import Text.FliPpr.Pat
 import Text.FliPpr.TH
 
 import qualified Data.RangeSet.List as RS
+import qualified Defs
 import Text.FliPpr.Automaton as A
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
@@ -218,26 +223,7 @@ isMember cs f =
     `Branch` f
 
 -- |
--- The function 'define' provides an effective way to avoid writing 'app' and 'arg'.
--- We can write
---
--- >  f <- define $ \i -> ...
--- >  ... f a ...
---
--- instead of:
---
--- >  f <- share $ arg $ \i -> ...
--- >  ... f `app` a ...
---
--- It works also with recursive defintions.
--- We can write
---
--- >  rec f <- define $ \i -> ... f a ...
---
--- instead of:
---
--- >  rec f <- share $ arg $ \i -> ... f `app` a ...
--- define :: (FliPprD arg exp, Repr arg exp t r) => r -> FliPprM exp r
+-- A synonym of 'share'.
 define :: (Arg (E f) r) => r -> FliPprM f r
 define = share
 
@@ -256,12 +242,21 @@ data Assoc
   | -- | non-associative
     AssocN
 
+-- | A pretty-printer for binary-operator expressions such as @e1 + e2@.
+-- A typical use is:
+--
+-- > rec pprExp <- define $ \i e -> case_ i [
+-- >         ...
+-- >         unAdd $ \e1 e2 -> opPrinter (\d1 d2 -> d1 <+>. text "+" <+>. d2) (flip pprExp e1) (flip pprExp e2),
+-- >         ... ]
 opPrinter ::
   (DocLike d, Ord n, Num n) =>
   Fixity
   -> (d -> d -> d)
   -> (n -> d)
+  -- ^ precedence printer for the first operand
   -> (n -> d)
+  -- ^ precedence printer for the second operand
   -> (n -> d)
 opPrinter (Fixity a opPrec) opD ppr1 ppr2 k =
   let (dl, dr) = case a of
@@ -297,3 +292,72 @@ textAs' (A.DFAImpl i qs fs tr) = local $
                 ]
           )
           $ return (f i)
+
+-- | A list printer.
+--
+-- [NOTE] We are not able to have `mapPpr :: ... => (A arg i -> E exp D) -> A arg [i] -> FliPprM [E exp D]`.
+-- In FliPpr, one can only define recursive printers that can be interpreted as context-free grammars.
+-- By returning lists depending the input AST, we can do anything with lists---in particular, we can
+-- define different printers for different indices. This is beyond context-free.
+foldPpr :: (FliPprD arg exp, Eq i) => (A arg i -> E exp D -> E exp D) -> E exp D -> A arg [i] -> E exp D
+foldPpr c n = local $ foldPprShared c n
+
+-- | If 'foldPpr' is used with the same arguments more than once, the following version
+--   is more efficient.
+--
+--  > do p <- foldPprShared (...) (...)
+--  >    ... p xs ... p ys ...
+foldPprShared ::
+  (FliPprD arg exp, Eq i) =>
+  (A arg i -> E exp D -> E exp D)
+  -> E exp D
+  -> FliPprM exp (A arg [i] -> E exp D)
+foldPprShared c n =
+  letr $ \f ->
+    def
+      ( arg $ \es0 ->
+          case_
+            es0
+            [ unNil n
+            , unCons $ \e es -> c e (f `app` es)
+            ]
+      )
+      $ pure (app f)
+
+-- | A list printer that treats the last element specially.
+--
+-- For example, the following prints lists separated by commas
+-- > foldPprL (\a d -> pprElem a <> text "," <+>. d) pprElem (text "")
+foldPprL :: (FliPprD arg exp, Eq i) => (A arg i -> E exp D -> E exp D) -> (A arg i -> E exp D) -> E exp D -> A arg [i] -> E exp D
+foldPprL c s n = local $ foldPprLShared c s n
+
+-- | If 'foldPprL' is used with the same arguments more than once, the following version
+--   is more efficient.
+foldPprLShared ::
+  (FliPprD arg exp, Eq i) =>
+  (A arg i -> E exp D -> E exp D)
+  -> (A arg i -> E exp D)
+  -> E exp D
+  -> FliPprM exp (A arg [i] -> E exp D)
+foldPprLShared c s n =
+  letr $ \f ->
+    letr $ \g ->
+      def
+        ( arg $ \es0 ->
+            case_
+              es0
+              [ unNil n
+              , unCons $ \e es -> g `app` e `app` es
+              ]
+        )
+        >>> def
+          ( arg $ \e0 -> arg $ \es0 ->
+              case_
+                es0
+                [ unNil (s e0)
+                , unCons $ \e es -> c e0 (g `app` e `app` es)
+                ]
+          )
+        $ pure (app f)
+  where
+    (>>>) = flip (.)
