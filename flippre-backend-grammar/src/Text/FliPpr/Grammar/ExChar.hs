@@ -1,5 +1,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -28,6 +29,8 @@ import qualified Prettyprinter as PP
 
 import Control.Monad.State (StateT (..), evalStateT)
 import Data.Typeable ((:~:) (..))
+
+-- import Debug.Trace (trace)
 import Defs
 import Text.FliPpr.Grammar.Flatten (flatten)
 import Text.FliPpr.Grammar.Internal.Util
@@ -100,9 +103,40 @@ instance CharLike ExChar where
 char :: (CharLike c, Grammar c e) => Char -> e c
 char c = symb (fromChar c)
 
+-- data Frozen e a where
+--   FPure :: a -> Frozen e a
+--   FStar :: Frozen e (a -> b) -> Frozen e a -> Frozen e b
+--   FFMap :: (a -> b) -> Frozen e a -> Frozen e b
+--   FLift :: e a -> Frozen e a
+
+-- showFrozenSh :: Frozen e a -> String
+-- showFrozenSh (FPure _) = "p"
+-- showFrozenSh (FFMap _ e) = "(_ <$> " ++ showFrozenSh e ++ ")"
+-- showFrozenSh (FStar e1 e2) = "(" ++ showFrozenSh e1 ++ " <*> " ++ showFrozenSh e2 ++ ")"
+-- showFrozenSh (FLift _) = "l"
+
+-- thaw :: (Applicative e) => Frozen e a -> e a
+-- thaw (FPure x) = pure x
+-- thaw (FStar e1 e2) = thaw e1 <*> thaw e2
+-- thaw (FFMap f e) = fmap f (thaw e)
+-- thaw (FLift e) = e
+
+-- textF :: (CharLike c, Grammar c e) => String -> Frozen e [c]
+-- textF = foldr (\c r -> FFMap (:) (FLift $ char c) `fstar` r) (FPure [])
+--   where
+--     fstar :: Frozen e (a -> b) -> Frozen e a -> Frozen e b
+--     fstar (FFMap f e1) (FStar e2 e3) = FFMap (\a b -> f a . b) e1 `fstar` e2 `FStar` e3
+--     fstar (FFMap f e1) (FFMap g e2) = FFMap (\a -> f a . g) e1 `fstar` e2
+--     fstar (FFMap f e1) (FPure x) = FFMap (`f` x) e1
+--     fstar e1 e2 = FStar e1 e2
+
 -- | A production of a string.
 text :: (CharLike c, Grammar c e) => String -> e [c]
 text = foldr (\c r -> (:) <$> char c <*> r) (pure [])
+
+-- text x =
+--   let f = textF x
+--   in  trace (show x ++ " -> " ++ showFrozenSh f) $ thaw f
 
 -- | A production of the special symbol 'Space'
 space :: (Grammar ExChar e) => e ()
