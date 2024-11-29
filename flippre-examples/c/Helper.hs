@@ -82,6 +82,8 @@ sepByClose comma p = do
 commaSep :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 commaSep = sepBy ","
 
+-- TODO: space if necessary
+
 -- manyParens :: (FliPprE arg exp, Defs exp) => E exp D -> E exp D
 manyParens d = local $ do
     rec m <- define $ d <? parens m
