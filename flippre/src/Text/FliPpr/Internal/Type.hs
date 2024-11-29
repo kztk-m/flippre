@@ -1,88 +1,88 @@
-{-# LANGUAGE BangPatterns               #-}
-{-# LANGUAGE ConstraintKinds            #-}
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DerivingStrategies         #-}
-{-# LANGUAGE ExistentialQuantification  #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE FunctionalDependencies     #-}
-{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE NoMonomorphismRestriction  #-}
-{-# LANGUAGE RankNTypes                 #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE UndecidableInstances       #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
 
-module Text.FliPpr.Internal.Type
-  ( FType (..),
-    type D,
-    type (~>),
-    In,
-    FliPprE (..),
-    FliPprD,
-    A (..),
-    E (..),
-    FliPpr (..),
-    Branch (..),
-    PartialBij (..),
-    flippr,
-    arg,
-    app,
-    (@@),
-    charAs,
-    case_,
-    unpair,
-    ununit,
-    Text.FliPpr.Internal.Type.line',
-    Text.FliPpr.Internal.Type.space,
-    spaces,
-    nespaces,
-    nespaces',
-    (<?),
-    hardcat,
-    (<#>),
-    Repr (..),
-    FliPprM,
-    mfixF,
-    -- letr, letrs,
-    Defs.letrs,
-    def,
-    share,
-    local,
-    FinNE,
-    reifySNat,
-    -- Wit (..),
+module Text.FliPpr.Internal.Type (
+  FType (..),
+  type D,
+  type (~>),
+  In,
+  FliPprE (..),
+  FliPprD,
+  A (..),
+  E (..),
+  FliPpr (..),
+  Branch (..),
+  PartialBij (..),
+  flippr,
+  arg,
+  app,
+  (@@),
+  charAs,
+  case_,
+  unpair,
+  ununit,
+  Text.FliPpr.Internal.Type.line',
+  Text.FliPpr.Internal.Type.space,
+  spaces,
+  nespaces,
+  nespaces',
+  (<?),
+  hardcat,
+  (<#>),
+  Repr (..),
+  FliPprM,
+  mfixF,
+  -- letr, letrs,
+  Defs.letrs,
+  def,
+  share,
+  local,
+  FinNE,
+  reifySNat,
+  -- Wit (..),
 
-    Defs.Arg(..), -- Defs.Convertible,
-    Defs,
-  )
+  Defs.Arg (..), -- Defs.Convertible,
+  Defs,
+)
 where
 
-import           Control.Applicative  (Const (..))
-import           Control.Monad        (forM)
-import           Control.Monad.State  hiding (lift)
-import           Data.Coerce          (coerce)
-import qualified Data.Fin             as F
-import           Data.Kind            (Type)
-import           Data.Semigroup       (Semigroup (..))
-import qualified Data.Type.Nat        as F
-import           Data.Typeable        (Proxy (..))
+import Control.Applicative (Const (..))
+import Control.Monad (forM)
+import Control.Monad.State hiding (lift)
+import Data.Coerce (coerce)
+import qualified Data.Fin as F
+import Data.Kind (Type)
+import Data.Semigroup (Semigroup (..))
+import qualified Data.Type.Nat as F
+import Data.Typeable (Proxy (..))
 
-import           Prettyprinter        as D
+import qualified Prettyprinter as D
 
-import           Defs                 (Defs)
+import Defs (Defs)
 import qualified Defs
 
-import           Text.FliPpr.Doc      as DD
+import Text.FliPpr.Doc as DD
 
-import           Control.Arrow        (first)
+import Control.Arrow (first)
 
-import           Data.Function.Compat (applyWhen)
-import qualified Data.RangeSet.List   as RS
-import           Data.String          (IsString (..))
+import Data.Function.Compat (applyWhen)
+import qualified Data.RangeSet.List as RS
+import Data.String (IsString (..))
 
 -- | A kind for datatypes in FliPpr.
 data FType = FTypeD | Type :~> FType
@@ -101,15 +101,15 @@ data PartialBij a b = PartialBij !String !(a -> Maybe b) !(b -> Maybe a)
 
 -- | A datatype represents branches.
 data Branch arg exp a (t :: FType)
-  = forall b. In b => Branch (PartialBij a b) (arg b -> exp t)
+  = forall b. (In b) => Branch (PartialBij a b) (arg b -> exp t)
 
 -- | A finally-tagless implementation of FliPpr expressions.
 --   The APIs are only for internal use.
 class FliPprE (arg :: Type -> Type) (exp :: FType -> Type) | exp -> arg where
-  fapp :: In a => exp (a ~> t) -> arg a -> exp t
-  farg :: In a => (arg a -> exp t) -> exp (a ~> t)
+  fapp :: (In a) => exp (a ~> t) -> arg a -> exp t
+  farg :: (In a) => (arg a -> exp t) -> exp (a ~> t)
 
-  fcase :: In a => arg a -> [Branch arg exp a t] -> exp t
+  fcase :: (In a) => arg a -> [Branch arg exp a t] -> exp t
 
   funpair :: (In a, In b) => arg (a, b) -> (arg a -> arg b -> exp t) -> exp t
   fununit :: arg () -> exp t -> exp t
@@ -224,7 +224,7 @@ newtype A (arg :: Type -> Type) (a :: Type) = A {unA :: arg a}
 -- | Similarly, @E exp t@ is nothing but @exp t@.
 newtype E (exp :: FType -> Type) (t :: FType) = E {unE :: exp t}
 
-newtype FliPpr t = FliPpr (forall arg exp. FliPprD arg exp => exp t)
+newtype FliPpr t = FliPpr (forall arg exp. (FliPprD arg exp) => exp t)
 
 -- flipprPure :: (forall arg exp. FliPprD arg exp => E exp t) -> FliPpr t
 -- flipprPure x = FliPpr (unE x)
@@ -236,47 +236,56 @@ type FliPprM exp = Defs.DefM (E exp)
 --   > flippr $ do
 --   >   rec ppr <- share $ arg $ \i -> ...
 --   >   return ppr
-flippr :: (forall arg exp. FliPprD arg exp => FliPprM exp (E exp t)) -> FliPpr t
+flippr :: (forall arg exp. (FliPprD arg exp) => FliPprM exp (E exp t)) -> FliPpr t
 flippr x = FliPpr (unE $ Defs.local x) -- flipprPure (unC x)
 
 -- | Indicating that there can be zero-or-more spaces in parsing.
 --   In pretty-printing, it is equivalent to @text ""@.
 {-# INLINEABLE spaces #-}
-spaces :: FliPprE arg exp => E exp D
+spaces :: (FliPprE arg exp) => E exp D
 spaces = (coerce :: exp D -> E exp D) fspaces
 
 -- | In pretty-printing, it works as @text " "@. In parsing
 --   it behaves a single space in some sense.
 {-# INLINEABLE space #-}
-space :: FliPprE arg exp => E exp D
+space :: (FliPprE arg exp) => E exp D
 space = (coerce :: exp D -> E exp D) fspace
 
 -- | For internal use. Use '<+>'.
 {-# INLINEABLE nespaces #-}
-nespaces :: FliPprE arg exp => E exp D
+nespaces :: (FliPprE arg exp) => E exp D
 nespaces = Text.FliPpr.Internal.Type.space <#> spaces
 
 -- | For internal use. Use '<+>.'.
 {-# INLINEABLE nespaces' #-}
-nespaces' :: FliPprE arg exp => E exp D
+nespaces' :: (FliPprE arg exp) => E exp D
 nespaces' = (coerce :: exp D -> E exp D) fnespaces'
 
 -- | Similar to 'line', but it also accepts the empty string in parsing.
 {-# INLINEABLE line' #-}
-line' :: FliPprE arg exp => E exp D
+line' :: (FliPprE arg exp) => E exp D
 line' = (coerce :: exp D -> E exp D) fline'
 
 -- | A wrapper for 'farg'.
 {-# INLINEABLE arg #-}
 arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
-arg = (coerce :: ((arg a -> exp t) -> exp (a ~> t)) ->
-                  (A arg a -> E exp t) -> E exp (a ~> t)) farg
+arg =
+  ( coerce ::
+      ((arg a -> exp t) -> exp (a ~> t))
+      -> (A arg a -> E exp t)
+      -> E exp (a ~> t)
+  )
+    farg
 
 -- | A wrapper for 'fapp'.
 {-# INLINEABLE app #-}
 app :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
-app = (coerce :: (exp (a ~> t) -> arg a -> exp t) ->
-                 (E exp (a ~> t) -> A arg a -> E exp t)) fapp
+app =
+  ( coerce ::
+      (exp (a ~> t) -> arg a -> exp t)
+      -> (E exp (a ~> t) -> A arg a -> E exp t)
+  )
+    fapp
 
 -- | FliPpr version of '$'.
 {-# INLINE (@@) #-}
@@ -285,17 +294,28 @@ app = (coerce :: (exp (a ~> t) -> arg a -> exp t) ->
 
 infixr 0 @@
 
-charAs :: FliPprE arg exp => A arg Char -> RS.RSet Char -> E exp D
-charAs = (coerce :: (arg Char -> RS.RSet Char -> exp D) ->
-                    (A arg Char -> RS.RSet Char -> E exp D)) fcharAs
+charAs :: (FliPprE arg exp) => A arg Char -> RS.RSet Char -> E exp D
+charAs =
+  ( coerce ::
+      (arg Char -> RS.RSet Char -> exp D)
+      -> (A arg Char -> RS.RSet Char -> E exp D)
+  )
+    fcharAs
+
 -- charAs a cs = E $ fcharAs (unA a) cs
 
 -- | case branching.
 {-# INLINEABLE case_ #-}
 case_ :: (In a, FliPprE arg exp) => A arg a -> [Branch (A arg) (E exp) a r] -> E exp r
-case_ = (coerce :: (arg a -> [Branch arg exp a r] -> exp r) ->
-                    A arg a -> [Branch (A arg) (E exp) a r] -> E exp r)
-        fcase
+case_ =
+  ( coerce ::
+      (arg a -> [Branch arg exp a r] -> exp r)
+      -> A arg a
+      -> [Branch (A arg) (E exp) a r]
+      -> E exp r
+  )
+    fcase
+
 -- case_ (A a) bs = E (fcase a (coerce bs))
 
 -- | A CPS style conversion from @A arg (a,b)@ to a pair of @A arg a@ and @A arg b@.
@@ -305,31 +325,49 @@ case_ = (coerce :: (arg a -> [Branch arg exp a r] -> exp r) ->
 --   one can avoid using a bit awkward 'unpair' explicitly.
 {-# INLINEABLE unpair #-}
 unpair :: (In a, In b, FliPprE arg exp) => A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r
-unpair = (coerce :: (arg (a, b) -> (arg a -> arg b -> exp r) -> exp r)
-                    -> (A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r))
-         funpair
+unpair =
+  ( coerce ::
+      (arg (a, b) -> (arg a -> arg b -> exp r) -> exp r)
+      -> (A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r)
+  )
+    funpair
+
 -- unpair (A x) k = E $ funpair x (coerce k)
 
 {-# INLINEABLE ununit #-}
-ununit :: FliPprE arg exp => A arg () -> E exp r -> E exp r
-ununit = (coerce :: (arg () -> exp r -> exp r)
-                     -> A arg () -> E exp r -> E exp r) fununit
+ununit :: (FliPprE arg exp) => A arg () -> E exp r -> E exp r
+ununit =
+  ( coerce ::
+      (arg () -> exp r -> exp r)
+      -> A arg ()
+      -> E exp r
+      -> E exp r
+  )
+    fununit
+
 -- ununit (A x) y = E $ fununit x (coerce y)
 
 -- | Biased choice. @a <? b = a@ in parsing, but it accepts strings indicated by both @a@ and @b$ in parsing.
-(<?) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
-(<?) = (coerce :: (exp D -> exp D -> exp D)
-                  -> E exp D -> E exp D -> E exp D)
-        fbchoice
+(<?) :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
+(<?) =
+  ( coerce ::
+      (exp D -> exp D -> exp D)
+      -> E exp D
+      -> E exp D
+      -> E exp D
+  )
+    fbchoice
+
 -- (<?) (E x) (E y) = E (fbchoice x y)
 
-instance Defs.Defs e => Defs.Defs (E e) where
+instance (Defs.Defs e) => Defs.Defs (E e) where
   newtype D (E e) as a = RE (Defs.D e as a)
 
   -- liftDS (E x) = RE (Defs.liftDS x)
-  liftD = coerce (Defs.liftD :: e a -> Defs.D e '[] a )
+  liftD = coerce (Defs.liftD :: e a -> Defs.D e '[] a)
+
   -- unliftDS (RE x) = E (Defs.unliftDS x)
-  unliftD = coerce (Defs.unliftD  :: Defs.D e '[] a -> e a)
+  unliftD = coerce (Defs.unliftD :: Defs.D e '[] a -> e a)
     where
       _ = RE -- just to suppress unused constructor RE, which is indeed used via coerce.
 
@@ -351,7 +389,7 @@ class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, r -> arg exp t
   fromFunction :: r -> E exp t
   -- ^ @fromFunction :: A arg a1 -> ... -> A arg an -> E exp D -> E exp (a1 ~> ... ~> an ~> D)@
 
-instance FliPprE arg exp => Repr arg exp t (E exp t) where
+instance (FliPprE arg exp) => Repr arg exp t (E exp t) where
   toFunction = id
   fromFunction = id
 
@@ -361,13 +399,13 @@ instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A a
 
 -- | A specialized version of 'mfixDefM'
 -- mfixF :: forall exp a d. (Defs exp, Defs.DefType d, Defs.Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
-mfixF :: Defs.Arg (E f) a => (a -> FliPprM f a) -> FliPprM f a
+mfixF :: (Defs.Arg (E f) a) => (a -> FliPprM f a) -> FliPprM f a
 mfixF = Defs.mfixDefM
 
 -- type DefsF exp = Defs.DTypeVal (E exp)
 
 -- | A specialized version of 'letr', which would be useful for defining mutual recursions.
---
+
 --- Typical usage:
 --  @
 --  letr $ \f -> def fdef $
@@ -387,7 +425,6 @@ mfixF = Defs.mfixDefM
 -- letr :: Defs.Arg (E f) t => (t -> FliPprM f (t, r)) -> FliPprM f r
 -- letr = Defs.letr
 
-
 -- -- letr :: (Repr arg exp ft rep, FliPprD arg exp) => (rep -> FliPprM exp (rep, r)) -> FliPprM exp r
 -- -- letr h = Defs.letr $ \x -> do
 -- --   (d, r) <- h (toFunction x)
@@ -406,15 +443,14 @@ mfixF = Defs.mfixDefM
 --     unJust (Just x) = x
 --     unJust Nothing  = "letrs: out of bounds"
 
-
 -- | Useful combinator that can be used with 'letr'.
-def :: Functor m => a -> m b -> m (a, b)
+def :: (Functor m) => a -> m b -> m (a, b)
 def a b = (a,) <$> b
 
 -- | Spacilized version of 'Defs.share'
 -- share ::(Repr arg exp ft rep,  FliPprD arg exp) => rep -> FliPprM exp rep
 -- share = fmap toFunction . Defs.share . fromFunction
-share :: Defs.Arg (E f) r => r -> FliPprM f r
+share :: (Defs.Arg (E f) r) => r -> FliPprM f r
 share e = Defs.letr $ \x -> return (e, x)
 
 -- | Specialized version of 'Defs.local'
@@ -423,12 +459,11 @@ local = toFunction . Defs.local . fmap fromFunction
 
 -- One-level unfolding to avoid overlapping instances.
 
-instance Defs.Defs exp => Defs.Arg (E exp) (E exp a) where
+instance (Defs.Defs exp) => Defs.Arg (E exp) (E exp a) where
   letr f = Defs.letr $ fmap (first Defs.Tip) . f . Defs.unTip
 
 instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E exp) (A arg a -> r) where
   letr f = Defs.letr $ fmap (first fromFunction) . f . toFunction
-
 
 -- instance Defs.Convertible (E exp) (Defs.Lift a) (E exp a) where
 --   fromDTypeVal (Defs.VT x) = x
@@ -475,7 +510,7 @@ instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E
 --         F.FS n -> runFromDTypeVal p h n
 
 -- | FinNE n represents {0,..,n} (NB: n is included)
-type FinNE n = F.Fin ( 'F.S n)
+type FinNE n = F.Fin ('F.S n)
 
 -- data Wit c where
 --   Wit :: c => Wit c
@@ -493,7 +528,7 @@ type FinNE n = F.Fin ( 'F.S n)
 -- reifySNat :: forall n r. (Integral n) => n -> (forall m. F.SNatI m => F.SNat m -> (forall t. Defs.DefType t => Proxy t -> Wit (Defs.DefType (Prods t m))) -> r) -> r
 -- reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy k) -> k (F.snat @k) (\(_ :: Proxy t) -> propDefTypeProds @k Proxy (Proxy :: Proxy t))
 
-reifySNat :: forall n r. Integral n => n -> (forall m. F.SNatI m => F.SNat m -> r) -> r
+reifySNat :: forall n r. (Integral n) => n -> (forall m. (F.SNatI m) => F.SNat m -> r) -> r
 reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy m) -> k (F.snat :: F.SNat m)
 
 -- where
@@ -518,24 +553,18 @@ reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy m) -> k (F.snat :: F.SNa
 -- | Unlike '(<>)' that allows spaces between concatenated elementes in parsing,
 --   'hardcat' does not allow such extra spaces in parsing.
 {-# INLINEABLE hardcat #-}
-hardcat :: FliPprE arg exp => E exp D -> E exp D -> E exp D
+hardcat :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
 hardcat (E x) (E y) = E (fcat x y)
 
 -- | A better syntax for `hardcat`.
 {-# INLINE (<#>) #-}
-(<#>) :: FliPprE arg exp => E exp D -> E exp D -> E exp D
+(<#>) :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
 (<#>) = hardcat
 
 infixr 5 <#>
 
 instance (D ~ t, FliPprE arg exp) => Semigroup (E exp t) where
   (<>) x y = x `hardcat` (spaces `hardcat` y)
-
--- FIXME: This instance does not satisify the laws. Maybe, we should remove Monoid from the
--- superclass of DocLike.
-instance (D ~ t, FliPprE arg exp) => Monoid (E exp t) where
-  mempty = spaces
-  mappend = (Data.Semigroup.<>)
 
 instance (D ~ t, FliPprE arg exp) => IsString (E exp t) where
   fromString = E . ftext
@@ -544,7 +573,7 @@ instance (D ~ t, FliPprE arg exp) => IsString (E exp t) where
 instance (D ~ t, FliPprE arg exp) => DD.DocLike (E exp t) where
   empty = E fempty
 
-  (<+>) x y = x `hardcat` text " " `hardcat` spaces `hardcat` y
+  (<+>) x y = x `hardcat` space `hardcat` spaces `hardcat` y
 
   line = E fline
   linebreak = E flinebreak
@@ -603,8 +632,9 @@ instance FliPprE (Const IName) (PrinterI ann) where
   farg h = Defs.PprExpN $ \k -> do
     x <- newIName
     d <- Defs.pprExpN (h $ Const x) 0
-    return $ applyWhen (k > 0) D.parens $
-      D.fillSep [fromString "\\" <> pprIName x D.<+> fromString "->", d]
+    return $
+      applyWhen (k > 0) D.parens $
+        D.fillSep [fromString "\\" <> pprIName x D.<+> fromString "->", d]
 
   fcharAs a cs = Defs.PprExpN $ \k -> do
     let da = pprIName $ getConst a
@@ -619,8 +649,10 @@ instance FliPprE (Const IName) (PrinterI ann) where
     return $
       applyWhen (k > 9) D.parens $
         D.group $
-          fromString "case_" D.<+> da
-            D.<+> fromString "[" <> D.align (D.concatWith (\x y -> D.fillSep [x <> fromString ",", y]) ds <> fromString "]")
+          fromString "case_"
+            D.<+> da
+            D.<+> fromString "["
+            <> D.align (D.concatWith (\x y -> D.fillSep [x <> fromString ",", y]) ds <> fromString "]")
 
   funpair a f = Defs.PprExpN $ \k -> do
     let da = pprIName (getConst a)
@@ -631,9 +663,10 @@ instance FliPprE (Const IName) (PrinterI ann) where
       applyWhen (k > 0) D.parens $
         D.align $
           D.group $
-            D.fillSep [
-              fromString "let" D.<+> D.parens (pprIName x <> fromString "," D.<+> pprIName y) D.<+> fromString "=" D.<+> D.align da,
-              fromString "in" D.<+> D.align db]
+            D.fillSep
+              [ fromString "let" D.<+> D.parens (pprIName x <> fromString "," D.<+> pprIName y) D.<+> fromString "=" D.<+> D.align da
+              , fromString "in" D.<+> D.align db
+              ]
 
   fununit a e = Defs.PprExpN $ \k -> do
     let da = pprIName (getConst a)
@@ -642,8 +675,10 @@ instance FliPprE (Const IName) (PrinterI ann) where
       applyWhen (k > 0) D.parens $
         D.align $
           D.group $
-            D.fillSep[ fromString "let () =" D.<+> D.align da
-                     , fromString "in" D.<+> D.align de]
+            D.fillSep
+              [ fromString "let () =" D.<+> D.align da
+              , fromString "in" D.<+> D.align de
+              ]
 
   ftext s = Defs.PprExpN $ \k ->
     return $ applyWhen (k > 9) D.parens $ fromString "text" D.<+> fromString (show s)

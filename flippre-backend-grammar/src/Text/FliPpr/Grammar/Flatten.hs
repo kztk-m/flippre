@@ -2,7 +2,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -81,7 +80,9 @@ instance (Show c, env ~ '[]) => Pretty (FreeGrammarExp c env a) where
 
 prettyD :: (Show c) => Int -> Env (Const Int) env -> FreeGrammarD c env as r -> Doc ann
 prettyD k xs (ConsT e d) =
-  applyWhen (k > 9) parens $ "consD" <+> prettyE 10 xs e <+> prettyD 10 xs d
+  applyWhen (k > 9) parens $
+    group $
+      "consD" <+> align (prettyE 10 xs e <> line <> prettyD 10 xs d)
 prettyD k xs (LiftT e) =
   applyWhen (k > 9) parens $ "liftD" <+> prettyE 10 xs e
 prettyD k xs (LetrT d) =
@@ -131,10 +132,9 @@ type family Snd (p :: (k1, k2)) :: k2 where
   Snd '(a, b) = b
 
 instance LiftVariables (FreeGrammarExp c) where
-  newtype Var (FreeGrammarExp c) env a = VarFE (Ix env a)
-    deriving newtype Variables
+  type Var (FreeGrammarExp c) = Ix
 
-  liftVar (VarFE ix) = FNT ix
+  liftVar = FNT
 
 instance Defs (EnvI (FreeGrammarExp c)) where
   newtype D (EnvI (FreeGrammarExp c)) as r = DD {runDD :: EnvI (WrapD c) '(as, r)}
@@ -152,11 +152,23 @@ instance FromSymb c (EnvI (FreeGrammarExp c)) where
   symbI cs = U.liftFO0 (FSymbI cs)
 
 instance Functor (EnvI (FreeGrammarExp c)) where
-  fmap f x = pure f <*> x -- intentional
+  fmap f0 = U.liftFO1 (h f0)
+    where
+      h :: (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
+      h f (FPure x) = FPure (f x)
+      --      h f (FStar e1 e2) = FStar (h (f .) e1) e2
+      h _ FEmp = FEmp
+      h f x = FPure f `FStar` x
 
 instance Applicative (EnvI (FreeGrammarExp c)) where
   pure x = U.liftFO0 (FPure x)
-  (<*>) = U.liftFO2 FStar
+  (<*>) = U.liftFO2 fstar
+    where
+      fstar :: FreeGrammarExp c env (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
+      fstar (FPure f) (FPure x) = FPure (f x)
+      fstar FEmp _ = FEmp
+      fstar _ FEmp = FEmp
+      fstar e1 e2 = e1 `FStar` e2
 
 instance Alternative (EnvI (FreeGrammarExp c)) where
   empty = U.liftFO0 FEmp

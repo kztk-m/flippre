@@ -8,7 +8,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 
 module Text.FliPpr.Grammar.Types (
   -- * Type class for grammars
@@ -38,9 +37,7 @@ import Defs (Defs (..))
 
 import Unembedding.Env (Env (..), Ix (..), lookEnv, mapEnv)
 
-import Control.Monad (void)
 import Data.Coerce (coerce)
-import Data.Kind (Type)
 import qualified Data.List.Split as Sp
 import Data.String (IsString (..))
 import qualified Prettyprinter as PP

@@ -14,22 +14,27 @@ import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Driver.Earley as Earley
 import Prelude
 
-mfix :: (Arg (E f) a) => (a -> FliPprM f a) -> FliPprM f a
-mfix = mfixF
+-- for RebindableSyntax (used with RecursiveDo)
+import Control.Applicative ((<|>))
+import Text.FliPpr.Mfix (mfix)
+
+manyParens :: (FliPprD arg exp) => E exp D -> E exp D
+manyParens d = local $ do
+  rec m <- share $ d <? parens m
+  return m
+
+defPprTF :: (FliPprD arg exp) => FliPprM exp (A arg Bool -> E exp D)
+defPprTF = define $ \i ->
+  manyParens $
+    case_
+      i
+      [ $(un 'True) $ text "True"
+      , $(un 'False) $ text "False"
+      ]
 
 example1 :: FliPpr ([Bool] ~> D)
 example1 = flippr $ do
-  let manyParens d = local $ do
-        rec m <- share $ d <? parens m
-        return m
-
-  pprTF <- define $ \i ->
-    manyParens $
-      case_
-        i
-        [ $(un 'True) $ text "True"
-        , $(un 'False) $ text "False"
-        ]
+  pprTF <- defPprTF
 
   rec ppr <- define $ \x ->
         manyParens $
@@ -46,8 +51,13 @@ example1 = flippr $ do
           ]
   return (fromFunction ppr)
 
+example2 :: FliPpr ([Bool] ~> D)
+example2 = flippr $ do
+  pprTF <- defPprTF
+  pure $ arg $ brackets . foldPprL (\a d -> pprTF a <> text "," <+>. d) pprTF (text "")
+
 gsp :: (G.GrammarD Char g) => g ()
-gsp = () <$ G.text " "
+gsp = () <$ (G.text " " <|> G.text "\n")
 
 main :: IO ()
 main = do
@@ -60,3 +70,10 @@ main = do
   putStrLn $ "String to be parsed: " ++ show s
   putStrLn "Parse result:"
   print $ Earley.parse g s
+  putStrLn $ replicate 80 '='
+  let g' = parsingModeSP gsp example2
+  print $ G.pprGrammar g'
+  print $ G.pprAsFlat g'
+  putStrLn $ "String to be parsed: " ++ show s
+  putStrLn "Parse result:"
+  print $ Earley.parse g' s

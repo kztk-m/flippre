@@ -512,7 +512,8 @@ parsingModeWith spec (FliPpr e) =
       g0 = parsingModeMono e
       g1 :: forall g'. (G.GrammarD Char g') => g' (Err ann a)
       g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
-  in  trace (show $ PP.fillSep [G.pprAsFlat g0, fromString "---------", G.pprAsFlat g1]) g1
+  in  -- trace (show $ PP.fillSep [G.pprAsFlat g0, fromString "---------", G.pprAsFlat g1])
+      g1
 
 parsingModeSP :: forall g a ann. (G.GrammarD Char g) => (forall g'. (G.GrammarD Char g') => g' ()) -> FliPpr (a ~> D) -> g (Err ann a)
 parsingModeSP gsp (FliPpr e) =
