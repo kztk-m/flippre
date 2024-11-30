@@ -64,19 +64,52 @@ data Decl
   | DirectDecl DirectDecl
   deriving (Show, Eq)
 
-data DirectDecl = DIdent String | DArray DirectDecl Exp | DArrayUnsized DirectDecl | DFunction DirectDecl [String] | DDecl Decl
-  -- \| TODO: DProto  more stuff with types here
+data AbsDirect
+  = AbsArray Exp
+  | AbsArrayUnsized
+  | AbsFunction
+  | AbsDecl AbsDecl
   deriving
-    ( Show
+    ( -- | AbsProto ParamList
+      Show
+    , Eq
+    )
+
+data AbsDecl = AbsPointer [Pointer] | AbsPointerDecl [Pointer] [AbsDirect] | AbsDirectDecl [AbsDirect]
+  deriving (Show, Eq)
+
+data Parameter = PDecl [DeclSpecifier] Decl | PAbsDecl [DeclSpecifier] AbsDecl | PSpecOnly [DeclSpecifier]
+  deriving (Show, Eq)
+
+data ParamList = Variadic [Parameter] | Fixed [Parameter]
+  deriving (Show, Eq)
+
+data DirectDecl
+  = DIdent String
+  | DArray DirectDecl Exp
+  | DArrayUnsized DirectDecl
+  | DFunction DirectDecl [String]
+  | DDecl Decl
+  deriving
+    ( -- | DProto DirectDecl ParamList
+      Show
     , Eq
     )
 
 data Pointer = Pointer [TypeQualifier]
   deriving (Show, Eq)
 
+data DeclSpecifier = DeclStor StorageClass | DeclSpec TypeSpecifier | DeclQual TypeQualifier
+  deriving (Show, Eq)
+
 $(mkUn ''Decl)
 $(mkUn ''DirectDecl)
 $(mkUn ''Pointer)
+$(mkUn ''DeclSpecifier)
+$(mkUn ''AbsDecl)
+$(mkUn ''AbsDirect)
+$(mkUn ''Parameter)
+$(mkUn ''ParamList)
 
 pprTypeQualifier :: (FliPprD a e) => FliPprM e (A a TypeQualifier -> E e D)
 pprTypeQualifier = define $ \x ->
@@ -86,23 +119,40 @@ pprTypeQualifier = define $ \x ->
     , unTVolatile $ text "volatile"
     ]
 
+pprPointerList :: (FliPprD a e) => FliPprM e (A a [Pointer] -> E e D)
+pprPointerList = do
+  pTypeQualifier <- pprTypeQualifier
+  typeQualifierList <- list pTypeQualifier
+  pointer <- define $ \p ->
+    case_
+      p
+      [ unPointer $ \qs ->
+          text "*"
+            <> case_
+              qs
+              [ unNil $ text ""
+              , unCons $ \t ts -> pTypeQualifier t <+> typeQualifierList ts
+              ]
+              -- TODO: what if non-alphanumeric symbol follows?
+      ]
+  rec pointerList <- sepByClose "" pointer
+  return pointerList
+
 pprDecl :: (FliPprD a e) => FliPprM e (A a Decl -> E e D)
 pprDecl = do
   pExp <- pprExp
-  pTypeQualifier <- pprTypeQualifier
-  typeQualifierList <- list pTypeQualifier
   identList <- commaSep (`textAs` ident)
-  pointer <- define $ \p ->
-    case_ p [unPointer $ \qs -> text "*" <> case_ qs [unNil $ text "", unCons $ \_ _ -> typeQualifierList qs <+> text ""]]
-  pointerList <- sepByClose "" pointer
+  pointerList <- pprPointerList
+  -- pParamList <- pprParamList
   rec pDirectDecl <- define $ \x ->
         case_
           x
           [ unDIdent $ \i -> textAs i ident
           , unDArray $ \d e -> pDirectDecl d <> text "[" <> pExp e <> text "]"
           , unDFunction $ \d args -> pDirectDecl d <> text "(" <> identList args <> text ")"
-          , unDArrayUnsized $ \d -> pDirectDecl d <> text "[]"
+          , unDArrayUnsized $ \d -> pDirectDecl d <> text "[" <> text "]"
           , unDDecl $ \d -> parens $ pDecl d
+          -- , unDProto $ \d ps -> pDirectDecl d <> parens (pParamList ps)
           ]
       pDecl <- define $ \x ->
         case_
@@ -113,12 +163,6 @@ pprDecl = do
 
   return pDecl
 
--- data DeclSpecifier = DeclStor StorageClass | DeclSpec TypeSpecifier | DeclQual TypeQualifier
--- deriving (Show, Eq)
-
--- $(mkUn ''DeclSpecifier)
-
-{-
 pprDeclSpecifier :: (FliPprD a e) => FliPprM e (A a DeclSpecifier -> E e D)
 pprDeclSpecifier = do
   pTypeSpecifier <- pprTypeSpec
@@ -130,11 +174,38 @@ pprDeclSpecifier = do
       [ unDeclStor pStorageClass
       , unDeclSpec pTypeSpecifier
       , unDeclQual pTypeQualifier
-      ]-}
+      ]
 
--- pprAbstractDecl :: (FliPprD a e) => FliPprM e (A a AbsDecl -> E e D)
+pprAbstractDecl :: (FliPprD a e) => FliPprM e (A a AbsDecl -> E e D)
+pprAbstractDecl = do
+  pExp <- pprExp
+  pointerList <- pprPointerList
+  -- pParamList <- pprParamList
+  rec pDirectDecl <- define $ \x ->
+        case_
+          x
+          [ unAbsArray $ \e -> text "[" <> pExp e <> text "]"
+          , unAbsFunction $ parens $ text ""
+          , unAbsArrayUnsized $ text "[" <> text "]"
+          , unAbsDecl $ \d -> parens $ pDecl d
+          -- , unAbsProto $ \ps -> parens $ pParamList ps
+          ]
+      pDirectDeclList <- define $ \ds ->
+        case_
+          ds
+          [ unNil $ text ""
+          , unCons $ \d ds' -> pDirectDecl d <> pDirectDeclList ds'
+          ]
+      pDecl <- define $ \x ->
+        case_
+          x
+          [ unAbsDirectDecl $ \ds -> pDirectDeclList ds
+          , unAbsPointerDecl $ \ps ds -> pointerList ps <> pDirectDeclList ds
+          , unAbsPointer $ \ps -> pointerList ps
+          ]
+  return pDecl
 
-helpPrint = putStrLn . unlines . map (show . pprProgram')
+-- helpPrint = putStrLn . unlines . map (show . pprProgram')
 
 expDecl :: Decl
 expDecl = DPointer [Pointer [TConst, TVolatile]] $ DArrayUnsized $ DIdent "x"
@@ -162,6 +233,26 @@ pprTypeSpec = do
         unTName $ \n -> textAs n ident
       ]
 
+pprParamList :: (FliPprD a e) => FliPprM e (A a ParamList -> E e D)
+pprParamList = do
+  pDecl <- pprDecl
+  pAbsDecl <- pprAbstractDecl
+  pSpecList <- pprDeclSpecifier >>= list
+  pParameter <- define $ \x ->
+    case_
+      x
+      [ unPDecl $ \ds d -> pSpecList ds <> pDecl d
+      , unPAbsDecl $ \ds d -> pSpecList ds <> pAbsDecl d
+      , unPSpecOnly $ \ds -> pSpecList ds
+      ]
+  pParameterList <- sepBy "," pParameter
+  return $ \x ->
+    case_
+      x
+      [ unVariadic $ \ps -> pParameterList ps <> text "," <+> text "..."
+      , unFixed $ \ps -> pParameterList ps
+      ]
+
 keywords :: [String]
 keywords = ["void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "const", "volatile", "auto", "register", "static", "extern", "typedef"]
 
@@ -182,9 +273,8 @@ pprExp = do
           [ unLitExp lit
           , unIdentExp identExp
           , unFunctionCall $ \f args ->
-              identExp f <#> text "("
-                <> pExpList args
-                <> text ")"
+              identExp f
+                <#> parens (pExpList args)
           ]
       pExpList <- list pExp
   return pExp
@@ -192,14 +282,17 @@ pprExp = do
 exp1 :: Exp
 exp1 = FunctionCall "f" [LitExp $ IntL $ Int 42, LitExp $ FloatL $ Float 3.14, FunctionCall "g" []]
 
-pprProgram :: Exp -> Doc ann
-pprProgram = pprMode (flippr $ fromFunction <$> pprExp)
+pprProgram :: Decl -> Doc ann
+pprProgram = pprMode (flippr $ fromFunction <$> pprDecl)
 
-parseProgram :: [Char] -> Err ann [Exp]
-parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprExp)
+parseProgram :: [Char] -> Err ann [Decl]
+parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprDecl)
 
-pprProgram' :: Decl -> Doc ann
-pprProgram' = pprMode (flippr $ fromFunction <$> pprDecl)
+expParamList :: ParamList
+expParamList = Fixed [PDecl [DeclSpec $ TName "int"] expDecl, PDecl [DeclSpec $ TName "float"] expDecl]
 
-parseProgram' :: [Char] -> Err ann [Decl]
-parseProgram' = E.parse $ parsingMode (flippr $ fromFunction <$> pprDecl)
+pprProgram' :: ParamList -> Doc ann
+pprProgram' = pprMode (flippr $ fromFunction <$> pprParamList)
+
+parseProgram' :: [Char] -> Err ann [ParamList]
+parseProgram' = E.parse $ parsingMode (flippr $ fromFunction <$> pprParamList)

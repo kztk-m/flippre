@@ -26,6 +26,10 @@ ifThenElse :: Bool -> t -> t -> t
 ifThenElse True t _ = t
 ifThenElse False _ f = f
 
+{-
+
+cautionary tale about being not linear
+
 list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 list p = do
     rec list' <- define $ \xs ->
@@ -59,7 +63,55 @@ sepBy comma p = do
             [ unNil $ text ""
             , unCons $ \_ _ -> commaSep' xs
             ]
+-}
 
+list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+list p = do
+    rec listNE <- define $ \t ts ->
+            case_
+                ts
+                [ unNil $ p t -- singleton case
+                , unCons $ \t' ts' -> p t <+> listNE t' ts' -- cons case
+                ]
+        list' <- define $ \ts ->
+            case_
+                ts
+                [ unNil $ text "" -- empty case
+                , unCons $ \t' ts' -> listNE t' ts'
+                ]
+    return list'
+
+sepBy :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+sepBy comma p = do
+    rec commaSepNE <- define $ \x xs ->
+            case_
+                xs
+                [ unNil $ p x
+                , unCons $ \t ts -> p x <> text comma <+>. commaSepNE t ts
+                ]
+    return $ \xs ->
+        case_
+            xs
+            [ unNil $ text ""
+            , unCons commaSepNE
+            ]
+
+sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+sepByClose comma p = do
+    rec commaSepNE <- define $ \x xs ->
+            case_
+                xs
+                [ unNil $ p x
+                , unCons $ \t ts -> p x <> text comma <> commaSepNE t ts
+                ]
+    return $ \xs ->
+        case_
+            xs
+            [ unNil $ text ""
+            , unCons commaSepNE
+            ]
+
+{-
 sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepByClose comma p = do
     rec commaSep' <- define $ \xs ->
@@ -78,6 +130,7 @@ sepByClose comma p = do
             [ unNil $ text ""
             , unCons $ \_ _ -> commaSep' xs
             ]
+            -}
 
 commaSep :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 commaSep = sepBy ","
