@@ -11,6 +11,7 @@ module Helper (
     list,
     commaSep,
     sepBy,
+    sepByClose,
     manyParens,
 ) where
 
@@ -87,6 +88,21 @@ sepBy comma p = do
                 xs
                 [ unNil $ p x
                 , unCons $ \t ts -> p x <> text comma <+>. commaSepNE t ts
+                ]
+    return $ \xs ->
+        case_
+            xs
+            [ unNil $ text ""
+            , unCons commaSepNE
+            ]
+
+sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+sepByClose comma p = do
+    rec commaSepNE <- define $ \x xs ->
+            case_
+                xs
+                [ unNil $ p x
+                , unCons $ \t ts -> p x <> text comma <> commaSepNE t ts
                 ]
     return $ \xs ->
         case_

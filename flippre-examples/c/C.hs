@@ -81,9 +81,6 @@ data AbsDecl = AbsPointer [Pointer] | AbsPointerDecl [Pointer] [AbsDirect] | Abs
 data Parameter = PDecl [DeclSpecifier] Decl | PAbsDecl [DeclSpecifier] AbsDecl | PSpecOnly [DeclSpecifier]
   deriving (Show, Eq)
 
-data ParamList = Variadic [Parameter] | Fixed [Parameter]
-  deriving (Show, Eq)
-
 data DirectDecl
   = DIdent String
   | DArray DirectDecl Exp
@@ -109,6 +106,10 @@ $(mkUn ''DeclSpecifier)
 $(mkUn ''AbsDecl)
 $(mkUn ''AbsDirect)
 $(mkUn ''Parameter)
+
+data ParamList = Variadic [Parameter] | Fixed [Parameter]
+  deriving (Show, Eq)
+
 $(mkUn ''ParamList)
 
 pprTypeQualifier :: (FliPprD a e) => FliPprM e (A a TypeQualifier -> E e D)
