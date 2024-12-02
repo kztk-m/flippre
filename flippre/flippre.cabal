@@ -1,0 +1,73 @@
+cabal-version:       2.2
+name:                flippre
+version:             0.2.1
+synopsis:            FliPpr, embedded 
+-- description:
+homepage:            https://github.com/kztk-m/flippre
+license:             BSD-3-Clause 
+license-file:        LICENSE
+author:              Kazutaka Matsuda
+maintainer:          kztk@tohoku.ac.jp
+copyright:           2017, 2018, 2020, 2024 Kazutaka Matsuda
+category:            Text 
+build-type:          Simple
+extra-source-files:  README.md
+
+common warnings
+    default-language: Haskell2010
+    ghc-options:
+                 -Wall
+                 -Wcompat
+                 -Widentities
+                 -Wincomplete-uni-patterns
+                 -Wincomplete-record-updates
+                 -Wredundant-constraints
+                 -Wnoncanonical-monad-instances
+    if impl(ghc >= 8.2)
+      ghc-options:       -fhide-source-paths
+    if impl(ghc >= 8.4)
+      ghc-options:       -Wmissing-export-lists
+                         -Wpartial-fields
+    if impl(ghc >= 8.8)
+      ghc-options:       -Wmissing-deriving-strategies
+                         -fwrite-ide-info
+                         -hiedir=.hie
+    if impl(ghc >= 8.10)
+      ghc-options:       -Wunused-packages  
+
+library
+  import: warnings
+  hs-source-dirs:      src
+  exposed-modules:     
+    Text.FliPpr, 
+    Text.FliPpr.Mfix, 
+    Text.FliPpr.Doc, 
+    Text.FliPpr.TH, 
+    Text.FliPpr.Internal.Type, 
+    Text.FliPpr.Internal.HList, 
+    Text.FliPpr.Internal.PrettyPrinting,
+    Text.FliPpr.Internal.ParserGeneration,
+    Text.FliPpr.Internal.Env, 
+    Text.FliPpr.Internal.PartialEnv
+    Text.FliPpr.Automaton 
+    Text.FliPpr.Pat 
+
+                                 
+  build-depends:       
+    base >= 4.7 && < 5, 
+    base-compat >= 0.13,                    
+    mtl  >= 2.0 && < 3, 
+    containers >= 0.5 && < 0.7,
+    template-haskell >= 2.11 && < 2.23, 
+    range-set-list >= 0.1 && < 0.2, 
+    th-abstraction >= 0.2 && < 0.8, 
+    fin >= 0.1 && < 0.4,
+    prettyprinter >= 1.7 && < 1.8, 
+    mutual-def-class, 
+    flippre-backend-grammar 
+    
+  default-language:    Haskell2010
+  
+source-repository head
+  type:     git 
+  location: https://github.com/kztk-m/flippre
