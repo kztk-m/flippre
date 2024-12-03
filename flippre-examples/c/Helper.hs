@@ -107,8 +107,7 @@ sepByClose comma p = do
     return $ \xs ->
         case_
             xs
-            [ unNil $ text ""
-            , unCons commaSepNE
+            [ unCons commaSepNE
             ]
 
 {-

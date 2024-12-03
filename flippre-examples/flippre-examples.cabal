@@ -53,33 +53,33 @@ common deps
         flippre-backend-grammar
     default-language: Haskell2010
 
-executable space
-    import: warnings, deps
-    main-is: Space.hs 
-    build-depends: prettyprinter
+--executable space
+--    import: warnings, deps
+--    main-is: Space.hs 
+--    build-depends: prettyprinter
 
-executable arith
-    import: warnings, deps 
-    main-is: Arith.hs 
-    build-depends: deepseq, prettyprinter
+--executable arith
+--    import: warnings, deps 
+--    main-is: Arith.hs 
+----    build-depends: deepseq, prettyprinter
 
-executable boollist 
-    import: warnings, deps
-    main-is: BoolList.hs
+--executable boollist 
+--    import: warnings, deps
+--    main-is: BoolList.hs
 
-executable grammar 
-    import: warnings, deps
-    main-is: G.hs 
+--executable grammar 
+--    import: warnings, deps
+--    main-is: G.hs 
 
-executable arithlet
-    import: warnings, deps
-    main-is: Let.hs
-    build-depends: deepseq, prettyprinter
+--executable arithlet
+--    import: warnings, deps
+--    main-is: Let.hs
+--    build-depends: deepseq, prettyprinter
 
-executable simple-lang 
-    import: warnings, deps 
-    main-is:  SimpleLang.hs 
-    build-depends: prettyprinter
+--executable simple-lang 
+--    import: warnings, deps 
+--    main-is:  SimpleLang.hs 
+--    build-depends: prettyprinter
 
 executable c
     import: warnings, deps

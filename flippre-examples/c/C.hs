@@ -283,6 +283,18 @@ pprExp = do
 exp1 :: Exp
 exp1 = FunctionCall "f" [LitExp $ IntL $ Int 42, LitExp $ FloatL $ Float 3.14, FunctionCall "g" []]
 
+parseAbstractDecl :: [Char] -> Err ann [AbsDecl]
+parseAbstractDecl = E.parse $ parsingMode (flippr $ fromFunction <$> pprAbstractDecl)
+
+parseDecl :: [Char] -> Err ann [Decl]
+parseDecl = E.parse $ parsingMode (flippr $ fromFunction <$> pprDecl)
+
+main :: IO ()
+main = do
+  print $ parseAbstractDecl "*const []"
+  print $ parseDecl "*const volatile x[]"
+
+{-}
 pprProgram :: Decl -> Doc ann
 pprProgram = pprMode (flippr $ fromFunction <$> pprDecl)
 
@@ -297,3 +309,4 @@ pprProgram' = pprMode (flippr $ fromFunction <$> pprParamList)
 
 parseProgram' :: [Char] -> Err ann [ParamList]
 parseProgram' = E.parse $ parsingMode (flippr $ fromFunction <$> pprParamList)
+-}
