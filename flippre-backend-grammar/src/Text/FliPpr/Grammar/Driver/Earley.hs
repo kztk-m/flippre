@@ -15,8 +15,9 @@ import Data.Foldable (asum)
 import qualified Data.RangeSet.List as RS
 import qualified Text.Earley as E
 
-import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Err
+import qualified Text.FliPpr.Grammar.Flatten as G
+import qualified Text.FliPpr.Grammar.Types as G
 
 import Data.String (IsString (..))
 import qualified Prettyprinter as PP
@@ -42,7 +43,7 @@ toEarley (G.FlatGrammar defs rhs) = do
     procSymb :: (Ord c) => G.Env (E.Prod r c c) env -> G.Symb c env a -> E.Grammar r (E.Prod r c c a)
     procSymb _env (G.Symb c) = pure $ E.namedToken c
     procSymb _env (G.SymbI cs) = pure $ E.satisfy (`RS.member` cs)
-    procSymb env (G.NT x) = pure $ G.lookEnv env x
+    procSymb env (G.NT x) = pure $ G.lookEnv env (G.toIx x)
 
 -- | Converts our grammars into those in @Text.Earley@.
 asEarley :: (Ord c) => (forall g. (G.GrammarD c g) => g t) -> E.Grammar r (E.Prod r c c t)

@@ -299,7 +299,7 @@ aNormalize ::
 aNormalize (FSymb c) _diff0 = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (Symb c)))
 aNormalize (FSymbI cs) _ = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (SymbI cs)))
 aNormalize (FNT x) diff0 = ANormalizeRes id SSingleton $ \diffF ->
-  (id, SingRHS (fromSymb (NT $ shift (diffF . diff0) x)))
+  (id, SingRHS (fromSymb (NT $ fromIx $ shift (diffF . diff0) x)))
 aNormalize (FPure a) _diff0 = ANormalizeRes id SSingleton $ const (id, SingRHS (pure a))
 aNormalize (FStar e1 e2) diff0
   | ANormalizeRes diff1 sdecl1 h1 <- aNormalize e1 diff0
@@ -317,7 +317,7 @@ aNormalize (FStar e1 e2) diff0
               d = ECons (unsize r1) . ECons (unsize r2) . decls2 . decls1
               x1 = shift diffF IxZ
               x2 = shift diffF (IxS IxZ)
-          in  (d, SingRHS $ fromSymb (NT x1) <*> fromSymb (NT x2))
+          in  (d, SingRHS $ fromSymb (NT $ fromIx x1) <*> fromSymb (NT $ fromIx x2))
 aNormalize FEmp _diff0 = ANormalizeRes id SEmpty $ const (id, EmptyRHS)
 aNormalize (FAlt e1 e2) diff0
   | ANormalizeRes diff1 sdecl1 h1 <- aNormalize e1 diff0

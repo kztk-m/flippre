@@ -22,18 +22,18 @@ import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
 
 import Text.FliPpr.Grammar.Internal.Util
 
-type MemoS g env = M2.Map2 (Ix env) g
+type MemoS g env = M2.Map2 (IxN env) g
 
-lookupEnvRec :: Env (RHS c env) env -> Ix env a -> RHS c env a
+lookupEnvRec :: Env (RHS c env) env -> IxN env a -> RHS c env a
 lookupEnvRec = go (const False)
   where
-    go :: (forall x. Ix env x -> Bool) -> Env (RHS c env) env -> Ix env a -> RHS c env a
+    go :: (forall x. IxN env x -> Bool) -> Env (RHS c env) env -> IxN env a -> RHS c env a
     go memo defs x
       | memo x = MkRHS []
       | otherwise =
-          case lookEnv defs x of
+          case lookEnv defs (toIx x) of
             MkRHS [PCons (NT y) (PNil f)] ->
-              f <$> go (\z -> case eqIx z x of Just _ -> True; _ -> memo z) defs y
+              f <$> go (\z -> case M2.eq2 z x of Just _ -> True; _ -> memo z) defs y
             rhs -> rhs
 
 -- | unflattens grammar with inlining.
@@ -63,7 +63,7 @@ unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
     -- (fmap $ \a k -> k a) <$> procSymb s <*> procProd r
 
     -- x = rhs is inlinable if rhs is small enouch and x does not appear in rhs
-    inlinable :: Ix env a -> RHS c env a -> Bool
+    inlinable :: IxN env a -> RHS c env a -> Bool
     inlinable _ (MkRHS []) = True
     inlinable x (MkRHS [p]) = smallEnough p && not (occur p)
       where
@@ -74,7 +74,7 @@ unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
 
         occur :: Prod c env b -> Bool
         occur (PNil _) = False
-        occur (PCons (NT y) _) | Just _ <- eqIx x y = True
+        occur (PCons (NT y) _) | Just _ <- M2.eq2 x y = True
         occur (PCons _ r) = occur r
     inlinable _ _ = False
 
@@ -95,11 +95,11 @@ unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
               return (r, (a, m))
 
 _example :: FlatGrammar Char ()
-_example = FlatGrammar defs (MkRHS [fromSymb (NT IxZ)])
+_example = FlatGrammar defs (MkRHS [fromSymb (NT $ fromIx IxZ)])
   where
     --    defs :: Env (RHS Char _) _
     defs =
-      ECons (MkRHS [pure (), fromSymb (Symb 'a') *> fromSymb (NT IxZ)]) $ ENil
+      ECons (MkRHS [pure (), fromSymb (Symb 'a') *> fromSymb (NT $ fromIx IxZ)]) $ ENil
 
 -- >>> Prettyprinter.pretty _example
 -- N0

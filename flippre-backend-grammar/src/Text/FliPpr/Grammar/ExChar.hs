@@ -218,7 +218,7 @@ thawSpace sp0 g = local $ do
   return (runThawSpace g sp sps)
 {-# INLINE thawSpace #-}
 
-data MemoEntry env a = MemoEntry {-# UNPACK #-} !Qsp {-# UNPACK #-} !Qsp !(Ix env a)
+data MemoEntry env a = MemoEntry {-# UNPACK #-} !Qsp {-# UNPACK #-} !Qsp !(IxN env a)
 
 instance M2.Eq2 (MemoEntry env) where
   eq2 (MemoEntry q1 q2 x) (MemoEntry q1' q2' x')
@@ -234,13 +234,13 @@ instance M2.Ord2 (MemoEntry env) where
 
 type Memo env g = M2.Map2 (MemoEntry env) g
 
-lookupMemo :: Memo env g -> Qsp -> Qsp -> Ix env a -> Maybe (g a)
+lookupMemo :: Memo env g -> Qsp -> Qsp -> IxN env a -> Maybe (g a)
 lookupMemo m q1 q2 x = M2.lookup (MemoEntry q1 q2 x) m
 
 emptyMemo :: Memo env g
 emptyMemo = M2.empty
 
-updateMemo :: Memo env g -> Qsp -> Qsp -> Ix env a -> g a -> Memo env g
+updateMemo :: Memo env g -> Qsp -> Qsp -> IxN env a -> g a -> Memo env g
 updateMemo m q1 q2 x v = M2.insert (MemoEntry q1 q2 x) v m
 
 -- -- FIXME: will be replaced by Map2
@@ -310,12 +310,12 @@ optSpaces (FlatGrammar (defs :: Env (RHS inc env) env) rhs0) =
           g2 <- procProd qm q2 r
           return $ (\a k -> k a) <$> g1 <*> g2
 
-    procVar :: Qsp -> Qsp -> Ix env a -> StateT (Memo env g) (DefM g) (g a)
+    procVar :: Qsp -> Qsp -> IxN env a -> StateT (Memo env g) (DefM g) (g a)
     procVar q1 q2 x = StateT $ \memo ->
       case lookupMemo memo q1 q2 x of
         Just r -> return (r, memo)
         Nothing -> do
-          let rhs = lookEnv defs x
+          let rhs = lookEnv defs (toIx x)
           letr1 $ \a -> do
             (r, memo') <- runStateT (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a)
             return (r, (a, memo'))

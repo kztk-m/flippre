@@ -18,6 +18,9 @@ module Text.FliPpr.Grammar.Types (
   -- * Datatype for flat CFGs
   FlatGrammar (..),
   Ix (..),
+  IxN (..),
+  fromIx,
+  toIx,
   Symb (..),
   fromSymb,
   Prod (..),
@@ -58,17 +61,28 @@ type GrammarD c e = (Defs e, Grammar c e)
 
 --------------
 
+data IxN env a = IxN {-# UNPACK #-} !Word !(Ix env a) deriving stock Show
+
+fromIx :: Ix env a -> IxN env a
+fromIx x0 = IxN (go x0 0) x0
+  where
+    go :: Ix env' a' -> Word -> Word
+    go IxZ r = r
+    go (IxS x) r = go x $! r + 1
+
+toIx :: IxN env a -> Ix env a
+toIx (IxN _ x) = x
+
 data Symb c env a where
-  NT :: !(Ix env a) -> Symb c env a
+  NT :: !(IxN env a) -> Symb c env a
   Symb :: !c -> Symb c env c
   SymbI :: !(RSet c) -> Symb c env c
 
 instance (Show c) => PP.Pretty (Symb c env a) where
   pretty (NT x) = fromString ("N" ++ show (go x))
     where
-      go :: Ix env' a' -> Int
-      go IxZ = 0
-      go (IxS n) = 1 + go n
+      go :: IxN env' a' -> Word
+      go (IxN w _) = w
   pretty (Symb c) = PP.viaShow c
   -- fromString (show c)
   pretty (SymbI cs) = PP.viaShow cs
