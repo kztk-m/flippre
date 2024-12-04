@@ -33,6 +33,7 @@ import Data.Typeable ((:~:) (..))
 -- import Debug.Trace (trace)
 import Defs
 import Text.FliPpr.Grammar.Flatten (flatten)
+import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
 import Text.FliPpr.Grammar.Internal.Util
 import Text.FliPpr.Grammar.Simplify (simplify)
 import Text.FliPpr.Grammar.Types
@@ -217,18 +218,43 @@ thawSpace sp0 g = local $ do
   return (runThawSpace g sp sps)
 {-# INLINE thawSpace #-}
 
--- FIXME: will be replaced by Map2
-newtype Memo env g = Memo {lookupMemo :: forall a. Qsp -> Qsp -> Ix env a -> Maybe (g a)}
+data MemoEntry env a = MemoEntry {-# UNPACK #-} !Qsp {-# UNPACK #-} !Qsp !(Ix env a)
+
+instance M2.Eq2 (MemoEntry env) where
+  eq2 (MemoEntry q1 q2 x) (MemoEntry q1' q2' x')
+    | q1 == q1' && q2 == q2' = M2.eq2 x x'
+    | otherwise = Nothing
+
+instance M2.Ord2 (MemoEntry env) where
+  compare2 (MemoEntry q1 q2 x) (MemoEntry q1' q2' x') =
+    case compare (q1, q2) (q1', q2') of
+      LT -> M2.LT2
+      GT -> M2.GT2
+      EQ -> M2.compare2 x x'
+
+type Memo env g = M2.Map2 (MemoEntry env) g
+
+lookupMemo :: Memo env g -> Qsp -> Qsp -> Ix env a -> Maybe (g a)
+lookupMemo m q1 q2 x = M2.lookup (MemoEntry q1 q2 x) m
 
 emptyMemo :: Memo env g
-emptyMemo = Memo $ \_ _ _ -> Nothing
+emptyMemo = M2.empty
 
 updateMemo :: Memo env g -> Qsp -> Qsp -> Ix env a -> g a -> Memo env g
-updateMemo (Memo f) q1 q2 x k =
-  Memo $ \q1' q2' x' ->
-    case eqIx x x' of
-      Just Refl | q1 == q1', q2 == q2' -> Just k
-      _ -> f q1' q2' x'
+updateMemo m q1 q2 x v = M2.insert (MemoEntry q1 q2 x) v m
+
+-- -- FIXME: will be replaced by Map2
+-- newtype Memo env g = Memo {lookupMemo :: forall a. Qsp -> Qsp -> Ix env a -> Maybe (g a)}
+
+-- emptyMemo :: Memo env g
+-- emptyMemo = Memo $ \_ _ _ -> Nothing
+
+-- updateMemo :: Memo env g -> Qsp -> Qsp -> Ix env a -> g a -> Memo env g
+-- updateMemo (Memo f) q1 q2 x k =
+--   Memo $ \q1' q2' x' ->
+--     case eqIx x x' of
+--       Just Refl | q1 == q1', q2 == q2' -> Just k
+--       _ -> f q1' q2' x'
 
 data Qsp = Qn | Qs | Qss deriving stock (Eq, Ord)
 

@@ -15,13 +15,14 @@ import Data.Typeable ((:~:) (..))
 import Defs as D
 import Text.FliPpr.Grammar.Types
 
+import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
+
 -- Just for test
 -- import Text.FliPpr.Grammar.Flatten
 
 import Text.FliPpr.Grammar.Internal.Util
 
--- FIXME: Slow
-newtype MemoS g env = MemoS {lookupMemoS :: forall a. Ix env a -> Maybe (g a)}
+type MemoS g env = M2.Map2 (Ix env) g
 
 lookupEnvRec :: Env (RHS c env) env -> Ix env a -> RHS c env a
 lookupEnvRec = go (const False)
@@ -38,16 +39,16 @@ lookupEnvRec = go (const False)
 -- | unflattens grammar with inlining.
 unFlatten :: forall c g r. (GrammarD c g) => FlatGrammar c r -> g r
 unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
-  local $ evalStateT (procRHS rhs0) initMemoS
+  local $ evalStateT (procRHS rhs0) M2.empty
   where
-    initMemoS :: MemoS g env
-    initMemoS = MemoS $ const Nothing
+    -- initMemoS :: MemoS g env
+    -- initMemoS = MemoS $ const Nothing
 
-    updateMemoS :: MemoS g env -> Ix env a -> g a -> MemoS g env
-    updateMemoS (MemoS m) x v = MemoS $ \x' ->
-      case eqIx x x' of
-        Just Refl -> Just v
-        Nothing -> m x'
+    -- updateMemoS :: MemoS g env -> Ix env a -> g a -> MemoS g env
+    -- updateMemoS (MemoS m) x v = MemoS $ \x' ->
+    --   case eqIx x x' of
+    --     Just Refl -> Just v
+    --     Nothing -> m x'
 
     procRHS :: RHS c env a -> StateT (MemoS g env) (DefM g) (g a)
     procRHS (MkRHS rs) = asum <$> mapM procProd rs
@@ -81,16 +82,16 @@ unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
     procSymb (Symb c) = return (symb c)
     procSymb (SymbI cs) = return (symbI cs)
     procSymb (NT x) = StateT $ \memo ->
-      case lookupMemoS memo x of
+      case M2.lookup x memo of
         Just r -> return (r, memo)
         Nothing -> do
           let rhs = lookupEnvRec defs x
           if inlinable x rhs
             then do
               (r, m) <- runStateT (procRHS rhs) memo
-              return (r, updateMemoS m x r)
+              return (r, M2.insert x r m)
             else letr1 $ \a -> do
-              (r, m) <- runStateT (procRHS rhs) (updateMemoS memo x a)
+              (r, m) <- runStateT (procRHS rhs) (M2.insert x a memo)
               return (r, (a, m))
 
 _example :: FlatGrammar Char ()
