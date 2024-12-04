@@ -22,7 +22,8 @@ import Prelude hiding (lookup)
 
 -- import Data.Container2
 import Data.Typeable ((:~:) (..))
-import Text.FliPpr.Grammar.Types (Ix (..))
+import Text.FliPpr.Grammar.Types (Ix (..), IxN (..))
+import Unsafe.Coerce (unsafeCoerce)
 
 data Ordering2 a b where
   LT2 :: Ordering2 a b
@@ -45,6 +46,19 @@ instance Ord2 (Ix env) where
   compare2 IxZ (IxS _) = LT2
   compare2 (IxS _) IxZ = GT2
   compare2 (IxS x) (IxS y) = compare2 x y
+
+instance Eq2 (IxN env) where
+  eq2 (IxN w _) (IxN w' _)
+    | w == w' = Just (unsafeCoerce Refl)
+    | otherwise = Nothing
+  {-# INLINEABLE eq2 #-}
+
+instance Ord2 (IxN env) where
+  compare2 (IxN w _) (IxN w' _)
+    | w < w' = LT2
+    | w > w' = GT2
+    | otherwise = unsafeCoerce EQ2
+  {-# INLINEABLE compare2 #-}
 
 -- default eq2 :: (Ord2 k) => k a -> k b -> Maybe (a :~: b)
 -- eq2 x y = case compare2 x y of

@@ -39,7 +39,7 @@ removeNonProductive (FlatGrammar (defs :: Env (RHS c env0) env0) rhs) =
     checkSymb :: Env (Const Bool) env' -> Symb c env' a -> Bool
     checkSymb _ (Symb _) = True
     checkSymb _ (SymbI cs) = not (RS.null cs)
-    checkSymb env (NT x) = getConst $ lookEnv env x
+    checkSymb env (NT x) = getConst $ lookEnv env $ toIx x
 
     checkDefs :: Env (RHS c env') env -> Env (Const Bool) env' -> Env (Const Bool) env
     checkDefs es env = mapEnv (Const . checkRHS env) es
@@ -62,7 +62,7 @@ removeNonProductive (FlatGrammar (defs :: Env (RHS c env0) env0) rhs) =
     procSymb :: Symb c env0 a -> Maybe (Symb c env0 a)
     procSymb (Symb c) = return (Symb c)
     procSymb (SymbI cs) = if RS.null cs then Nothing else return (SymbI cs)
-    procSymb (NT x) = if getConst (lookEnv prodTable x) then return (NT x) else Nothing
+    procSymb (NT x) = if getConst (lookEnv prodTable $ toIx x) then return (NT x) else Nothing
 
 -- | a simple optimizing interpretation
 -- We use the property that
