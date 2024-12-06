@@ -65,7 +65,7 @@ instance Ord2 (IxN env) where
 --   EQ2 -> Just Refl
 --   _ -> Nothing
 
-data Entry k1 k2 = forall a. Entry (k1 a) (k2 a)
+data Entry k1 k2 = forall a. Entry !(k1 a) !(k2 a)
 
 -- data Color = Red | Black
 type Color = Int
@@ -78,7 +78,7 @@ pattern Black = 1
 
 data Map2 k1 k2
   = Leaf
-  | Node {-# UNPACK #-} !Color !(Entry k1 k2) (Map2 k1 k2) (Map2 k1 k2)
+  | Node {-# UNPACK #-} !Color !(Entry k1 k2) !(Map2 k1 k2) !(Map2 k1 k2)
 
 lookup :: (Ord2 k1) => k1 a -> Map2 k1 k2 -> Maybe (k2 a)
 lookup _ Leaf = Nothing

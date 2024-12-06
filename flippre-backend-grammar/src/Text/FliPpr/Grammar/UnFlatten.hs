@@ -11,7 +11,6 @@ module Text.FliPpr.Grammar.UnFlatten (unFlatten) where
 
 import Control.Applicative (asum)
 import Control.Monad.State (StateT (..), evalStateT)
-import Data.Typeable ((:~:) (..))
 import Defs as D
 import Text.FliPpr.Grammar.Types
 
@@ -24,16 +23,16 @@ import Text.FliPpr.Grammar.Internal.Util
 
 type MemoS g env = M2.Map2 (IxN env) g
 
-lookupEnvRec :: Env (RHS c env) env -> IxN env a -> RHS c env a
-lookupEnvRec = go (const False)
+lookupEnvRec :: forall env c a. M2.Map2 (IxN env) (RHS c env) -> IxN env a -> RHS c env a
+lookupEnvRec defs = go (const False)
   where
-    go :: (forall x. IxN env x -> Bool) -> Env (RHS c env) env -> IxN env a -> RHS c env a
-    go memo defs x
+    go :: (forall x. IxN env x -> Bool) -> IxN env b -> RHS c env b
+    go memo x
       | memo x = MkRHS []
       | otherwise =
-          case lookEnv defs (toIx x) of
+          case lookIxMap defs x of
             MkRHS [PCons (NT y) (PNil f)] ->
-              f <$> go (\z -> case M2.eq2 z x of Just _ -> True; _ -> memo z) defs y
+              f <$> go (\z -> case M2.eq2 z x of Just _ -> True; _ -> memo z) y
             rhs -> rhs
 
 -- | unflattens grammar with inlining.
@@ -41,6 +40,7 @@ unFlatten :: forall c g r. (GrammarD c g) => FlatGrammar c r -> g r
 unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
   local $ evalStateT (procRHS rhs0) M2.empty
   where
+    defsMap = envToMap defs
     -- initMemoS :: MemoS g env
     -- initMemoS = MemoS $ const Nothing
 
@@ -85,7 +85,7 @@ unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
       case M2.lookup x memo of
         Just r -> return (r, memo)
         Nothing -> do
-          let rhs = lookupEnvRec defs x
+          let rhs = lookupEnvRec defsMap x
           if inlinable x rhs
             then do
               (r, m) <- runStateT (procRHS rhs) memo
