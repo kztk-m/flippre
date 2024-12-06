@@ -31,7 +31,7 @@ lookIxMap :: M2.Map2 (IxN env) f -> IxN env a -> f a
 lookIxMap m x = fromJust $ M2.lookup x m
 
 traverseEnvWithIxN :: forall m f g as. (Applicative m) => (forall a. IxN as a -> f a -> m (g a)) -> Env f as -> m (Env g as)
-traverseEnvWithIxN f = go (IxN 0 IxZ)
+traverseEnvWithIxN f = go (IxN 0)
   where
     -- unsafe implementation, as we are reluctant to pay computation cost just for type safety
     go :: forall bs b as1. IxN bs b -> Env f as1 -> m (Env g as1)
@@ -39,7 +39,7 @@ traverseEnvWithIxN f = go (IxN 0 IxZ)
     go ix (ECons e es) = ECons <$> f (Unsafe.Coerce.unsafeCoerce ix) e <*> go (ixS ix) es
 
     ixS :: IxN bs b -> IxN (b : bs) b
-    ixS (IxN w x) = IxN (w + 1) (IxS x)
+    ixS (IxN w) = IxN (w + 1) 
     {-# INLINE ixS #-}
 
 -- traverseEnvWithIxN _ ENil = pure ENil

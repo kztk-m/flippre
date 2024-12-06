@@ -5,6 +5,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -44,6 +46,7 @@ import Data.Coerce (coerce)
 import qualified Data.List.Split as Sp
 import Data.String (IsString (..))
 import qualified Prettyprinter as PP
+import Unsafe.Coerce (unsafeCoerce)
 
 class FromSymb c e | e -> c where
   -- | A production of a given single char.
@@ -61,17 +64,21 @@ type GrammarD c e = (Defs e, Grammar c e)
 
 --------------
 
-data IxN env a = IxN {-# UNPACK #-} !Word !(Ix env a) deriving stock Show
+newtype IxN (env :: [k]) (a :: k) = IxN Word deriving stock Show
 
 fromIx :: Ix env a -> IxN env a
-fromIx x0 = IxN (go x0 0) x0
+fromIx x0 = IxN (go x0 0)
   where
     go :: Ix env' a' -> Word -> Word
     go IxZ r = r
     go (IxS x) r = go x $! r + 1
 
 toIx :: IxN env a -> Ix env a
-toIx (IxN _ x) = x
+toIx (IxN n) = go n IxZ unsafeCoerce
+  where
+    go :: Word -> Ix env a -> (forall env'. Ix env' a -> r) -> r
+    go 0 x k = k x
+    go n x k = go (n - 1) (IxS x) k
 
 data Symb c env a where
   NT :: !(IxN env a) -> Symb c env a
@@ -82,7 +89,7 @@ instance (Show c) => PP.Pretty (Symb c env a) where
   pretty (NT x) = fromString ("N" ++ show (go x))
     where
       go :: IxN env' a' -> Word
-      go (IxN w _) = w
+      go (IxN w) = w
   pretty (Symb c) = PP.viaShow c
   -- fromString (show c)
   pretty (SymbI cs) = PP.viaShow cs
