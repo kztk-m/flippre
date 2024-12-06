@@ -262,6 +262,8 @@ optSpaces :: forall g t. (Defs g, Grammar ExChar g) => FlatGrammar ExChar t -> g
 optSpaces (FlatGrammar (defs :: Env (RHS inc env) env) rhs0) =
   local $ evalStateT (asum <$> mapM (\qf -> (<* finalProd qf) <$> procRHS Qn qf rhs0) allStates) emptyMemo
   where
+    defsMap = envToMap defs
+
     allStates = [Qn, Qs, Qss]
 
     finalProd Qn = pure ()
@@ -315,7 +317,7 @@ optSpaces (FlatGrammar (defs :: Env (RHS inc env) env) rhs0) =
       case lookupMemo memo q1 q2 x of
         Just r -> return (r, memo)
         Nothing -> do
-          let rhs = lookEnv defs (toIx x)
+          let rhs = lookIxMap defsMap x
           letr1 $ \a -> do
             (r, memo') <- runStateT (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a)
             return (r, (a, memo'))

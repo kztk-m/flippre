@@ -38,12 +38,12 @@ import Text.FliPpr.Grammar.Types
 import qualified Unembedding.Env as U
 
 data FreeGrammarExp c env a where
-  FNT :: Ix env a -> FreeGrammarExp c env a
-  FSymb :: c -> FreeGrammarExp c env c
-  FSymbI :: RSet c -> FreeGrammarExp c env c
-  FStar :: FreeGrammarExp c env (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
-  FPure :: a -> FreeGrammarExp c env a
-  FAlt :: FreeGrammarExp c env a -> FreeGrammarExp c env a -> FreeGrammarExp c env a
+  FNT :: !(Ix env a) -> FreeGrammarExp c env a
+  FSymb :: !c -> FreeGrammarExp c env c
+  FSymbI :: !(RSet c) -> FreeGrammarExp c env c
+  FStar :: !(FreeGrammarExp c env (a -> b)) -> !(FreeGrammarExp c env a) -> FreeGrammarExp c env b
+  FPure :: !a -> FreeGrammarExp c env a
+  FAlt :: !(FreeGrammarExp c env a) -> !(FreeGrammarExp c env a) -> FreeGrammarExp c env a
   FEmp :: FreeGrammarExp c env a
   -- | Corresponding to the follwing typing rule.
   --
@@ -52,7 +52,7 @@ data FreeGrammarExp c env a where
   --  ------------------
   --   Γ |- local d : B
   -- @
-  UnliftT :: FreeGrammarD c env '[] r -> FreeGrammarExp c env r
+  UnliftT :: !(FreeGrammarD c env '[] r) -> FreeGrammarExp c env r
 
 prettyE :: (Show c) => Int -> Env (Const Int) env -> FreeGrammarExp c env a -> Doc ann
 prettyE _ xs (FNT x) = "x_" <> unsafeViaShow (getConst $ U.lookEnv xs x)
@@ -102,7 +102,7 @@ data FreeGrammarD c env as r where
   --   -------------------------------
   --     Γ |- e |> d : Dec (A, Δ) B
   -- @
-  ConsT :: FreeGrammarExp c env a -> FreeGrammarD c env as r -> FreeGrammarD c env (a : as) r
+  ConsT :: !(FreeGrammarExp c env a) -> !(FreeGrammarD c env as r) -> FreeGrammarD c env (a : as) r
   -- | Construct corresponding to the following rule
   --
   -- @
@@ -110,7 +110,7 @@ data FreeGrammarD c env as r where
   --   ----------------------
   --   Γ |- ret e : Dec ε A
   -- @
-  LiftT :: FreeGrammarExp c env r -> FreeGrammarD c env '[] r
+  LiftT :: !(FreeGrammarExp c env r) -> FreeGrammarD c env '[] r
   -- | Construct corresponding to the folowing rule
   --
   -- @
@@ -118,7 +118,7 @@ data FreeGrammarD c env as r where
   --  -----------------------------
   --    Γ |- letr x. d : Dec Δ B
   -- @
-  LetrT :: FreeGrammarD c (a : env) (a : as) r -> FreeGrammarD c env as r
+  LetrT :: !(FreeGrammarD c (a : env) (a : as) r) -> FreeGrammarD c env as r
 
 instance (Show c, env ~ '[]) => Pretty (FreeGrammarD c env as r) where
   pretty = prettyD 0 ENil
