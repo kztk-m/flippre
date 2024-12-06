@@ -33,10 +33,10 @@ import Prelude hiding (id, (.))
 import qualified Prelude (id, (.))
 
 import Data.Function.Compat (applyWhen)
+import Debug.Trace (trace)
 import Prettyprinter hiding (SEmpty)
 import Text.FliPpr.Grammar.Types
 import qualified Unembedding.Env as U
-import Debug.Trace (trace)
 
 data FreeGrammarExp c env a where
   FNT :: !(Ix env a) -> FreeGrammarExp c env a
@@ -213,11 +213,15 @@ freeze = U.runClose
 
 data DiffF env1 env2
   = SimpleDiffF !Word
-  | OtherDiffF (forall a. IxN env1 a -> IxN env2 a)
+  | forall env'. SODiffF !Word !(forall a. IxN env1 a -> IxN env' a)
+  | OtherDiffF !(forall a. IxN env1 a -> IxN env2 a)
 
 shiftIxN :: DiffF env1 env2 -> IxN env1 a -> IxN env2 a
 shiftIxN (SimpleDiffF w) (IxN n) = IxN (w + n)
 shiftIxN (OtherDiffF f) x = f x
+shiftIxN (SODiffF w f) x =
+  let IxN n = f x
+  in  IxN (w + n)
 
 diffStep :: DiffF env (a : env)
 diffStep = SimpleDiffF 1
@@ -230,7 +234,9 @@ diffTail diff = OtherDiffF $ \(IxN w) ->
 
 instance Category DiffF where
   id = SimpleDiffF 0
-  SimpleDiffF f . SimpleDiffF g = trace (show $ f + g) $ SimpleDiffF (f + g)
+  SimpleDiffF f . SimpleDiffF g = SimpleDiffF (f + g)
+  SimpleDiffF f . OtherDiffF g = SODiffF f g
+  SimpleDiffF f . SODiffF g h = trace (show $ f + g) $ SODiffF (f + g) h
   f . g = OtherDiffF (shiftIxN f Prelude.. shiftIxN g)
 
 data SpecRHS = Empty | Singleton | Other
