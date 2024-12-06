@@ -16,6 +16,7 @@ module Text.FliPpr.Grammar.Internal.Map2 (
   adjust,
   toList,
   fromAscList,
+  traverseMap2,
 ) where
 
 import Prelude hiding (lookup)
@@ -167,6 +168,11 @@ instance (Ord2 k1, Eq2 k2) => Eq (Map2 k1 k2) where
               Just Refl -> go es1 es2
               _ -> False
           _ -> False
+
+traverseMap2 :: (Applicative m) => (forall a. f a -> m (g a)) -> Map2 k f -> m (Map2 k g)
+traverseMap2 _ Leaf = pure Leaf
+traverseMap2 f (Node c (Entry y v) l1 l2) =
+  (Node c . Entry y <$> f v) <*> traverseMap2 f l1 <*> traverseMap2 f l2
 
 -- instance (Ord2 k1) => Container2 (Map2 k1) where
 --   traverse2 _ Leaf = pure Leaf

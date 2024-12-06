@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module Text.FliPpr.Grammar.Internal.Util where
 

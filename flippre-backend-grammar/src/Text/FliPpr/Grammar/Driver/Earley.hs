@@ -21,29 +21,51 @@ import qualified Text.FliPpr.Grammar.Types as G
 
 import Data.String (IsString (..))
 import qualified Prettyprinter as PP
-import Text.FliPpr.Grammar.Internal.Util (traverseEnvWithIx)
+import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
+import qualified Text.FliPpr.Grammar.Internal.Util as G
 
 toEarley :: (Ord c) => G.FlatGrammar c a -> E.Grammar r (E.Prod r c c a)
 toEarley (G.FlatGrammar defs rhs) = do
-  rec env <- traverseEnvWithIx (const $ procRHS env) defs
+  rec env <- M2.traverseMap2 (procRHS env) $ G.envToMap defs
   procRHS env rhs
   where
-    procRHS :: (Ord c) => G.Env (E.Prod r c c) env -> G.RHS c env t -> E.Grammar r (E.Prod r c c t)
+    procRHS :: (Ord c) => M2.Map2 (G.IxN env) (E.Prod r c c) -> G.RHS c env t -> E.Grammar r (E.Prod r c c t)
     procRHS env (G.MkRHS ps) = do
       xs <- mapM (procProd env) ps
       E.rule (asum xs)
 
-    procProd :: (Ord c) => G.Env (E.Prod r c c) env -> G.Prod c env a -> E.Grammar r (E.Prod r c c a)
+    procProd :: (Ord c) => M2.Map2 (G.IxN env) (E.Prod r c c) -> G.Prod c env a -> E.Grammar r (E.Prod r c c a)
     procProd _env (G.PNil a) = return (pure a)
     procProd env (G.PCons s r) = do
       s' <- procSymb env s
       r' <- procProd env r
       return $ (\a k -> k a) <$> s' <*> r'
 
-    procSymb :: (Ord c) => G.Env (E.Prod r c c) env -> G.Symb c env a -> E.Grammar r (E.Prod r c c a)
+    procSymb :: (Ord c) => M2.Map2 (G.IxN env) (E.Prod r c c) -> G.Symb c env a -> E.Grammar r (E.Prod r c c a)
     procSymb _env (G.Symb c) = pure $ E.namedToken c
     procSymb _env (G.SymbI cs) = pure $ E.satisfy (`RS.member` cs)
-    procSymb env (G.NT x) = pure $ G.lookEnv env (G.toIx x)
+    procSymb env (G.NT x) = pure $ G.lookIxMap env x
+
+-- toEarley (G.FlatGrammar defs rhs) = do
+--   rec env <- traverseEnvWithIx (const $ procRHS env) defs
+--   procRHS env rhs
+--   where
+--     procRHS :: (Ord c) => G.Env (E.Prod r c c) env -> G.RHS c env t -> E.Grammar r (E.Prod r c c t)
+--     procRHS env (G.MkRHS ps) = do
+--       xs <- mapM (procProd env) ps
+--       E.rule (asum xs)
+
+--     procProd :: (Ord c) => G.Env (E.Prod r c c) env -> G.Prod c env a -> E.Grammar r (E.Prod r c c a)
+--     procProd _env (G.PNil a) = return (pure a)
+--     procProd env (G.PCons s r) = do
+--       s' <- procSymb env s
+--       r' <- procProd env r
+--       return $ (\a k -> k a) <$> s' <*> r'
+
+--     procSymb :: (Ord c) => G.Env (E.Prod r c c) env -> G.Symb c env a -> E.Grammar r (E.Prod r c c a)
+--     procSymb _env (G.Symb c) = pure $ E.namedToken c
+--     procSymb _env (G.SymbI cs) = pure $ E.satisfy (`RS.member` cs)
+--     procSymb env (G.NT x) = pure $ G.lookEnv env (G.toIx x)
 
 -- | Converts our grammars into those in @Text.Earley@.
 asEarley :: (Ord c) => (forall g. (G.GrammarD c g) => g t) -> E.Grammar r (E.Prod r c c t)
