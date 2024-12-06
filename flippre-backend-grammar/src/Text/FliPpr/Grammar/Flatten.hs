@@ -36,6 +36,7 @@ import Data.Function.Compat (applyWhen)
 import Prettyprinter hiding (SEmpty)
 import Text.FliPpr.Grammar.Types
 import qualified Unembedding.Env as U
+import Debug.Trace (trace)
 
 data FreeGrammarExp c env a where
   FNT :: !(Ix env a) -> FreeGrammarExp c env a
@@ -199,20 +200,38 @@ freeze = U.runClose
 -- A Normalization
 --------------------
 
-newtype DiffF env1 env2
-  = DiffF {shift :: forall a. Ix env1 a -> Ix env2 a}
+-- newtype DiffF env1 env2
+--   = DiffF {shift :: forall a. Ix env1 a -> Ix env2 a}
+
+-- diffStep :: DiffF env (a : env)
+-- diffStep = DiffF weaken
+
+-- diffTail :: DiffF env env' -> DiffF (a : env) (a : env')
+-- diffTail (DiffF diff) = DiffF $ \case
+--   IxZ -> IxZ
+--   (IxS x) -> IxS (diff x)
+
+data DiffF env1 env2
+  = SimpleDiffF !Word
+  | OtherDiffF (forall a. IxN env1 a -> IxN env2 a)
+
+shiftIxN :: DiffF env1 env2 -> IxN env1 a -> IxN env2 a
+shiftIxN (SimpleDiffF w) (IxN n) = IxN (w + n)
+shiftIxN (OtherDiffF f) x = f x
 
 diffStep :: DiffF env (a : env)
-diffStep = DiffF weaken
+diffStep = SimpleDiffF 1
 
 diffTail :: DiffF env env' -> DiffF (a : env) (a : env')
-diffTail (DiffF diff) = DiffF $ \case
-  IxZ -> IxZ
-  (IxS x) -> IxS (diff x)
+diffTail diff = OtherDiffF $ \(IxN w) ->
+  if w == 0
+    then IxN 0
+    else let IxN w' = shiftIxN diff (IxN $ w - 1) in IxN (w' + 1)
 
 instance Category DiffF where
-  id = DiffF Prelude.id
-  DiffF f . DiffF g = DiffF (f Prelude.. g)
+  id = SimpleDiffF 0
+  SimpleDiffF f . SimpleDiffF g = trace (show $ f + g) $ SimpleDiffF (f + g)
+  f . g = OtherDiffF (shiftIxN f Prelude.. shiftIxN g)
 
 data SpecRHS = Empty | Singleton | Other
 data SSpecRHS (c :: SpecRHS) where
@@ -299,7 +318,7 @@ aNormalize ::
 aNormalize (FSymb c) _diff0 = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (Symb c)))
 aNormalize (FSymbI cs) _ = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (SymbI cs)))
 aNormalize (FNT x) diff0 = ANormalizeRes id SSingleton $ \diffF ->
-  (id, SingRHS (fromSymb (NT $ fromIx $ shift (diffF . diff0) x)))
+  (id, SingRHS (fromSymb (NT $ shiftIxN (diffF . diff0) $ fromIx x)))
 aNormalize (FPure a) _diff0 = ANormalizeRes id SSingleton $ const (id, SingRHS (pure a))
 aNormalize (FStar e1 e2) diff0
   | ANormalizeRes diff1 sdecl1 h1 <- aNormalize e1 diff0
@@ -315,9 +334,9 @@ aNormalize (FStar e1 e2) diff0
           let (decls1, r1) = h1 (diffF . diffStep . diffStep . diff2)
               (decls2, r2) = h2 (diffF . diffStep . diffStep)
               d = ECons (unsize r1) . ECons (unsize r2) . decls2 . decls1
-              x1 = shift diffF IxZ
-              x2 = shift diffF (IxS IxZ)
-          in  (d, SingRHS $ fromSymb (NT $ fromIx x1) <*> fromSymb (NT $ fromIx x2))
+              x1 = shiftIxN diffF $ fromIx IxZ
+              x2 = shiftIxN diffF $ fromIx (IxS IxZ)
+          in  (d, SingRHS $ fromSymb (NT x1) <*> fromSymb (NT x2))
 aNormalize FEmp _diff0 = ANormalizeRes id SEmpty $ const (id, EmptyRHS)
 aNormalize (FAlt e1 e2) diff0
   | ANormalizeRes diff1 sdecl1 h1 <- aNormalize e1 diff0

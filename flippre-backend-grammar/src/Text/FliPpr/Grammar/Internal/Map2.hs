@@ -52,13 +52,13 @@ instance Ord2 (Ix env) where
   compare2 (IxS x) (IxS y) = compare2 x y
 
 instance Eq2 (IxN env) where
-  eq2 (IxN w _) (IxN w' _)
+  eq2 (IxN w) (IxN w')
     | w == w' = Just (unsafeCoerce Refl)
     | otherwise = Nothing
   {-# INLINEABLE eq2 #-}
 
 instance Ord2 (IxN env) where
-  compare2 (IxN w _) (IxN w' _)
+  compare2 (IxN w) (IxN w')
     | w < w' = LT2
     | w > w' = GT2
     | otherwise = unsafeCoerce EQ2
