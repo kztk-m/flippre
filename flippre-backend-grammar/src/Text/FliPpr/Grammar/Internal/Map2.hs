@@ -130,7 +130,7 @@ empty = Leaf
 fromAscList :: (Ord2 k1) => [Entry k1 k2] -> Map2 k1 k2
 fromAscList = \xs -> fst $ go False (length xs) xs
   where
-    -- go b n es takes the first (if b then n else n-1) element from the list to
+    -- go b n es takes the first (if b then n else n-1) elements from the list to
     -- return a tree together with the rest elements.
     go :: (Ord2 k1) => Bool -> Int -> [Entry k1 k2] -> (Map2 k1 k2, [Entry k1 k2])
     go False 1 (e : es) = (Node Red e Leaf Leaf, es)
