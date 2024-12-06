@@ -28,7 +28,6 @@ import Data.String (IsString (..))
 import qualified Prettyprinter as PP
 
 import Control.Monad.State (StateT (..), evalStateT)
-import Data.Typeable ((:~:) (..))
 
 -- import Debug.Trace (trace)
 import Defs
