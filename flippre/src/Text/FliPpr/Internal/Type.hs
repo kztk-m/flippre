@@ -32,6 +32,7 @@ module Text.FliPpr.Internal.Type (
   arg,
   app,
   (@@),
+  abort,
   charAs,
   case_,
   unpair,
@@ -67,7 +68,6 @@ import Control.Monad.State hiding (lift)
 import Data.Coerce (coerce)
 import qualified Data.Fin as F
 import Data.Kind (Type)
-import Data.Semigroup (Semigroup (..))
 import qualified Data.Type.Nat as F
 import Data.Typeable (Proxy (..))
 
@@ -83,6 +83,7 @@ import Control.Arrow (first)
 import Data.Function.Compat (applyWhen)
 import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
+import GHC.Stack (HasCallStack)
 
 -- | A kind for datatypes in FliPpr.
 data FType = FTypeD | Type :~> FType
@@ -121,6 +122,8 @@ class FliPprE (arg :: Type -> Type) (exp :: FType -> Type) | exp -> arg where
   fcharAs :: arg Char -> RS.RSet Char -> exp D
 
   ftext :: String -> exp D
+
+  fabort :: (HasCallStack) => exp D -- throws an error in pretty-printing, accepts no strings in parsing
 
   fempty :: exp D
   fcat :: exp D -> exp D -> exp D
@@ -266,6 +269,12 @@ nespaces' = (coerce :: exp D -> E exp D) fnespaces'
 {-# INLINEABLE line' #-}
 line' :: (FliPprE arg exp) => E exp D
 line' = (coerce :: exp D -> E exp D) fline'
+
+{-# INLINEABLE abort #-}
+
+-- | In pretty-printing 'abort' throws an error. In parsing, it accepts no strings.
+abort :: (FliPprE arg exp, HasCallStack) => E exp D
+abort = (coerce :: exp D -> E exp D) fabort
 
 -- | A wrapper for 'farg'.
 -- @f@ of @arg f@ must be a linear function. In other words, @f@ must use its input exactly once.

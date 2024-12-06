@@ -145,7 +145,7 @@ import Text.FliPpr.Pat
 import Text.FliPpr.TH
 
 import qualified Data.RangeSet.List as RS
-import qualified Defs
+import GHC.Stack (HasCallStack, withFrozenCallStack)
 import Text.FliPpr.Automaton as A
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
@@ -274,24 +274,22 @@ $(mkUn ''(,,))
 
 -- | @textAs x r@ serves as @text x@ in pretty-printing, but
 -- in parsing it serves as @r@ of which parsing result is used to update @x$.
-textAs :: (FliPprD arg exp) => A arg String -> A.DFA Char -> E exp D
-textAs = flip textAs'
+textAs :: (FliPprD arg exp, HasCallStack) => A arg String -> A.DFA Char -> E exp D
+textAs a m = withFrozenCallStack (textAs' m a)
 
-textAs' :: (FliPprD arg exp) => A.DFA Char -> A arg [Char] -> E exp D
+textAs' :: (FliPprD arg exp, HasCallStack) => A.DFA Char -> A arg [Char] -> E exp D
 textAs' (A.DFAImpl i qs fs tr) = local $
-  letr $ \abort ->
-    def abort $
-      letrs (S.toList qs) $ \f ->
-        def
-          ( \q s ->
-              case_
-                s
-                [ unNil $ if q `S.member` fs then text "" else abort
-                , unCons $ \c r ->
-                    case_ c [isMember cs $ \c' -> charAs c' cs <#> f q' r | (cs, q') <- fromMaybe [] $ M.lookup q tr]
-                ]
-          )
-          $ return (f i)
+  letrs (S.toList qs) $ \f ->
+    def
+      ( \q s ->
+          case_
+            s
+            [ unNil $ if q `S.member` fs then text "" else abort
+            , unCons $ \c r ->
+                case_ c [isMember cs $ \c' -> charAs c' cs <#> f q' r | (cs, q') <- fromMaybe [] $ M.lookup q tr]
+            ]
+      )
+      $ return (f i)
 
 -- | A list printer.
 --
