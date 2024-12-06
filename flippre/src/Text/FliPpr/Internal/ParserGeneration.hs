@@ -220,8 +220,14 @@ instance FliPprE PArg (PExp ann s) where
   fcharAs a cs = PExp $ \tenv ->
     let x = unPArg a tenv
     in  (\c -> do env <- tryUpdateEnv x (Just $ EqI $ unNormalChar c) (PE.undeterminedEnv tenv); return $ RD env)
-          <$> G.symbI (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
+          <$> symbI' (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
     where
+      symbI' :: (G.FromSymb G.ExChar s) => RS.RSet G.ExChar -> s G.ExChar
+      symbI' cs_
+        | RS.size cs_ == 1 = G.symb $ RS.findMin cs_
+        | otherwise = G.symbI cs_
+
+      unNormalChar :: G.ExChar -> Char
       unNormalChar (G.NormalChar c) = c
       unNormalChar _ = error "Cannot happen."
 
