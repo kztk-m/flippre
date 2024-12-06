@@ -17,11 +17,14 @@ module Text.FliPpr.Grammar.Internal.Map2 (
   toList,
   fromAscList,
   traverseMap2,
+  mapMap2,
 ) where
 
 import Prelude hiding (lookup)
 
 -- import Data.Container2
+
+import Data.Functor.Identity (Identity (..))
 import Data.Typeable ((:~:) (..))
 import Text.FliPpr.Grammar.Types (Ix (..), IxN (..))
 import Unsafe.Coerce (unsafeCoerce)
@@ -173,6 +176,9 @@ traverseMap2 :: (Applicative m) => (forall a. f a -> m (g a)) -> Map2 k f -> m (
 traverseMap2 _ Leaf = pure Leaf
 traverseMap2 f (Node c (Entry y v) l1 l2) =
   (Node c . Entry y <$> f v) <*> traverseMap2 f l1 <*> traverseMap2 f l2
+
+mapMap2 :: (forall a. f a -> g a) -> Map2 k f -> Map2 k g
+mapMap2 f = runIdentity . traverseMap2 (Identity . f)
 
 -- instance (Ord2 k1) => Container2 (Map2 k1) where
 --   traverse2 _ Leaf = pure Leaf
