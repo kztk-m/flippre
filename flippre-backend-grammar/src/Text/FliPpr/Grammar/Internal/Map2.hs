@@ -111,8 +111,8 @@ insert x0 v0 = makeBlack . go x0 v0
     go x v Leaf = Node Red (Entry x v) Leaf Leaf
     go x v (Node o e@(Entry y _) l1 l2) =
       case compare2 x y of
-        LT2 -> node o e (insert x v l1) l2
-        GT2 -> node o e l1 (insert x v l2)
+        LT2 -> node o e (go x v l1) l2
+        GT2 -> node o e l1 (go x v l2)
         EQ2 -> Node o (Entry y v) l1 l2
 
     {-# INLINEABLE node #-}
