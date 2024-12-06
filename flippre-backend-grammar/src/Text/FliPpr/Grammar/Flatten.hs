@@ -25,15 +25,14 @@ import Data.Proxy (Proxy (..))
 import Data.RangeSet.List (RSet)
 
 import Defs
-import Unembedding (Dim' (..), EnvI, LiftVariables (..), Variables (..))
+import Unembedding (Dim' (..), EnvI, LiftVariables (..))
 import qualified Unembedding as U
 
 import Control.Category (Category (..))
 import Prelude hiding (id, (.))
-import qualified Prelude (id, (.))
+import qualified Prelude ((.))
 
 import Data.Function.Compat (applyWhen)
-import Debug.Trace (trace)
 import Prettyprinter hiding (SEmpty)
 import Text.FliPpr.Grammar.Types
 import qualified Unembedding.Env as U
@@ -236,7 +235,7 @@ instance Category DiffF where
   id = SimpleDiffF 0
   SimpleDiffF f . SimpleDiffF g = SimpleDiffF (f + g)
   SimpleDiffF f . OtherDiffF g = SODiffF f g
-  SimpleDiffF f . SODiffF g h = trace (show $ f + g) $ SODiffF (f + g) h
+  SimpleDiffF f . SODiffF g h = SODiffF (f + g) h
   f . g = OtherDiffF (shiftIxN f Prelude.. shiftIxN g)
 
 data SpecRHS = Empty | Singleton | Other

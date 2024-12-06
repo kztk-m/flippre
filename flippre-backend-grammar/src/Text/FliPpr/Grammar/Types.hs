@@ -74,7 +74,7 @@ fromIx x0 = IxN (go x0 0)
     go (IxS x) r = go x $! r + 1
 
 toIx :: IxN env a -> Ix env a
-toIx (IxN n) = go n IxZ unsafeCoerce
+toIx (IxN n0) = go n0 IxZ unsafeCoerce
   where
     go :: Word -> Ix env a -> (forall env'. Ix env' a -> r) -> r
     go 0 x k = k x
