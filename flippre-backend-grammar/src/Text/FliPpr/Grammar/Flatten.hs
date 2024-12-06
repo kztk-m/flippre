@@ -55,12 +55,15 @@ data FreeGrammarExp c env a where
   UnliftT :: !(FreeGrammarD c env '[] r) -> FreeGrammarExp c env r
 
 prettyE :: (Show c) => Int -> Env (Const Int) env -> FreeGrammarExp c env a -> Doc ann
-prettyE _ xs (FNT x) = "x_" <> unsafeViaShow (getConst $ U.lookEnv xs x)
+prettyE _ xs (FNT x) = "x" <> unsafeViaShow (getConst $ U.lookEnv xs x)
 prettyE k _ (FSymb c) =
   applyWhen (k > 9) parens $
     "symb" <+> unsafeViaShow c
 prettyE k _ (FSymbI cs) =
   applyWhen (k > 9) parens $ "symbI" <+> unsafeViaShow cs
+prettyE k xs (FStar (FPure _) e) =
+  applyWhen (k > 4) parens $
+    "_ <$>" <+> prettyE 5 xs e
 prettyE k xs (FStar e1 e2) =
   applyWhen (k > 4) parens $
     prettyE 4 xs e1 <+> "<*>" <+> prettyE 5 xs e2
@@ -70,10 +73,15 @@ prettyE k xs (FAlt e1 e2) =
   align $
     group $
       applyWhen (k > 3) parens $
-        vsep [prettyE 3 xs e1, "<|>" <+> prettyE 4 xs e2]
+        vsep $
+          prettyE 3 xs e1 : ["<|>" <+> prettyE 4 xs e' | e' <- es]
+  where
+    es = getAlts e2
+    getAlts (FAlt e1' e2') = getAlts e1' ++ getAlts e2'
+    getAlts e = [e]
 prettyE _ _ FEmp = "empty"
 prettyE k xs (UnliftT d) =
-  align $ group $ applyWhen (k > 9) parens $ "liftD" <+> prettyD 10 xs d
+  applyWhen (k > 9) parens $ align $ sep ["liftD", nest 2 $ align $ prettyD 10 xs d]
 
 instance (Show c, env ~ '[]) => Pretty (FreeGrammarExp c env a) where
   pretty = prettyE 0 ENil
@@ -86,13 +94,14 @@ prettyD k xs (ConsT e d) =
 prettyD k xs (LiftT e) =
   applyWhen (k > 9) parens $ "liftD" <+> prettyE 10 xs e
 prettyD k xs (LetrT d) =
-  applyWhen (k > 9) parens $ "letrD" <+> body
+  applyWhen (k > 0) parens $ align $ "letrD" <+> "$" <+> body
   where
-    body =
-      parens . align . group $
-        ("\\ x_" <> pretty n <+> "->")
-          <+> align (group $ prettyD 0 (ECons (Const n) xs) d)
     n = U.lenEnv xs
+    body =
+      sep
+        [ "\\x" <> pretty n <+> "->"
+        , nest 2 (align $ group $ prettyD 0 (ECons (Const n) xs) d)
+        ]
 
 data FreeGrammarD c env as r where
   -- | Construct corresponding to the following rule
@@ -155,20 +164,18 @@ instance Functor (EnvI (FreeGrammarExp c)) where
   fmap f0 = U.liftFO1 (h f0)
     where
       h :: (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
-      h f (FPure x) = FPure (f x)
-      --      h f (FStar e1 e2) = FStar (h (f .) e1) e2
-      h _ FEmp = FEmp
-      h f x = FPure f `FStar` x
+      h f e = FPure f `fstar` e
+
+fstar :: FreeGrammarExp c env (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
+fstar (FPure f) (FPure x) = FPure (f x)
+fstar (FPure f) (FStar (FPure g) e) = fstar (FPure (f . g)) e
+fstar FEmp _ = FEmp
+fstar _ FEmp = FEmp
+fstar e1 e2 = e1 `FStar` e2
 
 instance Applicative (EnvI (FreeGrammarExp c)) where
   pure x = U.liftFO0 (FPure x)
   (<*>) = U.liftFO2 fstar
-    where
-      fstar :: FreeGrammarExp c env (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
-      fstar (FPure f) (FPure x) = FPure (f x)
-      fstar FEmp _ = FEmp
-      fstar _ FEmp = FEmp
-      fstar e1 e2 = e1 `FStar` e2
 
 instance Alternative (EnvI (FreeGrammarExp c)) where
   empty = U.liftFO0 FEmp
