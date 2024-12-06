@@ -22,7 +22,10 @@ eqIx _ _ = Nothing
 
 envToMap :: Env f as -> M2.Map2 (IxN as) f
 envToMap es =
-  appEndo (getConst $ traverseEnvWithIxN (\ix e -> Const $ Endo (M2.insert ix e)) es) M2.empty
+  let entries = appEndo (getConst $ traverseEnvWithIxN (\ix e -> Const $ Endo (M2.Entry ix e :)) es) []
+  in  M2.fromAscList entries
+
+-- appEndo (getConst $ traverseEnvWithIxN (\ix e -> Const $ Endo (M2.insert ix e)) es) M2.empty
 
 lookIxMap :: M2.Map2 (IxN env) f -> IxN env a -> f a
 lookIxMap m x = fromJust $ M2.lookup x m
