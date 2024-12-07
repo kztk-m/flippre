@@ -25,12 +25,12 @@ import Data.Proxy (Proxy (..))
 import Data.RangeSet.List (RSet)
 
 import Defs
-import Unembedding (Dim' (..), EnvI, LiftVariables (..), Variables (..))
+import Unembedding (Dim' (..), EnvI, LiftVariables (..))
 import qualified Unembedding as U
 
 import Control.Category (Category (..))
 import Prelude hiding (id, (.))
-import qualified Prelude (id, (.))
+import qualified Prelude ((.))
 
 import Data.Function.Compat (applyWhen)
 import Prettyprinter hiding (SEmpty)
@@ -38,12 +38,12 @@ import Text.FliPpr.Grammar.Types
 import qualified Unembedding.Env as U
 
 data FreeGrammarExp c env a where
-  FNT :: Ix env a -> FreeGrammarExp c env a
-  FSymb :: c -> FreeGrammarExp c env c
-  FSymbI :: RSet c -> FreeGrammarExp c env c
-  FStar :: FreeGrammarExp c env (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
-  FPure :: a -> FreeGrammarExp c env a
-  FAlt :: FreeGrammarExp c env a -> FreeGrammarExp c env a -> FreeGrammarExp c env a
+  FNT :: !(Ix env a) -> FreeGrammarExp c env a
+  FSymb :: !c -> FreeGrammarExp c env c
+  FSymbI :: !(RSet c) -> FreeGrammarExp c env c
+  FStar :: !(FreeGrammarExp c env (a -> b)) -> !(FreeGrammarExp c env a) -> FreeGrammarExp c env b
+  FPure :: !a -> FreeGrammarExp c env a
+  FAlt :: !(FreeGrammarExp c env a) -> !(FreeGrammarExp c env a) -> FreeGrammarExp c env a
   FEmp :: FreeGrammarExp c env a
   -- | Corresponding to the follwing typing rule.
   --
@@ -52,15 +52,18 @@ data FreeGrammarExp c env a where
   --  ------------------
   --   Γ |- local d : B
   -- @
-  UnliftT :: FreeGrammarD c env '[] r -> FreeGrammarExp c env r
+  UnliftT :: !(FreeGrammarD c env '[] r) -> FreeGrammarExp c env r
 
 prettyE :: (Show c) => Int -> Env (Const Int) env -> FreeGrammarExp c env a -> Doc ann
-prettyE _ xs (FNT x) = "x_" <> unsafeViaShow (getConst $ U.lookEnv xs x)
+prettyE _ xs (FNT x) = "x" <> unsafeViaShow (getConst $ U.lookEnv xs x)
 prettyE k _ (FSymb c) =
   applyWhen (k > 9) parens $
     "symb" <+> unsafeViaShow c
 prettyE k _ (FSymbI cs) =
   applyWhen (k > 9) parens $ "symbI" <+> unsafeViaShow cs
+prettyE k xs (FStar (FPure _) e) =
+  applyWhen (k > 4) parens $
+    "_ <$>" <+> prettyE 5 xs e
 prettyE k xs (FStar e1 e2) =
   applyWhen (k > 4) parens $
     prettyE 4 xs e1 <+> "<*>" <+> prettyE 5 xs e2
@@ -70,10 +73,15 @@ prettyE k xs (FAlt e1 e2) =
   align $
     group $
       applyWhen (k > 3) parens $
-        vsep [prettyE 3 xs e1, "<|>" <+> prettyE 4 xs e2]
+        vsep $
+          prettyE 3 xs e1 : ["<|>" <+> prettyE 4 xs e' | e' <- es]
+  where
+    es = getAlts e2
+    getAlts (FAlt e1' e2') = getAlts e1' ++ getAlts e2'
+    getAlts e = [e]
 prettyE _ _ FEmp = "empty"
 prettyE k xs (UnliftT d) =
-  align $ group $ applyWhen (k > 9) parens $ "liftD" <+> prettyD 10 xs d
+  applyWhen (k > 9) parens $ align $ sep ["liftD", nest 2 $ align $ prettyD 10 xs d]
 
 instance (Show c, env ~ '[]) => Pretty (FreeGrammarExp c env a) where
   pretty = prettyE 0 ENil
@@ -86,13 +94,14 @@ prettyD k xs (ConsT e d) =
 prettyD k xs (LiftT e) =
   applyWhen (k > 9) parens $ "liftD" <+> prettyE 10 xs e
 prettyD k xs (LetrT d) =
-  applyWhen (k > 9) parens $ "letrD" <+> body
+  applyWhen (k > 0) parens $ align $ "letrD" <+> "$" <+> body
   where
-    body =
-      parens . align . group $
-        ("\\ x_" <> pretty n <+> "->")
-          <+> align (group $ prettyD 0 (ECons (Const n) xs) d)
     n = U.lenEnv xs
+    body =
+      sep
+        [ "\\x" <> pretty n <+> "->"
+        , nest 2 (align $ group $ prettyD 0 (ECons (Const n) xs) d)
+        ]
 
 data FreeGrammarD c env as r where
   -- | Construct corresponding to the following rule
@@ -102,7 +111,7 @@ data FreeGrammarD c env as r where
   --   -------------------------------
   --     Γ |- e |> d : Dec (A, Δ) B
   -- @
-  ConsT :: FreeGrammarExp c env a -> FreeGrammarD c env as r -> FreeGrammarD c env (a : as) r
+  ConsT :: !(FreeGrammarExp c env a) -> !(FreeGrammarD c env as r) -> FreeGrammarD c env (a : as) r
   -- | Construct corresponding to the following rule
   --
   -- @
@@ -110,7 +119,7 @@ data FreeGrammarD c env as r where
   --   ----------------------
   --   Γ |- ret e : Dec ε A
   -- @
-  LiftT :: FreeGrammarExp c env r -> FreeGrammarD c env '[] r
+  LiftT :: !(FreeGrammarExp c env r) -> FreeGrammarD c env '[] r
   -- | Construct corresponding to the folowing rule
   --
   -- @
@@ -118,7 +127,7 @@ data FreeGrammarD c env as r where
   --  -----------------------------
   --    Γ |- letr x. d : Dec Δ B
   -- @
-  LetrT :: FreeGrammarD c (a : env) (a : as) r -> FreeGrammarD c env as r
+  LetrT :: !(FreeGrammarD c (a : env) (a : as) r) -> FreeGrammarD c env as r
 
 instance (Show c, env ~ '[]) => Pretty (FreeGrammarD c env as r) where
   pretty = prettyD 0 ENil
@@ -155,20 +164,18 @@ instance Functor (EnvI (FreeGrammarExp c)) where
   fmap f0 = U.liftFO1 (h f0)
     where
       h :: (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
-      h f (FPure x) = FPure (f x)
-      --      h f (FStar e1 e2) = FStar (h (f .) e1) e2
-      h _ FEmp = FEmp
-      h f x = FPure f `FStar` x
+      h f e = FPure f `fstar` e
+
+fstar :: FreeGrammarExp c env (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
+fstar (FPure f) (FPure x) = FPure (f x)
+fstar (FPure f) (FStar (FPure g) e) = fstar (FPure (f . g)) e
+fstar FEmp _ = FEmp
+fstar _ FEmp = FEmp
+fstar e1 e2 = e1 `FStar` e2
 
 instance Applicative (EnvI (FreeGrammarExp c)) where
   pure x = U.liftFO0 (FPure x)
   (<*>) = U.liftFO2 fstar
-    where
-      fstar :: FreeGrammarExp c env (a -> b) -> FreeGrammarExp c env a -> FreeGrammarExp c env b
-      fstar (FPure f) (FPure x) = FPure (f x)
-      fstar FEmp _ = FEmp
-      fstar _ FEmp = FEmp
-      fstar e1 e2 = e1 `FStar` e2
 
 instance Alternative (EnvI (FreeGrammarExp c)) where
   empty = U.liftFO0 FEmp
@@ -199,20 +206,44 @@ freeze = U.runClose
 -- A Normalization
 --------------------
 
-newtype DiffF env1 env2
-  = DiffF {shift :: forall a. Ix env1 a -> Ix env2 a}
+-- newtype DiffF env1 env2
+--   = DiffF {shift :: forall a. Ix env1 a -> Ix env2 a}
+
+-- diffStep :: DiffF env (a : env)
+-- diffStep = DiffF weaken
+
+-- diffTail :: DiffF env env' -> DiffF (a : env) (a : env')
+-- diffTail (DiffF diff) = DiffF $ \case
+--   IxZ -> IxZ
+--   (IxS x) -> IxS (diff x)
+
+data DiffF env1 env2
+  = SimpleDiffF !Word
+  | forall env'. SODiffF !Word !(forall a. IxN env1 a -> IxN env' a)
+  | OtherDiffF !(forall a. IxN env1 a -> IxN env2 a)
+
+shiftIxN :: DiffF env1 env2 -> IxN env1 a -> IxN env2 a
+shiftIxN (SimpleDiffF w) (IxN n) = IxN (w + n)
+shiftIxN (OtherDiffF f) x = f x
+shiftIxN (SODiffF w f) x =
+  let IxN n = f x
+  in  IxN (w + n)
 
 diffStep :: DiffF env (a : env)
-diffStep = DiffF weaken
+diffStep = SimpleDiffF 1
 
 diffTail :: DiffF env env' -> DiffF (a : env) (a : env')
-diffTail (DiffF diff) = DiffF $ \case
-  IxZ -> IxZ
-  (IxS x) -> IxS (diff x)
+diffTail diff = OtherDiffF $ \(IxN w) ->
+  if w == 0
+    then IxN 0
+    else let IxN w' = shiftIxN diff (IxN $ w - 1) in IxN (w' + 1)
 
 instance Category DiffF where
-  id = DiffF Prelude.id
-  DiffF f . DiffF g = DiffF (f Prelude.. g)
+  id = SimpleDiffF 0
+  SimpleDiffF f . SimpleDiffF g = SimpleDiffF (f + g)
+  SimpleDiffF f . OtherDiffF g = SODiffF f g
+  SimpleDiffF f . SODiffF g h = SODiffF (f + g) h
+  f . g = OtherDiffF (shiftIxN f Prelude.. shiftIxN g)
 
 data SpecRHS = Empty | Singleton | Other
 data SSpecRHS (c :: SpecRHS) where
@@ -299,7 +330,7 @@ aNormalize ::
 aNormalize (FSymb c) _diff0 = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (Symb c)))
 aNormalize (FSymbI cs) _ = ANormalizeRes id SSingleton $ const (id, SingRHS (fromSymb (SymbI cs)))
 aNormalize (FNT x) diff0 = ANormalizeRes id SSingleton $ \diffF ->
-  (id, SingRHS (fromSymb (NT $ shift (diffF . diff0) x)))
+  (id, SingRHS (fromSymb (NT $ shiftIxN (diffF . diff0) $ fromIx x)))
 aNormalize (FPure a) _diff0 = ANormalizeRes id SSingleton $ const (id, SingRHS (pure a))
 aNormalize (FStar e1 e2) diff0
   | ANormalizeRes diff1 sdecl1 h1 <- aNormalize e1 diff0
@@ -315,8 +346,8 @@ aNormalize (FStar e1 e2) diff0
           let (decls1, r1) = h1 (diffF . diffStep . diffStep . diff2)
               (decls2, r2) = h2 (diffF . diffStep . diffStep)
               d = ECons (unsize r1) . ECons (unsize r2) . decls2 . decls1
-              x1 = shift diffF IxZ
-              x2 = shift diffF (IxS IxZ)
+              x1 = shiftIxN diffF $ fromIx IxZ
+              x2 = shiftIxN diffF $ fromIx (IxS IxZ)
           in  (d, SingRHS $ fromSymb (NT x1) <*> fromSymb (NT x2))
 aNormalize FEmp _diff0 = ANormalizeRes id SEmpty $ const (id, EmptyRHS)
 aNormalize (FAlt e1 e2) diff0

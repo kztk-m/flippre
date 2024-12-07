@@ -32,6 +32,7 @@ module Text.FliPpr.Internal.Type (
   arg,
   app,
   (@@),
+  abort,
   charAs,
   case_,
   unpair,
@@ -67,7 +68,6 @@ import Control.Monad.State hiding (lift)
 import Data.Coerce (coerce)
 import qualified Data.Fin as F
 import Data.Kind (Type)
-import Data.Semigroup (Semigroup (..))
 import qualified Data.Type.Nat as F
 import Data.Typeable (Proxy (..))
 
@@ -83,6 +83,7 @@ import Control.Arrow (first)
 import Data.Function.Compat (applyWhen)
 import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
+import GHC.Stack (HasCallStack)
 
 -- | A kind for datatypes in FliPpr.
 data FType = FTypeD | Type :~> FType
@@ -101,7 +102,8 @@ data PartialBij a b = PartialBij !String !(a -> Maybe b) !(b -> Maybe a)
 
 -- | A datatype represents branches.
 data Branch arg exp a (t :: FType)
-  = forall b. (In b) => Branch (PartialBij a b) (arg b -> exp t)
+  = -- | the part @arg b -> exp t@ must be a linear function
+    forall b. (In b) => Branch (PartialBij a b) (arg b -> exp t)
 
 -- | A finally-tagless implementation of FliPpr expressions.
 --   The APIs are only for internal use.
@@ -120,6 +122,8 @@ class FliPprE (arg :: Type -> Type) (exp :: FType -> Type) | exp -> arg where
   fcharAs :: arg Char -> RS.RSet Char -> exp D
 
   ftext :: String -> exp D
+
+  fabort :: (HasCallStack) => exp D -- throws an error in pretty-printing, accepts no strings in parsing
 
   fempty :: exp D
   fcat :: exp D -> exp D -> exp D
@@ -266,7 +270,14 @@ nespaces' = (coerce :: exp D -> E exp D) fnespaces'
 line' :: (FliPprE arg exp) => E exp D
 line' = (coerce :: exp D -> E exp D) fline'
 
+{-# INLINEABLE abort #-}
+
+-- | In pretty-printing 'abort' throws an error. In parsing, it accepts no strings.
+abort :: (FliPprE arg exp, HasCallStack) => E exp D
+abort = (coerce :: exp D -> E exp D) fabort
+
 -- | A wrapper for 'farg'.
+-- @f@ of @arg f@ must be a linear function. In other words, @f@ must use its input exactly once.
 {-# INLINEABLE arg #-}
 arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
 arg =
@@ -320,6 +331,7 @@ case_ =
 
 -- | A CPS style conversion from @A arg (a,b)@ to a pair of @A arg a@ and @A arg b@.
 --   A typical use of 'unpair' is to implement (invertible) pattern matching in FliPpr.
+--   To guarantee invertibility, @k@ of @unpair x k@ must be a linear function.
 --
 --   'Language.FliPpr.TH' provides 'un' and 'branch'. By using these functions,
 --   one can avoid using a bit awkward 'unpair' explicitly.
@@ -334,6 +346,7 @@ unpair =
 
 -- unpair (A x) k = E $ funpair x (coerce k)
 
+-- | An explicit disposal of `A arg ()`, required by the invertibility guarantee.
 {-# INLINEABLE ununit #-}
 ununit :: (FliPprE arg exp) => A arg () -> E exp r -> E exp r
 ununit =
@@ -387,7 +400,7 @@ class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, r -> arg exp t
   -- ^ @toFunction :: E exp (a1 ~> ... ~> an ~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
 
   fromFunction :: r -> E exp t
-  -- ^ @fromFunction :: A arg a1 -> ... -> A arg an -> E exp D -> E exp (a1 ~> ... ~> an ~> D)@
+  -- ^ @fromFunction :: (A arg a1 -> ... -> A arg an -> E exp D) -> E exp (a1 ~> ... ~> an ~> D)@
 
 instance (FliPprE arg exp) => Repr arg exp t (E exp t) where
   toFunction = id
@@ -447,13 +460,11 @@ mfixF = Defs.mfixDefM
 def :: (Functor m) => a -> m b -> m (a, b)
 def a b = (a,) <$> b
 
--- | Spacilized version of 'Defs.share'
--- share ::(Repr arg exp ft rep,  FliPprD arg exp) => rep -> FliPprM exp rep
--- share = fmap toFunction . Defs.share . fromFunction
+-- | Sharing a computation.
 share :: (Defs.Arg (E f) r) => r -> FliPprM f r
 share e = Defs.letr $ \x -> return (e, x)
 
--- | Specialized version of 'Defs.local'
+-- | Localize declarations.
 local :: (Repr arg exp ft rep, FliPprD arg exp) => FliPprM exp rep -> rep
 local = toFunction . Defs.local . fmap fromFunction
 

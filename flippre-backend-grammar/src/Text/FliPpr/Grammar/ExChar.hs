@@ -28,11 +28,11 @@ import Data.String (IsString (..))
 import qualified Prettyprinter as PP
 
 import Control.Monad.State (StateT (..), evalStateT)
-import Data.Typeable ((:~:) (..))
 
 -- import Debug.Trace (trace)
 import Defs
 import Text.FliPpr.Grammar.Flatten (flatten)
+import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
 import Text.FliPpr.Grammar.Internal.Util
 import Text.FliPpr.Grammar.Simplify (simplify)
 import Text.FliPpr.Grammar.Types
@@ -217,18 +217,43 @@ thawSpace sp0 g = local $ do
   return (runThawSpace g sp sps)
 {-# INLINE thawSpace #-}
 
--- FIXME: will be replaced by Map2
-newtype Memo env g = Memo {lookupMemo :: forall a. Qsp -> Qsp -> Ix env a -> Maybe (g a)}
+data MemoEntry env a = MemoEntry {-# UNPACK #-} !Qsp {-# UNPACK #-} !Qsp !(IxN env a)
+
+instance M2.Eq2 (MemoEntry env) where
+  eq2 (MemoEntry q1 q2 x) (MemoEntry q1' q2' x')
+    | q1 == q1' && q2 == q2' = M2.eq2 x x'
+    | otherwise = Nothing
+
+instance M2.Ord2 (MemoEntry env) where
+  compare2 (MemoEntry q1 q2 x) (MemoEntry q1' q2' x') =
+    case compare (q1, q2) (q1', q2') of
+      LT -> M2.LT2
+      GT -> M2.GT2
+      EQ -> M2.compare2 x x'
+
+type Memo env g = M2.Map2 (MemoEntry env) g
+
+lookupMemo :: Memo env g -> Qsp -> Qsp -> IxN env a -> Maybe (g a)
+lookupMemo m q1 q2 x = M2.lookup (MemoEntry q1 q2 x) m
 
 emptyMemo :: Memo env g
-emptyMemo = Memo $ \_ _ _ -> Nothing
+emptyMemo = M2.empty
 
-updateMemo :: Memo env g -> Qsp -> Qsp -> Ix env a -> g a -> Memo env g
-updateMemo (Memo f) q1 q2 x k =
-  Memo $ \q1' q2' x' ->
-    case eqIx x x' of
-      Just Refl | q1 == q1', q2 == q2' -> Just k
-      _ -> f q1' q2' x'
+updateMemo :: Memo env g -> Qsp -> Qsp -> IxN env a -> g a -> Memo env g
+updateMemo m q1 q2 x v = M2.insert (MemoEntry q1 q2 x) v m
+
+-- -- FIXME: will be replaced by Map2
+-- newtype Memo env g = Memo {lookupMemo :: forall a. Qsp -> Qsp -> Ix env a -> Maybe (g a)}
+
+-- emptyMemo :: Memo env g
+-- emptyMemo = Memo $ \_ _ _ -> Nothing
+
+-- updateMemo :: Memo env g -> Qsp -> Qsp -> Ix env a -> g a -> Memo env g
+-- updateMemo (Memo f) q1 q2 x k =
+--   Memo $ \q1' q2' x' ->
+--     case eqIx x x' of
+--       Just Refl | q1 == q1', q2 == q2' -> Just k
+--       _ -> f q1' q2' x'
 
 data Qsp = Qn | Qs | Qss deriving stock (Eq, Ord)
 
@@ -236,6 +261,8 @@ optSpaces :: forall g t. (Defs g, Grammar ExChar g) => FlatGrammar ExChar t -> g
 optSpaces (FlatGrammar (defs :: Env (RHS inc env) env) rhs0) =
   local $ evalStateT (asum <$> mapM (\qf -> (<* finalProd qf) <$> procRHS Qn qf rhs0) allStates) emptyMemo
   where
+    defsMap = envToMap defs
+
     allStates = [Qn, Qs, Qss]
 
     finalProd Qn = pure ()
@@ -284,12 +311,12 @@ optSpaces (FlatGrammar (defs :: Env (RHS inc env) env) rhs0) =
           g2 <- procProd qm q2 r
           return $ (\a k -> k a) <$> g1 <*> g2
 
-    procVar :: Qsp -> Qsp -> Ix env a -> StateT (Memo env g) (DefM g) (g a)
+    procVar :: Qsp -> Qsp -> IxN env a -> StateT (Memo env g) (DefM g) (g a)
     procVar q1 q2 x = StateT $ \memo ->
       case lookupMemo memo q1 q2 x of
         Just r -> return (r, memo)
         Nothing -> do
-          let rhs = lookEnv defs x
+          let rhs = lookIxMap defsMap x
           letr1 $ \a -> do
             (r, memo') <- runStateT (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a)
             return (r, (a, memo'))

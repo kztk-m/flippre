@@ -1,31 +1,32 @@
-{-# LANGUAGE DataKinds             #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE GADTs                 #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RankNTypes            #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
-module Text.FliPpr.Internal.PrettyPrinting
-  (
-      pprMode, pprModeMono,
-      Ppr(..),
-  ) where
+module Text.FliPpr.Internal.PrettyPrinting (
+  pprMode,
+  pprModeMono,
+  Ppr (..),
+) where
 
-import           Data.Coerce
-import           Data.Functor.Identity
-import           Text.FliPpr.Doc
-import           Text.FliPpr.Internal.Type
+import Data.Coerce
+import Data.Functor.Identity
+import Text.FliPpr.Doc
+import Text.FliPpr.Internal.Type
 
-import qualified Data.RangeSet.List         as RS
+import qualified Data.RangeSet.List as RS
 import qualified Defs
 
-import           Text.FliPpr.Internal.HList
+import Text.FliPpr.Internal.HList
+
 data Ppr d (t :: FType) where
   PD :: !d -> Ppr d D
   PF :: !(a -> Ppr d r) -> Ppr d (a ~> r)
 
-instance DocLike d => FliPprE Identity (Ppr d) where
+instance (DocLike d) => FliPprE Identity (Ppr d) where
   fapp (PF f) a = f (coerce a)
 
   farg f = PF (coerce f)
@@ -36,16 +37,18 @@ instance DocLike d => FliPprE Identity (Ppr d) where
       go a (Branch (PartialBij _ f _) h : bs) =
         case f a of
           Nothing -> go a bs
-          Just b  -> h (Identity b)
+          Just b -> h (Identity b)
 
   funpair (Identity (a, b)) f = f (coerce a) (coerce b)
   fununit _ x = x
 
   fbchoice x _ = x
 
+  fabort = error "Aborted pretty-printing interpretation."
+
   fcharAs (Identity c) cs
-    | c `RS.member` cs        = PD (text [c])
-    | otherwise          = error "charAs: Condition violated."
+    | c `RS.member` cs = PD (text [c])
+    | otherwise = error "charAs: Condition violated."
 
   ftext s = PD (text s)
   fempty = PD empty
@@ -78,16 +81,15 @@ instance Defs.Defs (Ppr d) where
 
   letrD h =
     let PprRules (HCons a as) r = h a
-    in PprRules as r
+    in  PprRules as r
 
-  -- letrDS h =
-  --   let (a,b) = k $ pprRules $ h a
-  --   in PprRules b
-  --   where
-  --     -- Explicit decomposer to suppress an incomplete-uni-patterns warning, for this actually complete pattern.
-  --     k :: Defs.DTypeVal (Ppr d) (a <* b) -> (Ppr d a, Defs.DTypeVal (Ppr d) b)
-  --     k (Defs.VCons x y) = (x, y)
-
+-- letrDS h =
+--   let (a,b) = k $ pprRules $ h a
+--   in PprRules b
+--   where
+--     -- Explicit decomposer to suppress an incomplete-uni-patterns warning, for this actually complete pattern.
+--     k :: Defs.DTypeVal (Ppr d) (a <* b) -> (Ppr d a, Defs.DTypeVal (Ppr d) b)
+--     k (Defs.VCons x y) = (x, y)
 
 -- instance DocLike d => FliPprD Identity Identity (Ppr d) where
 --   fshare = Identity
@@ -102,5 +104,5 @@ pprModeMono (PF h) a =
   case h a of
     PD d -> d
 
-pprMode :: DocLike d => FliPpr (a ~> D) -> a -> d
+pprMode :: (DocLike d) => FliPpr (a ~> D) -> a -> d
 pprMode (FliPpr e) = pprModeMono e

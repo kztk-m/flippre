@@ -48,7 +48,8 @@ library
     Text.FliPpr.Grammar
 
   other-modules:
-    Text.FliPpr.Grammar.Internal.Util 
+    Text.FliPpr.Grammar.Internal.Util, 
+    Text.FliPpr.Grammar.Internal.Map2 
                                  
   build-depends:       
     base >= 4.7 && < 5, 

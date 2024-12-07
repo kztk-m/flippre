@@ -16,6 +16,7 @@ import Data.RangeSet.List (RSet)
 import qualified Data.RangeSet.List as RS
 import Defs
 import Text.FliPpr.Grammar.Flatten (flatten)
+import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
 import Text.FliPpr.Grammar.Internal.Util
 import Text.FliPpr.Grammar.Types
 import Text.FliPpr.Grammar.UnFlatten (unFlatten)
@@ -25,32 +26,35 @@ removeNonProductive (FlatGrammar (defs :: Env (RHS c env0) env0) rhs) =
   -- trace (show $ fromString " " D.<> D.align (D.pretty $ FlatGrammar defs rhs)) $
   FlatGrammar (mapEnv procRHS defs) (procRHS rhs)
   where
+    defsMap = envToMap defs
+    initTable = M2.mapMap2 (const $ Const False) defsMap
     prodTable = check initTable
 
-    initTable = mapEnv (const $ Const False) defs
-
-    checkRHS :: Env (Const Bool) env' -> RHS c env' a -> Bool
+    checkRHS :: M2.Map2 (IxN env') (Const Bool) -> RHS c env' a -> Bool
     checkRHS env (MkRHS rs) = any (checkProd env) rs
 
-    checkProd :: Env (Const Bool) env' -> Prod c env' a -> Bool
+    checkProd :: M2.Map2 (IxN env') (Const Bool) -> Prod c env' a -> Bool
     checkProd _ (PNil _) = True
     checkProd env (PCons s r) = checkSymb env s && checkProd env r
 
-    checkSymb :: Env (Const Bool) env' -> Symb c env' a -> Bool
+    checkSymb :: M2.Map2 (IxN env') (Const Bool) -> Symb c env' a -> Bool
     checkSymb _ (Symb _) = True
     checkSymb _ (SymbI cs) = not (RS.null cs)
-    checkSymb env (NT x) = getConst $ lookEnv env x
+    checkSymb env (NT x) = getConst $ lookIxMap env x
 
-    checkDefs :: Env (RHS c env') env -> Env (Const Bool) env' -> Env (Const Bool) env
-    checkDefs es env = mapEnv (Const . checkRHS env) es
+    checkDefs :: M2.Map2 (IxN env) (RHS c env') -> M2.Map2 (IxN env') (Const Bool) -> M2.Map2 (IxN env) (Const Bool)
+    checkDefs es env = M2.mapMap2 (Const . checkRHS env) es
 
     -- pprMP mp = E.pprEnv (\s d -> D.hsep [fromString s, fromString "=", fromString (show $ getConst d)]) mp :: D.Doc
 
     check mp =
-      let mp' = checkDefs defs mp
-          flag = appEndo (getConst $ zipWithEnvA (\(Const b1) (Const b2) -> Const $ Endo (\x -> x || (b1 /= b2))) mp mp') False
-      in  -- trace (show $ fromString "  " D.<> D.align (pprMP mp D.</> pprMP mp' D.</> fromString "flag: " D.<> fromString (show flag))) $
-          if flag then check mp' else mp'
+      let mp' = checkDefs defsMap mp
+      in  -- flag = appEndo (getConst $ zipWithEnvA (\(Const b1) (Const b2) -> Const $ Endo (\x -> x || (b1 /= b2))) mp mp') False
+          -- trace (show $ fromString "  " D.<> D.align (pprMP mp D.</> pprMP mp' D.</> fromString "flag: " D.<> fromString (show flag))) $
+          if cntTrue mp' > cntTrue mp then check mp' else mp'
+      where
+        cntTrue :: M2.Map2 k (Const Bool) -> Int
+        cntTrue m = appEndo (getConst $ M2.traverseMap2 (\(Const b) -> Const $ Endo (\x -> if b then x + 1 else x)) m) 0
 
     procRHS :: RHS c env0 a -> RHS c env0 a
     procRHS (MkRHS rs) = MkRHS $ mapMaybe procProd rs
@@ -62,7 +66,7 @@ removeNonProductive (FlatGrammar (defs :: Env (RHS c env0) env0) rhs) =
     procSymb :: Symb c env0 a -> Maybe (Symb c env0 a)
     procSymb (Symb c) = return (Symb c)
     procSymb (SymbI cs) = if RS.null cs then Nothing else return (SymbI cs)
-    procSymb (NT x) = if getConst (lookEnv prodTable x) then return (NT x) else Nothing
+    procSymb (NT x) = if getConst (lookIxMap prodTable x) then return (NT x) else Nothing
 
 -- | a simple optimizing interpretation
 -- We use the property that
