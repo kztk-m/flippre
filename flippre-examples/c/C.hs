@@ -242,8 +242,8 @@ pprParamList = do
   pParameter <- define $ \x ->
     case_
       x
-      [ unPDecl $ \ds d -> pSpecList ds <> pDecl d
-      , unPAbsDecl $ \ds d -> pSpecList ds <> pAbsDecl d
+      [ unPDecl $ \ds d -> pSpecList ds <+> pDecl d
+      , unPAbsDecl $ \ds d -> pSpecList ds <+> pAbsDecl d
       , unPSpecOnly $ \ds -> pSpecList ds
       ]
   pParameterList <- sepBy "," pParameter
@@ -283,18 +283,6 @@ pprExp = do
 exp1 :: Exp
 exp1 = FunctionCall "f" [LitExp $ IntL $ Int 42, LitExp $ FloatL $ Float 3.14, FunctionCall "g" []]
 
-parseAbstractDecl :: [Char] -> Err ann [AbsDecl]
-parseAbstractDecl = E.parse $ parsingMode (flippr $ fromFunction <$> pprAbstractDecl)
-
-parseDecl :: [Char] -> Err ann [Decl]
-parseDecl = E.parse $ parsingMode (flippr $ fromFunction <$> pprDecl)
-
-main :: IO ()
-main = do
-  print $ parseAbstractDecl "*const []"
-  print $ parseDecl "*const volatile x[]"
-
-{-}
 pprProgram :: Decl -> Doc ann
 pprProgram = pprMode (flippr $ fromFunction <$> pprDecl)
 
@@ -302,11 +290,10 @@ parseProgram :: [Char] -> Err ann [Decl]
 parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprDecl)
 
 expParamList :: ParamList
-expParamList = Fixed [PDecl [DeclSpec $ TName "int"] expDecl, PDecl [DeclSpec $ TName "float"] expDecl]
+expParamList = Fixed [PDecl [DeclSpec $ TInt] expDecl, PDecl [DeclSpec $ TName "xyz"] expDecl]
 
 pprProgram' :: ParamList -> Doc ann
 pprProgram' = pprMode (flippr $ fromFunction <$> pprParamList)
 
 parseProgram' :: [Char] -> Err ann [ParamList]
 parseProgram' = E.parse $ parsingMode (flippr $ fromFunction <$> pprParamList)
--}
