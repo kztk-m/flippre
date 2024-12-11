@@ -438,6 +438,8 @@ share s = DefM $ \k -> letrD $ \a -> consD s (k a)
 local :: (Defs f) => DefM f (f t) -> f t
 local m = unliftD $ unDefM m liftD
 
+{-# WARNING VarM "This class will be removed soon. Use 'EbU' library for pretty-printing" #-}
+
 -- | Monads for managing variable names
 class (Monad m) => VarM m where
   -- | A new variable name, which may or may not differ in calls.
@@ -458,6 +460,8 @@ class (Monad m) => VarM m where
 type Precedence = Int
 
 -- | A general pretty-printer for 'Defs' methods. Use different @m@ printing different HOAS, to avoid overlapping instance.
+{-# WARNING PprExp "To be removed" #-}
+
 newtype PprExp m ann _a = PprExp {pprExp :: Precedence -> m (D.Doc ann)}
 
 pattern PprExpN :: (Precedence -> m (D.Doc ann)) -> Norm (PprExp m ann) a
