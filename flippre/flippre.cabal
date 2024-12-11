@@ -41,6 +41,7 @@ library
   exposed-modules:     
     Text.FliPpr, 
     Text.FliPpr.Mfix, 
+    Text.FliPpr.QDo, 
     Text.FliPpr.Doc, 
     Text.FliPpr.TH, 
     Text.FliPpr.Internal.Type, 
