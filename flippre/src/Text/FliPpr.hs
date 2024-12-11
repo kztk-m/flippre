@@ -145,6 +145,7 @@ import Text.FliPpr.Pat
 import Text.FliPpr.TH
 
 import qualified Data.RangeSet.List as RS
+import qualified Defs
 import GHC.Stack (HasCallStack, withFrozenCallStack)
 import Text.FliPpr.Automaton as A
 
@@ -206,6 +207,11 @@ infixr 4 </>.
 --     Just m -> m
 --     Nothing -> error "defines: out of bounds"
 
+-- | @is c f@ is a branch for the case where the input is equal to @c@.
+--
+-- This will be used with 'case_' as:
+--
+-- > case_ x [ is '0' ..., is '1' ... , ... ]
 is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) c r
 is c f =
   PartialBij
@@ -214,6 +220,7 @@ is c f =
     (\_ -> Just c)
     `Branch` (`ununit` f)
 
+-- | @isMember cs f@ is a branch for the case where the input belongs to the set @cs@.
 isMember :: (Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
 isMember cs f =
   PartialBij
@@ -223,11 +230,12 @@ isMember cs f =
     `Branch` f
 
 -- |
--- A synonym of 'share'.
+-- A synonym of 'share' (remains for backward compatibility)
+{-# WARNING define "to be removed" #-}
 define :: (Arg (E f) r) => r -> FliPprM f r
 define = share
 
--- | Precedence.
+-- | Precedence. An operator with a higher precedence binds more tighter.
 type Prec = Int
 
 -- | Fixity is a pair of associativity and precedence.
