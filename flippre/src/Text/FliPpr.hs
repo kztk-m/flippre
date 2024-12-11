@@ -226,7 +226,7 @@ isMember cs f =
   PartialBij
     ("isMember " ++ show cs)
     (\x -> if x `RS.member` cs then Just x else Nothing)
-    Just
+    (\x -> if x `RS.member` cs then Just x else Nothing)
     `Branch` f
 
 -- |
