@@ -127,6 +127,7 @@ module Text.FliPpr (
   opPrinter,
   is,
   isMember,
+  convertInput,
 )
 where
 
@@ -228,6 +229,10 @@ isMember cs f =
     (\x -> if x `RS.member` cs then Just x else Nothing)
     (\x -> if x `RS.member` cs then Just x else Nothing)
     `Branch` f
+
+-- Converts an input by using a bijection.
+convertInput :: (FliPprE arg exp, In a, In b) => PartialBij a b -> A arg a -> (A arg b -> E exp r) -> E exp r
+convertInput pij a r = case_ a [pij `Branch` r]
 
 -- |
 -- A synonym of 'share' (remains for backward compatibility)
