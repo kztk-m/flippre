@@ -84,7 +84,7 @@ pExp = flippr $ do
 
   return $ fromFunction (ppr (0 :: Word8))
   where
-    lt10 :: (FliPprE arg exp) => (A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
+    lt10 :: (A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
     lt10 f = Branch (PartialBij "lt10" (\x -> if x < 10 then Just x else Nothing) Just) f
 
     dm10 :: (FliPprE arg exp) => (A arg Int -> A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
