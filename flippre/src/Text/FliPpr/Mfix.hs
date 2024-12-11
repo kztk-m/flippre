@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
+-- | Module supposed to be used with @RebindableSyntax@.
 module Text.FliPpr.Mfix (mfix) where
 
 import Text.FliPpr
