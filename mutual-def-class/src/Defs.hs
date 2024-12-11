@@ -130,21 +130,19 @@ module Defs (
 )
 where
 
-import Data.Functor.Identity (Identity (..))
-
 import Control.Applicative (Alternative (..))
+import Data.Coerce (coerce)
 import qualified Data.Fin as F
+import Data.Functor.Compose
+import Data.Functor.Const (Const (..))
+import Data.Functor.Identity (Identity (..))
 import Data.Int (Int8)
 import Data.Kind (Type)
+import Data.Proxy
+import Data.String (IsString (..))
 import qualified Data.Type.Nat as F
 import Data.Word (Word8)
 
-import Data.Coerce (coerce)
-import Data.Functor.Const (Const)
-
-import Data.Functor.Compose
-import Data.Proxy
-import Data.String (IsString (..))
 import Prettyprinter as D
 
 -- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
@@ -325,6 +323,13 @@ def a = fmap (a,)
 --     arr (VCons a b, r) = (a, (b, r))
 
 -- | A class that provides a generalized version of 'letr'.
+-- Intuitively, @Arg f t@ means @t@ can be recursively defined
+-- in the EDSL @f@.
+--
+-- Due to the restriction of Haskell type classes, no instance is provided
+-- for @Arg f (f a)@. Instead, we provide an instance @Arg f (Identity (f a))@.
+-- Use the instance via @DerivingVia@ to provide @Arg F (Identity (F a)@ for a
+-- concrete EDSL expression @F@.
 class (Defs f) => Arg f t where
   letr :: (t -> DefM f (t, r)) -> DefM f r
 
@@ -335,6 +340,10 @@ newtype Tip a = Tip {unTip :: a}
 
 instance (Defs f) => Arg f (Tip (f a)) where
   letr :: forall r. (Tip (f a) -> DefM f (Tip (f a), r)) -> DefM f r
+  letr f = letr1 (coerce f :: f a -> DefM f (f a, r))
+
+instance (Defs f) => Arg f (Identity (f a)) where
+  letr :: forall r. (Identity (f a) -> DefM f (Identity (f a), r)) -> DefM f r
   letr f = letr1 (coerce f :: f a -> DefM f (f a, r))
 
 instance (Arg f a, Arg f b) => Arg f (a, b) where
@@ -362,6 +371,21 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (
     ((b1, b2, b3, b4, b5, b6), r) <- f (a1, a2, a3, a4, a5, a6)
     return ((b1, b2, b3), ((b4, b5, b6), r))
 
+instance (Defs f) => Arg f (HList g '[]) where
+  letr f = do
+    (_, r) <- f HNil
+    pure r
+
+instance
+  (Defs f, Arg f a, Arg f (HList Identity as)) =>
+  Arg f (HList Identity (a : as))
+  where
+  letr f = letr $ \a -> letr $ \as -> do
+    (res, r) <- f (HCons (Identity a) as)
+    case res of
+      HCons (Identity v) vs ->
+        pure (vs, (v, r))
+
 -- | @letrs [k1,...,kn] $ \f -> (def fdef r)@ to mean
 --
 -- > letr $ \f1 -> letr $ \f2 -> ... letr $ \fn ->
@@ -369,7 +393,7 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (
 -- >   let f k = fromJust $ lookup k [(k1,f1), ..., (kn,fn)]
 -- >   r
 letrs :: (Eq k, Arg f a) => [k] -> ((k -> a) -> DefM f (k -> a, r)) -> DefM f r
-letrs [] h = snd <$> h (const $ error "Text.FliPpr.Internal.Defs.letrs: out of bounds")
+letrs [] h = snd <$> h (const $ error "Defs.letrs: out of bounds")
 letrs (k : ks) h = letr $ \fk -> letrs ks $ \f -> do
   (f', r) <- h $ \x -> if x == k then fk else f x
   return (f', (f' k, r))
