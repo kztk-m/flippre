@@ -64,6 +64,7 @@ library
     th-abstraction >= 0.2 && < 0.8, 
     fin >= 0.1 && < 0.4,
     prettyprinter >= 1.7 && < 1.8, 
+    embedding-by-unembedding ^>= 0.8, 
     mutual-def-class, 
     flippre-backend-grammar 
     

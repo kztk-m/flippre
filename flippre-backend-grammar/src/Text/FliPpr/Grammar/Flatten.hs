@@ -8,6 +8,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -154,7 +155,7 @@ instance Defs (EnvI (FreeGrammarExp c)) where
 
   unliftD = U.liftFO1' (\(WrapD d) -> UnliftT d) . runDD
 
-  letrD h = DD $ U.liftSOn' (U.ol1 ::. U.End') Proxy (\(WrapD d) -> WrapD (LetrT d)) (runDD . h)
+  letrD h = DD $ U.liftSOn' @(FreeGrammarExp c) @(WrapD c) (U.ol1 :. ENil) Proxy (\(WrapD d) -> WrapD (LetrT d)) (runDD . h)
 
 instance FromSymb c (EnvI (FreeGrammarExp c)) where
   symb c = U.liftFO0 (FSymb c)
