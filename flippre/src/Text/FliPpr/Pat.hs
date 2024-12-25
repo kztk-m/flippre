@@ -1,10 +1,10 @@
-{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE LambdaCase             #-}
-{-# LANGUAGE RankNTypes             #-}
-{-# LANGUAGE ScopedTypeVariables    #-}
-{-# LANGUAGE TupleSections          #-}
-{-# LANGUAGE UndecidableInstances   #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Utility to handle branching. The goal of this module is to provide basic building blocks to
 --   write FliPpr patterns.
@@ -14,23 +14,31 @@
 --   > case_ x [ pNil `br` ... {- nil case -} ...,
 --   >           pCons varP pNil `br` \x -> ... {- singleton case -} ...,
 --   >           pCons varP (pCons varP varP) `br` \x y xs -> ... {- double cons case -} ... ]
---
-module Text.FliPpr.Pat
-    (
-        PatT, varP, lift, (&.), unit, toPartialBij,
+module Text.FliPpr.Pat (
+  PatT,
+  varP,
+  lift,
+  (&.),
+  unit,
+  toPartialBij,
 
-        -- * Derived combinators
-        lift0, lift2, lift3,
+  -- * Derived combinators
+  lift0,
+  lift2,
+  lift3,
 
-        -- * Predefined pattern-like combinators.
-        pNil, pCons, pTrue, pFalse,
+  -- * Predefined pattern-like combinators.
+  pNil,
+  pCons,
+  pTrue,
+  pFalse,
 
-        -- * Pattern to branching
-        Decomp(..), br,
+  -- * Pattern to branching
+  Decomp (..),
+  br,
+) where
 
-    ) where
-
-import           Text.FliPpr.Internal.Type
+import Text.FliPpr.Internal.Type
 
 -- Patterns as
 
@@ -40,33 +48,33 @@ fromPBij :: (PBij a b, ShowS) -> PartialBij a b
 fromPBij (PBij f fi, fn) = PartialBij (fn "") f fi
 
 -- | A pattern of type @a@ transforms environments from @env@ to @env'@.
-
-newtype PatT env env' a = PatT { runPatT :: forall r. PBij r env -> (PBij (a, r) env', ShowS) }
+newtype PatT env env' a = PatT {runPatT :: forall r. PBij r env -> (PBij (a, r) env', ShowS)}
 
 -- | A variable pattern of type @a@.
 varP :: PatT env (a, env) a
-varP = PatT $ \(PBij f fi) -> (PBij (\(a,env) -> (a,) <$> f env) (\(a,r) -> (a,) <$> fi r), showString "_")
+varP = PatT $ \(PBij f fi) -> (PBij (\(a, env) -> (a,) <$> f env) (\(a, r) -> (a,) <$> fi r), showString "_")
 
 -- | Lifting 'PartialBij' into a pattern transformer.
 lift :: forall a b env env'. PartialBij a b -> PatT env env' b -> PatT env env' a
 lift (PartialBij fn f fi) (PatT tr) = PatT $ h . tr
-    where
-        h :: (PBij (b, r) env', ShowS) -> (PBij (a, r) env', ShowS)
-        h (PBij g gi, gn) = (PBij (\(a,r) -> do { b <- f a; g (b, r) }) (\x -> do { (b, r) <- gi x; a <- fi b ; return (a, r) }),
-                             showParen True (showString fn . showString " " . gn))
-
+  where
+    h :: (PBij (b, r) env', ShowS) -> (PBij (a, r) env', ShowS)
+    h (PBij g gi, gn) =
+      ( PBij (\(a, r) -> do b <- f a; g (b, r)) (\x -> do (b, r) <- gi x; a <- fi b; return (a, r))
+      , showParen True (showString fn . showString " " . gn)
+      )
 
 prod :: PatT env' env'' a -> PatT env env' b -> PatT env env'' (a, b)
 prod (PatT tr1) (PatT tr2) = PatT $ \p ->
-    let (x , w2) = tr2 p
-        (y , w1) = tr1 x
-    in (arr y, w1 . showString " " . w2)
-    where
-        arr :: PBij (a, (b, r)) env'' -> PBij ((a, b), r) env''
-        arr (PBij f fi) = PBij (f . assocr) (fmap assocl . fi)
+  let (x, w2) = tr2 p
+      (y, w1) = tr1 x
+  in  (arr y, w1 . showString " " . w2)
+  where
+    arr :: PBij (a, (b, r)) env'' -> PBij ((a, b), r) env''
+    arr (PBij f fi) = PBij (f . assocr) (fmap assocl . fi)
 
-        assocr ((a, b), c) = (a, (b, c))
-        assocl (a, (b, c)) = ((a, b), c)
+    assocr ((a, b), c) = (a, (b, c))
+    assocl (a, (b, c)) = ((a, b), c)
 
 -- | Pair patterns.
 (&.) :: PatT env' env'' a -> PatT env env' b -> PatT env env'' (a, b)
@@ -96,29 +104,27 @@ lift3 p x y z = lift p (x &. y &. z)
 -- toPartialBij (pCons varP (pCons varP varP)) :: forall b. PartialBij [b] (b, (b, ([b], ())))
 -- >>> :t toPartialBij (pCons (pCons varP varP) (pCons varP varP))
 -- toPartialBij (pCons (pCons varP varP) (pCons varP varP)) :: forall b. PartialBij [[b]] (b, ([b], ([b], ([[b]], ()))))
-
 toPartialBij :: PatT () env a -> PartialBij a env
 toPartialBij tr = fromPBij $ h $ runPatT tr (PBij Just Just)
-    where
-        h :: (PBij (a, ()) env, ShowS) -> (PBij a env, ShowS)
-        h (PBij f fi, fn) = (PBij (\a -> f (a, ())) (fmap fst . fi), fn)
-
+  where
+    h :: (PBij (a, ()) env, ShowS) -> (PBij a env, ShowS)
+    h (PBij f fi, fn) = (PBij (\a -> f (a, ())) (fmap fst . fi), fn)
 
 bNil :: PartialBij [a] ()
-bNil = PartialBij "[]" (\case { [] -> Just () ; _ -> Nothing }) (const $ Just [])
+bNil = PartialBij "[]" (\case [] -> Just (); _ -> Nothing) (const $ Just [])
 
 bTrue :: PartialBij Bool ()
-bTrue = PartialBij "True" (\case { True -> Just (); _ -> Nothing }) (const $ Just True)
+bTrue = PartialBij "True" (\case True -> Just (); _ -> Nothing) (const $ Just True)
 
 bFalse :: PartialBij Bool ()
-bFalse = PartialBij "False" (\case { False -> Just (); _ -> Nothing }) (const $ Just False)
+bFalse = PartialBij "False" (\case False -> Just (); _ -> Nothing) (const $ Just False)
 
 -- | A pattern corresponding to @[]@
 pNil :: PatT env env [a]
 pNil = lift0 bNil
 
-bCons :: PartialBij [a] (a,[a])
-bCons = PartialBij "(:)" (\case { a:x -> Just (a,x) ; _ -> Nothing }) (Just . uncurry (:))
+bCons :: PartialBij [a] (a, [a])
+bCons = PartialBij "(:)" (\case a : x -> Just (a, x); _ -> Nothing) (Just . uncurry (:))
 
 -- | A pattern corresponding to '(:)'
 pCons :: PatT env'1 env'2 b -> PatT env env'1 [b] -> PatT env env'2 [b]
@@ -139,18 +145,17 @@ pFalse = lift0 bFalse
 --   @
 --
 --   Notice that tip must be @()@ to use this function, as those generated by 'pat'.
-class FliPprE arg exp => Decomp arg exp a r t | r -> t exp arg, exp -> arg, exp a t -> r where
-    decomp :: A arg a -> r -> E exp t
+class (FliPprE arg exp) => Decomp arg exp a r t | r -> t exp arg, exp -> arg, exp a t -> r where
+  decomp :: A arg a -> r -> E exp t
 
 instance (FliPprE arg exp) => Decomp arg exp () (E exp t) t where
-    decomp = ununit
+  decomp = ununit
 
-instance (Eq a, Eq as, Decomp arg exp as r t) => Decomp arg exp (a, as) (A arg a -> r) t where
-    decomp as f = unpair as $ \a1 a2 -> decomp a2 $ f a1
+instance (Decomp arg exp as r t) => Decomp arg exp (a, as) (A arg a -> r) t where
+  decomp as f = unpair as $ \a1 a2 -> decomp a2 $ f a1
 
 -- | 'br' combines 'Branch', 'pat' and 'decomp'.
 --
 --   prop> br p k = Branch (pat p) $ \a -> decomp a k
-
-br :: (Decomp arg exp b r t, Eq b) => PatT () b a -> r -> Branch (A arg) (E exp) a t
+br :: (Decomp arg exp b r t) => PatT () b a -> r -> Branch (A arg) (E exp) a t
 br p k = Branch (toPartialBij p) $ \a -> decomp a k

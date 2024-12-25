@@ -67,8 +67,8 @@ library
     Text.FliPpr.Internal.HList, 
     Text.FliPpr.Internal.PrettyPrinting,
     Text.FliPpr.Internal.ParserGeneration,
-    Text.FliPpr.Internal.Env, 
-    Text.FliPpr.Internal.PartialEnv
+    -- Text.FliPpr.Internal.Env, 
+    -- Text.FliPpr.Internal.PartialEnv
     Text.FliPpr.Automaton 
     Text.FliPpr.Pat 
 

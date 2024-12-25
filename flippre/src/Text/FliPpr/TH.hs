@@ -126,10 +126,11 @@ unGen cname = do
       let res = return res_
       let contTy = foldr (\a r -> [t|A $ar $(return a) -> $r|]) [t|E $exp $res|] argsTy
       let resultTy = [t|Branch (A $ar) (E $exp) $(return retTy) $res|]
-      let inCtxt t = do
-            cs <- mapM (\a -> [t|In $(return a)|]) argsTy
-            TH.ForallT [] cs <$> t
-      [t|FliPprE $ar $exp => $(inCtxt [t|$contTy -> $resultTy|])|]
+      -- let inCtxt t = do
+      --       cs <- mapM (\a -> [t|In $(return a)|]) argsTy
+      --       TH.ForallT [] cs <$> t
+      -- [t|FliPprE $ar $exp => $(inCtxt [t|$contTy -> $resultTy|])|]
+      [t| FliPprE $ar $exp => $contTy -> $resultTy |]
       where
         splitType :: TH.Type -> (TH.Type -> TH.Type, TH.Type)
         splitType (TH.ForallT tvs ctxt t) =

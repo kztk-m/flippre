@@ -20,7 +20,6 @@ module Text.FliPpr.Internal.Type (
   FType (..),
   type D,
   type (~>),
-  In,
   FliPprE (..),
   FliPprD,
   A (..),
@@ -83,18 +82,19 @@ import Control.Arrow (first)
 import Data.Function.Compat (applyWhen)
 import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
-import GHC.Stack (HasCallStack)
+import GHC.Stack (HasCallStack, withFrozenCallStack)
 
 -- | The kind for FliPpr types.
 data FType = FTypeD | Type :~> FType
 
 -- | Unticked synonym for :~> used for readability.
-type a ~> b = a ':~> b
+type a ~> b = a :~> b
+
+infixr 0 ~>
+infixr 0 :~>
 
 -- | Unticked synonym for FTypeD
 type D = 'FTypeD
-
-type In a = Eq a
 
 -- | Partial bijections between @a@ and @b@.
 data PartialBij a b
@@ -109,17 +109,17 @@ data PartialBij a b
 -- | A datatype represents branches.
 data Branch arg exp a (t :: FType)
   = -- | the part @arg b -> exp t@ must be a linear function
-    forall b. (In b) => Branch (PartialBij a b) (arg b -> exp t)
+    forall b. Branch (PartialBij a b) (arg b -> exp t)
 
 -- | A finally-tagless implementation of FliPpr expressions.
 --   The API is only for internal use.
 class FliPprE (arg :: Type -> Type) (exp :: FType -> Type) | exp -> arg where
-  fapp :: (In a) => exp (a ~> t) -> arg a -> exp t
-  farg :: (In a) => (arg a -> exp t) -> exp (a ~> t)
+  fapp :: exp (a ~> t) -> arg a -> exp t
+  farg :: (arg a -> exp t) -> exp (a ~> t)
 
-  fcase :: (In a) => arg a -> [Branch arg exp a t] -> exp t
+  fcase :: (HasCallStack) => arg a -> [Branch arg exp a t] -> exp t
 
-  funpair :: (In a, In b) => arg (a, b) -> (arg a -> arg b -> exp t) -> exp t
+  funpair :: (HasCallStack) => arg (a, b) -> (arg a -> arg b -> exp t) -> exp t
   fununit :: arg () -> exp t -> exp t
 
   fbchoice :: exp D -> exp D -> exp D
@@ -293,7 +293,7 @@ abort = (coerce :: exp D -> E exp D) fabort
 --
 -- Internally, it is a wrapper for the method 'farg' of 'FliPprE'.
 {-# INLINEABLE arg #-}
-arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
+arg :: (FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
 arg =
   ( coerce ::
       ((arg a -> exp t) -> exp (a ~> t))
@@ -304,7 +304,7 @@ arg =
 
 -- | Application in FliPpr. Observed that the application is restricted to @A arg a@-typed values.
 {-# INLINEABLE app #-}
-app :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
+app :: (FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
 app =
   ( coerce ::
       (exp (a ~> t) -> arg a -> exp t)
@@ -314,7 +314,7 @@ app =
 
 -- | A synonym for 'app'. A FliPpr version of '$'.
 {-# INLINE (@@) #-}
-(@@) :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
+(@@) :: (FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
 (@@) = app
 
 infixr 0 @@
@@ -330,15 +330,16 @@ charAs =
 
 -- | case branching.
 {-# INLINEABLE case_ #-}
-case_ :: (In a, FliPprE arg exp) => A arg a -> [Branch (A arg) (E exp) a r] -> E exp r
+case_ :: (FliPprE arg exp, HasCallStack) => A arg a -> [Branch (A arg) (E exp) a r] -> E exp r
 case_ =
-  ( coerce ::
-      (arg a -> [Branch arg exp a r] -> exp r)
-      -> A arg a
-      -> [Branch (A arg) (E exp) a r]
-      -> E exp r
-  )
-    fcase
+  withFrozenCallStack $
+    ( coerce ::
+        (arg a -> [Branch arg exp a r] -> exp r)
+        -> A arg a
+        -> [Branch (A arg) (E exp) a r]
+        -> E exp r
+    )
+      fcase
 
 -- | A CPS style conversion from @A arg (a,b)@ to a pair of @A arg a@ and @A arg b@.
 --   A typical use of 'unpair' is to implement (invertible) pattern matching in FliPpr.
@@ -347,13 +348,14 @@ case_ =
 --   'Language.FliPpr.TH' provides 'un' and 'branch'. By using these functions,
 --   one can avoid using a bit awkward 'unpair' explicitly.
 {-# INLINEABLE unpair #-}
-unpair :: (In a, In b, FliPprE arg exp) => A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r
+unpair :: (HasCallStack) => (FliPprE arg exp) => A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r
 unpair =
-  ( coerce ::
-      (arg (a, b) -> (arg a -> arg b -> exp r) -> exp r)
-      -> (A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r)
-  )
-    funpair
+  withFrozenCallStack $
+    ( coerce ::
+        (arg (a, b) -> (arg a -> arg b -> exp r) -> exp r)
+        -> (A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r)
+    )
+      funpair
 
 -- | An explicit disposal of `A arg ()`, required for the invertibility guarantee.
 {-# INLINEABLE ununit #-}
@@ -412,7 +414,7 @@ instance (FliPprE arg exp) => Repr arg exp t (E exp t) where
   toFunction = id
   fromFunction = id
 
-instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A arg a -> r) where
+instance (FliPprE arg exp, Repr arg exp t r) => Repr arg exp (a ~> t) (A arg a -> r) where
   toFunction f = \a -> toFunction (f `app` a)
   fromFunction k = arg (fromFunction . k)
 
@@ -504,7 +506,7 @@ instance (Defs.Defs exp) => Defs.Arg (E exp) (E exp a) where
   letr f = Defs.letr $ fmap (first Defs.Tip) . f . Defs.unTip
 
 -- One-level unfolding to avoid overlapping instances.
-instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E exp) (A arg a -> r) where
+instance (FliPprE arg exp, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E exp) (A arg a -> r) where
   letr f = Defs.letr $ fmap (first fromFunction) . f . toFunction
 
 -- | FinNE n represents {0,..,n} (NB: n is included)
