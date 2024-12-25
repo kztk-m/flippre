@@ -38,10 +38,13 @@ common warnings
 library
     import:           warnings
     exposed-modules:  Defs 
+    other-modules: 
+      Internal.THUtil 
     build-depends:    
         base >= 4.7 && < 5, 
         fin >= 0.1 && < 0.4, 
-        prettyprinter >= 1.7 && < 1.8
+        prettyprinter >= 1.7 && < 1.8, 
+        template-haskell >= 2.11 && < 2.23
     hs-source-dirs:   src
     default-language: Haskell2010
 

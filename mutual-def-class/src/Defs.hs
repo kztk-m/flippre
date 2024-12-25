@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -12,6 +13,8 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -144,6 +147,8 @@ import qualified Data.Type.Nat as F
 import Data.Word (Word8)
 
 import Prettyprinter as D
+
+import Internal.THUtil
 
 -- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
 --
@@ -284,6 +289,20 @@ someD d = local $ letr1 $ \m -> letr1 $ \s ->
     def (pure [] <|> s) $
       return s
 
+-- | 'share's computation.
+share :: (Defs f) => f a -> DefM f (f a)
+share s = DefM $ \k -> letrD $ \a -> consD s (k a)
+
+-- | Makes definions to be 'local'.
+--
+-- For example, in the follownig code, the scope of shared computation is limited to @foo@; so using @foo@ twice copies @defa@.
+--
+-- > foo = local $ do
+-- >    a <- share defa
+-- >     ...
+local :: (Defs f) => DefM f (f t) -> f t
+local m = unliftD $ unDefM m liftD
+
 -- | @def a@ is a synonym for @fmap (a,)@, which is convenient to be used with 'letr'.
 def :: (Functor f) => a -> f b -> f (a, b)
 def a = fmap (a,)
@@ -333,6 +352,18 @@ def a = fmap (a,)
 class (Defs f) => Arg f t where
   letr :: (t -> DefM f (t, r)) -> DefM f r
 
+-- | A variant of 'mfix'. This function is supported to be used as:
+
+--- > {-# LANGUAGE RecursiveDo, RebindableSyntax #-}
+--  >
+--  > someFunc = do
+--  >     rec a <- share $ ... a ... b ...
+--  >         b <- share $ ... a ... b ...
+--  >     ...
+--  >   where mfix = mfixDefM
+mfixDefM :: (Arg f a) => (a -> DefM f a) -> DefM f a
+mfixDefM f = letr $ \a -> (,a) <$> f a
+
 instance (Defs f) => Arg f () where
   letr f = snd <$> f ()
 
@@ -350,7 +381,6 @@ instance (Arg f a, Arg f b) => Arg f (a, b) where
   letr f = letr $ \b -> letr $ \a -> do
     ((a', b'), r) <- f (a, b)
     return (a', (b', r))
-
 instance (Arg f a, Arg f b, Arg f c) => Arg f (a, b, c) where
   letr f = letr $ \c -> letr $ \b -> letr $ \a -> do
     ((a', b', c'), r) <- f (a, b, c)
@@ -370,6 +400,9 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (
   letr f = letr $ \ ~(a4, a5, a6) -> letr $ \ ~(a1, a2, a3) -> do
     ((b1, b2, b3, b4, b5, b6), r) <- f (a1, a2, a3, a4, a5, a6)
     return ((b1, b2, b3), ((b4, b5, b6), r))
+
+-- Use template haskell to generate instances for n-tuples
+$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 15]])
 
 instance (Defs f) => Arg f (HList g '[]) where
   letr f = do
@@ -435,32 +468,6 @@ instance (Arg f (b -> a)) => Arg f (Identity b -> a) where
 instance (Arg f (b -> a)) => Arg f (Const b x -> a) where
   letr :: forall r. ((Const b x -> a) -> DefM f (Const b x -> a, r)) -> DefM f r
   letr h = letr (coerce h :: (Const b x -> a) -> DefM f (Const b x -> a, r))
-
--- | A variant of 'mfix'. This function is supported to be used as:
-
---- > {-# LANGUAGE RecursiveDo, RebindableSyntax #-}
---  >
---  > someFunc = do
---  >     rec a <- share $ ... a ... b ...
---  >         b <- share $ ... a ... b ...
---  >     ...
---  >   where mfix = mfixDefM
-mfixDefM :: (Arg f a) => (a -> DefM f a) -> DefM f a
-mfixDefM f = letr $ \a -> (,a) <$> f a
-
--- | 'share's computation.
-share :: (Defs f) => f a -> DefM f (f a)
-share s = DefM $ \k -> letrD $ \a -> consD s (k a)
-
--- | Makes definions to be 'local'.
---
--- For example, in the follownig code, the scope of shared computation is limited to @foo@; so using @foo@ twice copies @defa@.
---
--- > foo = local $ do
--- >    a <- share defa
--- >     ...
-local :: (Defs f) => DefM f (f t) -> f t
-local m = unliftD $ unDefM m liftD
 
 {-# WARNING VarM "This class will be removed soon. Use 'EbU' library for pretty-printing" #-}
 
