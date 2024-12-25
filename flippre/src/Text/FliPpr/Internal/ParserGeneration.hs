@@ -56,6 +56,7 @@ import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Err (Err (..), err)
 import Text.FliPpr.Internal.Type
 
+import GHC.Stack (HasCallStack, callStack, prettyCallStack)
 import qualified Unembedding as U
 import Unembedding.Env (Env (..))
 
@@ -70,7 +71,7 @@ class ValEnvRepr r where
 
   weakenEnv :: ValEnv r env -> ValEnv r (a : env)
 
-  updateEnv :: Index r env a -> a -> ValEnv r env -> Err ann (ValEnv r env)
+  updateEnv :: (HasCallStack) => Index r env a -> a -> ValEnv r env -> Err ann (ValEnv r env)
   mergeEnv :: ValEnv r env -> ValEnv r env -> Err ann (ValEnv r env)
 
 data UsingIx
@@ -160,12 +161,12 @@ noresult g = pure (RD undeterminedEnv) <$ g
 
 newtype WithExtendedEnv a r ann g env t = WithExtendedEnv (g (Err ann (Result r (a : env) t)))
 
-brHOAS :: (ValEnvRepr r, Functor g, U.Variables (Index r)) => Branch (U.EnvI (ArgSem r)) (U.EnvI (ExpSem r ann g)) a t -> U.EnvI (WithExtendedEnv a r ann g) t
+brHOAS :: (ValEnvRepr r, Functor g, U.Variables (Index r), HasCallStack) => Branch (U.EnvI (ArgSem r)) (U.EnvI (ExpSem r ann g)) a t -> U.EnvI (WithExtendedEnv a r ann g) t
 brHOAS (Branch (PartialBij pname _ finv) pk) = brHOASImpl pname finv pk
 
 brHOASImpl ::
   forall r ann g a b t.
-  (ValEnvRepr r, Functor g, U.Variables (Index r)) =>
+  (ValEnvRepr r, Functor g, U.Variables (Index r), HasCallStack) =>
   String
   -> (b -> Maybe a)
   -> (U.EnvI (ArgSem r) b -> U.EnvI (ExpSem r ann g) t)
@@ -175,14 +176,14 @@ brHOASImpl pname finv = U.liftSOn' @(ArgSem r) @(WithExtendedEnv a r ann g) (U.o
     replaceHead :: ValEnv r (b : env) -> Err ann (ValEnv r (a : env))
     replaceHead =
       mapHeadA $ \case
-        Nothing -> err $ PP.hsep ["Detected unused variable in the branch:", fromString pname]
+        Nothing -> err $ PP.vcat [PP.hsep ["Detected unused variable in the branch:", fromString pname], fromString $ prettyCallStack callStack]
         Just b -> do
           maybe (err $ PP.hsep ["Inverse pattern matching failed:", fromString pname]) (pure . Just) $ finv b
 
     h :: ExpSem r ann g (b : env) t -> WithExtendedEnv a r ann g env t
     h (ExpSem g) = WithExtendedEnv $ (fmap . (=<<)) (mapToEnvA replaceHead) g
 
-branchesHOAS :: (ValEnvRepr r, Alternative g, U.Variables (Index r)) => [Branch (U.EnvI (ArgSem r)) (U.EnvI (ExpSem r ann g)) a t] -> U.EnvI (WithExtendedEnv a r ann g) t
+branchesHOAS :: (ValEnvRepr r, Alternative g, U.Variables (Index r), HasCallStack) => [Branch (U.EnvI (ArgSem r)) (U.EnvI (ExpSem r ann g)) a t] -> U.EnvI (WithExtendedEnv a r ann g) t
 branchesHOAS =
   foldr
     ( U.liftFO2
@@ -225,8 +226,8 @@ instance (ValEnvRepr r, U.Variables (Index r), G.Grammar G.ExChar g) => FliPprE 
         case (a, b) of
           (Just va, Just vb) -> updateEnv ix (va, vb) rest2
           (Nothing, Nothing) -> pure rest2 -- defer error
-          (Just _, Nothing) -> err (fromString "funpair: the second element of a pair is not used")
-          (Nothing, Just _) -> err (fromString "funpair: the first element of a pair is not used")
+          (Just _, Nothing) -> err $ PP.vcat [fromString "funpair: the second element of a pair is not used", fromString $ prettyCallStack callStack]
+          (Nothing, Just _) -> err $ PP.vcat [fromString "funpair: the first element of a pair is not used", fromString $ prettyCallStack callStack]
 
   fununit = U.liftFO2' ununitSem
     where
