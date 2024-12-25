@@ -431,6 +431,9 @@ letrs (k : ks) h = letr $ \fk -> letrs ks $ \f -> do
   (f', r) <- h $ \x -> if x == k then fk else f x
   return (f', (f' k, r))
 
+-- | A newtype wrapper for Bounded types. A typical use is an instance declaration such as:
+--
+-- > deriving via (FromBounded YourType -> a) instance (Arg f a) => Arg f (YourType -> a)
 newtype FromBounded b = FromBounded {getBounded :: b}
   deriving newtype (Eq, Ord, Enum, Bounded, Num, Real, Integral, Show)
 
@@ -446,20 +449,11 @@ instance (Eq b, Enum b, Bounded b, Arg f a) => Arg f (FromBounded b -> a) where
 -- Instances of concrete bounded types: we don't make instances like Arg f (Int -> a),
 -- as they are unrealistic.
 
-instance (Arg f a) => Arg f (Bool -> a) where
-  letr = letrsB
-
-instance (Arg f a, F.SNatI m, 'F.S m ~ n) => Arg f (F.Fin n -> a) where
-  letr = letrsB
-
-instance (Arg f a) => Arg f (Word8 -> a) where
-  letr = letrsB
-
-instance (Arg f a) => Arg f (Int8 -> a) where
-  letr = letrsB
-
-instance (Arg f a) => Arg f (() -> a) where
-  letr = letrsB
+deriving via (FromBounded Bool -> a) instance (Arg f a) => Arg f (Bool -> a)
+deriving via (FromBounded (F.Fin n) -> a) instance (Arg f a, F.SNatI m, F.S m ~ n) => Arg f (F.Fin n -> a)
+deriving via (FromBounded Word8 -> a) instance (Arg f a) => Arg f (Word8 -> a)
+deriving via (FromBounded Int8 -> a) instance (Arg f a) => Arg f (Int8 -> a)
+deriving via (FromBounded () -> a) instance (Arg f a) => Arg f (() -> a)
 
 instance (Arg f (b -> a)) => Arg f (Identity b -> a) where
   letr :: forall r. ((Identity b -> a) -> DefM f (Identity b -> a, r)) -> DefM f r
