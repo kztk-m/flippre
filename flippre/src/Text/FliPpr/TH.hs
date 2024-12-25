@@ -18,7 +18,7 @@ import           Language.Haskell.TH.Datatype as TH
 import           Prelude                      hiding (exp)
 import           Text.FliPpr.Internal.Type
 import           Text.FliPpr.Pat              as Pat
-import GHC.Stack (HasCallStack)
+
 
 
 pattern ConP_compat :: TH.Name -> [TH.Pat] -> TH.Pat
@@ -56,11 +56,11 @@ mkUn n = do
       let bn = TH.nameBase cn
       fn <- makeUnName bn
       (t, e) <- unGen cn
-      t' <- [t| HasCallStack => $(pure t) |]
-      e' <- [| withFrozenCallStack $(pure e) |] 
+      -- t' <- [t| HasCallStack => $(pure t) |]
+      -- e' <- [| withFrozenCallStack $(pure e) |] 
       -- let sigd = TH.SigD fn t
       -- (sigd:) <$> [d| $(TH.varP fn) = $(return e) |]
-      return [TH.SigD fn t', TH.ValD (TH.VarP fn) (TH.NormalB e') []]
+      return [TH.SigD fn t, TH.ValD (TH.VarP fn) (TH.NormalB e) []]
       where
         makeUnName :: String -> Q TH.Name
         makeUnName ":" = return $ TH.mkName "unCons"
