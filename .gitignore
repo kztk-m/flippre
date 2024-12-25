@@ -9,4 +9,6 @@ dist-newstyle
 hie.yaml
 .hie
 .vscode
+/local_*
+cabal.project.local
 fourmolu.yaml
