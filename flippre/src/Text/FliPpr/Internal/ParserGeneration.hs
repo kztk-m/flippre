@@ -9,10 +9,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PartialTypeSignatures #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
@@ -52,7 +50,7 @@ import Data.Functor ((<&>))
 import qualified Data.RangeSet.List as RS
 import qualified Prettyprinter as PP
 
-import Debug.Trace
+-- import Debug.Trace
 import qualified Defs
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Err (Err (..), err)
@@ -85,10 +83,11 @@ instance ValEnvRepr UsingIx where
   type Index UsingIx = G.Ix
   data ValEnv UsingIx as where
     VEmpty :: ValEnv UsingIx as
-    VCons :: Maybe a -> ValEnv UsingIx as -> ValEnv UsingIx (a : as)
+    VCons :: !(Maybe a) -> ValEnv UsingIx as -> ValEnv UsingIx (a : as)
 
   popEnv = unVCons
 
+  {-# SPECIALIZE mapTailA :: (ValEnv UsingIx env -> Identity (ValEnv UsingIx env')) -> ValEnv UsingIx (a : env) -> Identity (ValEnv UsingIx (a : env')) #-}
   mapTailA f (unVCons -> (a, as)) = VCons a <$> f as
 
   mapHeadA f (unVCons -> (a, as)) = (`VCons` as) <$> f a
@@ -112,7 +111,7 @@ instance ValEnvRepr UsingIx where
       mergeVal m Nothing = pure m
       mergeVal (Just _) (Just _) = err "Multiple use of a variable"
 
-newtype ArgSem r env a = ArgSem {argSem :: Index r env a}
+newtype ArgSem r env a = ArgSem (Index r env a)
 
 deriving newtype instance (U.Weakenable (Index r)) => U.Weakenable (ArgSem r)
 deriving newtype instance (U.Variables (Index r)) => U.Variables (ArgSem r)
@@ -123,8 +122,8 @@ newtype ExpSem r ann g env t = ExpSem {expSem :: g (Err ann (Result r env t))}
 
 -- Parsing result
 data Result r env t where
-  RF :: Result r (a : env) t -> Result r env (a ~> t)
-  RD :: ValEnv r env -> Result r env D
+  RF :: !(Result r (a : env) t) -> Result r env (a ~> t)
+  RD :: !(ValEnv r env) -> Result r env D
 
 type PExp ann g t = U.EnvI (ExpSem UsingIx ann g) t
 
@@ -133,16 +132,12 @@ type PExp ann g t = U.EnvI (ExpSem UsingIx ann g) t
 --   a points to a in env
 --
 appSem :: (ValEnvRepr r, Functor g) => ExpSem r ann g env (a ~> t) -> ArgSem r env a -> ExpSem r ann g env t
-appSem (ExpSem e) (ArgSem ix) =
-  ExpSem $
-    e <&> \m -> do
-      RF res <- m
-      mapToEnvA
-        ( \env ->
-            let (vv, env') = popEnv env
-            in  maybe (pure env') (\v -> updateEnv ix v env') vv
-        )
-        res
+appSem (ExpSem e) (ArgSem ix_) = ExpSem $ (fmap . (=<<)) (\(RF res) -> f ix_ res) e
+  where
+    f :: (ValEnvRepr r) => Index r env a -> Result r (a : env) t -> Err ann (Result r env t)
+    f ix = mapToEnvA $ \env ->
+      let (vv, env') = popEnv env
+      in  maybe (pure env') (\v -> updateEnv ix v env') vv
 
 mapToEnvA ::
   (Applicative f, ValEnvRepr r) =>
@@ -151,6 +146,7 @@ mapToEnvA ::
   -> f (Result r env' t)
 mapToEnvA f (RD e) = RD <$> f e
 mapToEnvA f (RF e0) = RF <$> mapToEnvA (mapTailA f) e0
+{-# SPECIALIZE mapToEnvA :: (ValEnvRepr r) => (ValEnv r env -> Identity (ValEnv r env')) -> Result r env t -> Identity (Result r env' t) #-}
 
 mapToEnv ::
   (ValEnvRepr r) =>
@@ -179,7 +175,7 @@ brHOASImpl pname finv = U.liftSOn' @(ArgSem r) @(WithExtendedEnv a r ann g) (U.o
     replaceHead :: ValEnv r (b : env) -> Err ann (ValEnv r (a : env))
     replaceHead =
       mapHeadA $ \case
-        Nothing -> err $ PP.hsep ["Detected unused variable in the case of:", fromString pname]
+        Nothing -> err $ PP.hsep ["Detected unused variable in the branch:", fromString pname]
         Just b -> do
           maybe (err $ PP.hsep ["Inverse pattern matching failed:", fromString pname]) (pure . Just) $ finv b
 
