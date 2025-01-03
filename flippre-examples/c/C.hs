@@ -149,7 +149,7 @@ pprTypeQualifier = define $ \x ->
 pprPointerList :: (FliPprD a e) => FliPprM e (A a [Pointer] -> E e D)
 pprPointerList = do
   pTypeQualifier <- pprTypeQualifier
-  typeQualifierList <- list pTypeQualifier
+  typeQualifierList <- inlineList pTypeQualifier
   pointer <- define $ \p ->
     case_
       p
@@ -157,7 +157,7 @@ pprPointerList = do
           text "*"
             <> typeQualifierList qs
       ]
-  rec pointerList <- sepByClose "" pointer
+  rec pointerList <- sepBy (text "") pointer
   return pointerList
 
 -- helpPrint = putStrLn . unlines . map (show . pprProgram')
@@ -165,12 +165,13 @@ pprPointerList = do
 expDecl :: Decl
 expDecl = DPointer [Pointer [TConst, TVolatile]] $ DArrayUnsized $ DIdent "x"
 
+-- BIG TODO: *x doesn't parse (generally: non-tokenized parsing needs some more work)
 pprTypeSpec :: (FliPprD a e) => FliPprM e (A a TypeSpecifier -> E e D)
 pprTypeSpec = do
   pExp <- pprExp
   pTypeQualifier <- pprTypeQualifier
   pStorageClass <- pprStorageClass
-  identList <- commaSep (`textAs` ident)
+  identList <- sepBy (text "," <> space) (`textAs` ident)
   pointerList <- pprPointerList
   pEnumerator <- define $ \x ->
     case_
@@ -178,9 +179,9 @@ pprTypeSpec = do
       [ unEnumeratorName $ \n -> textAs n ident
       , unEnumeratorWithValue $ \n e -> textAs n ident <+> text "=" <+> pExp e
       ]
-  pEnumeratorList <- sepBy "," pEnumerator
-  pEnum <- define $ \name enums -> text "enum" <+>. textAs name ident <+>. text "{" <+>. pEnumeratorList enums <+> text "}"
-  pAnonEnum <- define $ \enums -> text "enum" <+>. text "{" <+>. pEnumeratorList enums <+> text "}"
+  pEnumeratorList <- sepBy (text "," <> line) pEnumerator
+  pEnum <- define $ \name enums -> text "enum" <+>. textAs name ident <+>. text "{" <+>. nest 1 (pEnumeratorList enums) <> line <> text "}"
+  pAnonEnum <- define $ \enums -> text "enum" <+>. text "{" <+>. nest 1 (pEnumeratorList enums) <> line <> text "}"
   rec pSpec <- define $ \x ->
         case_
           x
@@ -188,14 +189,14 @@ pprTypeSpec = do
           , unDeclSpec pTypeSpec
           , unDeclQual pTypeQualifier
           ]
-      pSpecList <- sepByClose "" $ pSpec
+      pSpecList <- sepBy (text "") $ pSpec
       specQual <- define $ \x ->
         case_
           x
           [ unSpec $ pTypeSpec
           , unQual $ pTypeQualifier
           ]
-      specQualList <- list specQual
+      specQualList <- inlineList specQual
       structDeclarator <- define $ \x ->
         case_
           x
@@ -206,10 +207,10 @@ pprTypeSpec = do
       structDeclaratorList <- list structDeclarator
       structDeclaration <- define $ \t -> case_ t [unStructDecl $ \s d -> specQualList s <+> structDeclaratorList d <> text ";"]
       structDeclarationList <- list structDeclaration
-      struct <- define $ \name decls -> text "struct" <+> textAs name ident <+>. text "{" <+>. structDeclarationList decls <+>. text "}"
-      anonStruct <- define $ \decls -> text "struct" <+>. text "{" <+>. structDeclarationList decls <+>. text "}"
-      union <- define $ \name decls -> text "union" <+> textAs name ident <+>. text "{" <+>. structDeclarationList decls <+>. text "}"
-      anonUnion <- define $ \decls -> text "union" <+>. text "{" <+>. structDeclarationList decls <+>. text "}"
+      struct <- define $ \name decls -> text "struct" <+> textAs name ident <+>. text "{" <> nest 1 (line <> (structDeclarationList decls)) <> line <> text "}"
+      anonStruct <- define $ \decls -> text "struct" <+>. text "{" <> nest 1 (line <> structDeclarationList decls) <> line <> text "}"
+      union <- define $ \name decls -> text "union" <+> textAs name ident <+>. text "{" <> nest 1 (line <> structDeclarationList decls) <> line <> text "}"
+      anonUnion <- define $ \decls -> text "union" <+>. text "{" <> nest 1 (line <> structDeclarationList decls) <> line <> text "}"
       pDirectDecl <- define $ \x ->
         case_
           x
@@ -235,7 +236,7 @@ pprTypeSpec = do
           , unAbsDecl $ \d -> parens $ pAbsDecl d
           , unAbsProto $ \ps -> parens $ pParamList ps
           ]
-      pAbsDirectDeclList <- sepByClose "" pAbsDirectDecl
+      pAbsDirectDeclList <- sepBy (text "") pAbsDirectDecl
       pAbsDecl <- define $ \x ->
         case_
           x
@@ -250,7 +251,7 @@ pprTypeSpec = do
           , unPAbsDecl $ \ds d -> pSpecList ds <+> pAbsDecl d
           , unPSpecOnly $ \ds -> pSpecList ds
           ]
-      pParameterList <- sepBy "," pParameter
+      pParameterList <- sepBy (text "," <> space) pParameter
       pParamList <- define $ \x ->
         case_
           x
@@ -321,7 +322,7 @@ pprExp = do
               identExp f
                 <#> parens (pExpList args)
           ]
-      pExpList <- list pExp
+      pExpList <- inlineList pExp
   return pExp
 
 pprProgram :: TypeSpecifier -> Doc ann
