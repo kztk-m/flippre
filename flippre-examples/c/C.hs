@@ -17,35 +17,19 @@ import Prelude
 
 data Exp = LitExp Literal | IdentExp String | FunctionCall String [Exp]
   deriving (Show, Eq)
-$(mkUn ''Exp)
 
 data StorageClass = Auto | Register | Static | Extern | Typedef
   deriving (Show, Eq)
 
-$(mkUn ''StorageClass)
-
-pprStorageClass :: (FliPprD a e) => FliPprM e (A a StorageClass -> E e D)
-pprStorageClass = define $ \x ->
-  case_
-    x
-    [ unAuto $ text "auto"
-    , unRegister $ text "register"
-    , unStatic $ text "static"
-    , unExtern $ text "extern"
-    , unTypedef $ text "typedef"
-    ]
-
 data TypeQualifier = TConst | TVolatile
   deriving (Show, Eq)
 
-$(mkUn ''TypeQualifier)
-
 data Decl
-  = DPointer [Pointer] DirectDecl
+  = DPointer (NonEmpty Pointer) DirectDecl
   | DirectDecl DirectDecl
   deriving (Show, Eq)
 
-data ParamList = Variadic [Parameter] | Fixed [Parameter]
+data ParamList = Variadic (NonEmpty Parameter) | Fixed (NonEmpty Parameter)
   deriving (Show, Eq)
 
 data AbsDirect
@@ -59,17 +43,18 @@ data AbsDirect
     , Eq
     )
 
-data AbsDecl = AbsPointer [Pointer] | AbsPointerDecl [Pointer] [AbsDirect] | AbsDirectDecl [AbsDirect]
+data AbsDecl = AbsPointer (NonEmpty Pointer) | AbsPointerDecl (NonEmpty Pointer) AbsDirect | AbsDirectDecl AbsDirect
   deriving (Show, Eq)
 
-data Parameter = PDecl [DeclSpecifier] Decl | PAbsDecl [DeclSpecifier] AbsDecl | PSpecOnly [DeclSpecifier]
+data Parameter = PDecl [DeclSpecifier] Decl | PAbsDecl [DeclSpecifier] AbsDecl | PSpecOnly (NonEmpty DeclSpecifier)
   deriving (Show, Eq)
 
 data DirectDecl
   = DIdent String
   | DArray DirectDecl Exp
   | DArrayUnsized DirectDecl
-  | DFunction DirectDecl [String]
+  | DIdents DirectDecl (NonEmpty String)
+  | DFunction DirectDecl
   | DDecl Decl
   | DProto DirectDecl ParamList
   deriving
@@ -86,9 +71,7 @@ data SpecQualifier = Spec TypeSpecifier | Qual TypeQualifier
 data DeclSpecifier = DeclStor StorageClass | DeclSpec TypeSpecifier | DeclQual TypeQualifier
   deriving (Show, Eq)
 
-type AnyDecl = Either Decl AbsDecl
-
-data StructDeclaration = StructDecl [SpecQualifier] [StructDeclarator]
+data StructDeclaration = StructDecl [SpecQualifier] (NonEmpty StructDeclarator)
   deriving (Show, Eq)
 
 data StructDeclarator = SDecl Decl | SBits Decl Exp | SAnonBits Exp
@@ -113,20 +96,19 @@ data TypeSpecifier
   | TUnion String [StructDeclaration]
   | TAnonUnion
       [StructDeclaration]
-  | TEnum String [Enumerator]
+  | TEnum String (NonEmpty Enumerator)
   | TAnonEnum
-      [Enumerator]
+      (NonEmpty Enumerator)
   | TName
       String
   deriving (Show, Eq)
 
--- todo ENUM
-
+$(mkUn ''Exp)
+$(mkUn ''StorageClass)
+$(mkUn ''TypeQualifier)
 $(mkUn ''TypeSpecifier)
-
 $(mkUn ''StructDeclaration)
 $(mkUn ''StructDeclarator)
-
 $(mkUn ''Decl)
 $(mkUn ''DirectDecl)
 $(mkUn ''Pointer)
@@ -138,6 +120,17 @@ $(mkUn ''ParamList)
 $(mkUn ''SpecQualifier)
 $(mkUn ''Enumerator)
 
+pprStorageClass :: (FliPprD a e) => FliPprM e (A a StorageClass -> E e D)
+pprStorageClass = define $ \x ->
+  case_
+    x
+    [ unAuto $ text "auto"
+    , unRegister $ text "register"
+    , unStatic $ text "static"
+    , unExtern $ text "extern"
+    , unTypedef $ text "typedef"
+    ]
+
 pprTypeQualifier :: (FliPprD a e) => FliPprM e (A a TypeQualifier -> E e D)
 pprTypeQualifier = define $ \x ->
   case_
@@ -146,7 +139,8 @@ pprTypeQualifier = define $ \x ->
     , unTVolatile $ text "volatile"
     ]
 
-pprPointerList :: (FliPprD a e) => FliPprM e (A a [Pointer] -> E e D)
+-- todo
+pprPointerList :: (FliPprD a e) => FliPprM e (A a (NonEmpty Pointer) -> E e D)
 pprPointerList = do
   pTypeQualifier <- pprTypeQualifier
   typeQualifierList <- inlineList pTypeQualifier
@@ -157,21 +151,20 @@ pprPointerList = do
           text "*"
             <> typeQualifierList qs
       ]
-  rec pointerList <- sepBy (text "") pointer
+  rec pointerList <- sepByNonEmpty (text "") pointer
   return pointerList
 
 -- helpPrint = putStrLn . unlines . map (show . pprProgram')
 
-expDecl :: Decl
-expDecl = DPointer [Pointer [TConst, TVolatile]] $ DArrayUnsized $ DIdent "x"
-
 -- BIG TODO: *x doesn't parse (generally: non-tokenized parsing needs some more work)
-pprTypeSpec :: (FliPprD a e) => FliPprM e (A a TypeSpecifier -> E e D)
-pprTypeSpec = do
+pprTypeSpec :: (FliPprD a e) => FliPprM e (A a Exp -> E e D) -> FliPprM e (A a TypeSpecifier -> E e D)
+pprTypeSpec pprExp = do
+  -- for later knot-tying
   pExp <- pprExp
+  -- seperate out anything that is not recursive
   pTypeQualifier <- pprTypeQualifier
   pStorageClass <- pprStorageClass
-  identList <- sepBy (text "," <> space) (`textAs` ident)
+  identList <- sepByNonEmpty (text "," <> space) (`textAs` ident)
   pointerList <- pprPointerList
   pEnumerator <- define $ \x ->
     case_
@@ -179,44 +172,95 @@ pprTypeSpec = do
       [ unEnumeratorName $ \n -> textAs n ident
       , unEnumeratorWithValue $ \n e -> textAs n ident <+> text "=" <+> pExp e
       ]
-  pEnumeratorList <- sepBy (text "," <> line) pEnumerator
-  pEnum <- define $ \name enums -> text "enum" <+>. textAs name ident <+>. text "{" <+>. nest 1 (pEnumeratorList enums) <> line <> text "}"
-  pAnonEnum <- define $ \enums -> text "enum" <+>. text "{" <+>. nest 1 (pEnumeratorList enums) <> line <> text "}"
-  rec pSpec <- define $ \x ->
+  -- enumerators can only be nonempty
+  pEnumeratorList <- sepByNonEmpty (text "," <> line) pEnumerator
+  pEnum <- define $ \name enums -> text "enum" <+>. textAs name ident <+>. text "{" <> nest 1 (line <> pEnumeratorList enums) <> line <> text "}"
+  pAnonEnum <- define $ \enums -> text "enum" <+>. text "{" <> nest 1 (line <> pEnumeratorList enums) <> line <> text "}"
+
+  -- declarations for parameters
+  rec pDeclSpec <- define $ \x ->
         case_
           x
           [ unDeclStor pStorageClass
           , unDeclSpec pTypeSpec
           , unDeclQual pTypeQualifier
           ]
-      pSpecList <- sepBy (text "") $ pSpec
-      specQual <- define $ \x ->
+      pDeclSpecList <- sepBy (text "") $ pDeclSpec
+      pDeclSpecListNonEmpty <- sepByNonEmpty (text "") $ pDeclSpec
+      pSpecQual <- define $ \x ->
         case_
           x
           [ unSpec $ pTypeSpec
           , unQual $ pTypeQualifier
           ]
-      specQualList <- inlineList specQual
-      structDeclarator <- define $ \x ->
+      pSpecQualList <- inlineList pSpecQual
+      pParameter <- define $ \x ->
+        case_
+          x
+          [ unPDecl $ \ds d -> pDeclSpecList ds <+> pDecl d
+          , unPAbsDecl $ \ds d -> pDeclSpecList ds <+> pAbsDecl d
+          , unPSpecOnly $ \ds -> pDeclSpecListNonEmpty ds
+          ]
+      pParameterList <- sepByNonEmpty (text "," <> space) pParameter
+      pParamList <- define $ \x ->
+        case_
+          x
+          [ unVariadic $ \ps -> pParameterList ps <> text "," <+> text "..."
+          , unFixed $ \ps -> pParameterList ps
+          ]
+
+      -- struct stuff
+      pStructDeclarator <- define $ \x ->
         case_
           x
           [ unSDecl $ \d -> pDecl d
-          , unSBits $ \d e -> pDecl d <> text ":" <> pExp e
-          , unSAnonBits $ \e -> text ":" <> pExp e
+          , unSBits $ \d e -> pDecl d <+> text ":" <+> pExp e
+          , unSAnonBits $ \e -> text ":" <+> pExp e
           ]
-      structDeclaratorList <- list structDeclarator
-      structDeclaration <- define $ \t -> case_ t [unStructDecl $ \s d -> specQualList s <+> structDeclaratorList d <> text ";"]
-      structDeclarationList <- list structDeclaration
-      struct <- define $ \name decls -> text "struct" <+> textAs name ident <+>. text "{" <> nest 1 (line <> (structDeclarationList decls)) <> line <> text "}"
-      anonStruct <- define $ \decls -> text "struct" <+>. text "{" <> nest 1 (line <> structDeclarationList decls) <> line <> text "}"
-      union <- define $ \name decls -> text "union" <+> textAs name ident <+>. text "{" <> nest 1 (line <> structDeclarationList decls) <> line <> text "}"
-      anonUnion <- define $ \decls -> text "union" <+>. text "{" <> nest 1 (line <> structDeclarationList decls) <> line <> text "}"
+      pStructDeclaratorList <- sepByNonEmpty (text "," <> space) pStructDeclarator
+      pStructDeclaration <- define $
+        \t -> case_ t [unStructDecl $ \s d -> pSpecQualList s <+> pStructDeclaratorList d <> text ";"]
+      pStructDeclarationList <- list pStructDeclaration
+
+      pStruct <- define $
+        \name decls ->
+          text "struct"
+            <+> textAs name ident
+            <+>. text "{"
+            <> nest 1 (line <> (pStructDeclarationList decls))
+            <> line
+            <> text "}"
+      pAnonStruct <- define $
+        \decls ->
+          text "struct"
+            <+>. text "{"
+            <> nest 1 (line <> pStructDeclarationList decls)
+            <> line
+            <> text "}"
+      pUnion <- define $
+        \name decls ->
+          text "union"
+            <+> textAs name ident
+            <+>. text "{"
+            <> nest 1 (line <> pStructDeclarationList decls)
+            <> line
+            <> text "}"
+      pAnonUnion <- define $
+        \decls ->
+          text "union"
+            <+>. text "{"
+            <> nest 1 (line <> pStructDeclarationList decls)
+            <> line
+            <> text "}"
+
+      -- declarations
       pDirectDecl <- define $ \x ->
         case_
           x
           [ unDIdent $ \i -> textAs i ident
           , unDArray $ \d e -> pDirectDecl d <> text "[" <> pExp e <> text "]"
-          , unDFunction $ \d args -> pDirectDecl d <> text "(" <> identList args <> text ")"
+          , unDFunction $ \d -> pDirectDecl d <> parens (text "")
+          , unDIdents $ \d args -> pDirectDecl d <> parens (identList args)
           , unDArrayUnsized $ \d -> pDirectDecl d <> text "[" <> text "]"
           , unDDecl $ \d -> parens $ pDecl d
           , unDProto $ \d ps -> pDirectDecl d <> parens (pParamList ps)
@@ -225,8 +269,10 @@ pprTypeSpec = do
         case_
           x
           [ unDirectDecl pDirectDecl
-          , unDPointer $ \ps d -> pointerList ps <+> pDirectDecl d
+          , unDPointer $ \ps d -> pointerList ps <> pDirectDecl d
           ]
+
+      -- abstract declarations
       pAbsDirectDecl <- define $ \x ->
         case_
           x
@@ -236,28 +282,14 @@ pprTypeSpec = do
           , unAbsDecl $ \d -> parens $ pAbsDecl d
           , unAbsProto $ \ps -> parens $ pParamList ps
           ]
-      pAbsDirectDeclList <- sepBy (text "") pAbsDirectDecl
       pAbsDecl <- define $ \x ->
         case_
           x
-          [ unAbsDirectDecl $ \ds -> pAbsDirectDeclList ds
-          , unAbsPointerDecl $ \ps ds -> pointerList ps <> pAbsDirectDeclList ds
+          [ unAbsDirectDecl $ \ds -> pAbsDirectDecl ds
+          , unAbsPointerDecl $ \ps ds -> pointerList ps <> pAbsDirectDecl ds
           , unAbsPointer $ \ps -> pointerList ps
           ]
-      pParameter <- define $ \x ->
-        case_
-          x
-          [ unPDecl $ \ds d -> pSpecList ds <+> pDecl d
-          , unPAbsDecl $ \ds d -> pSpecList ds <+> pAbsDecl d
-          , unPSpecOnly $ \ds -> pSpecList ds
-          ]
-      pParameterList <- sepBy (text "," <> space) pParameter
-      pParamList <- define $ \x ->
-        case_
-          x
-          [ unVariadic $ \ps -> pParameterList ps <> text "," <+> text "..."
-          , unFixed $ \ps -> pParameterList ps
-          ]
+
       pTypeSpec <- define $ \x ->
         case_
           x
@@ -271,18 +303,18 @@ pprTypeSpec = do
           , unTSigned $ text "signed"
           , unTUnsigned $ text "unsigned"
           , unTStruct $ \n decls ->
-              struct
+              pStruct
                 n
                 decls
           , unTAnonStruct $ \decls ->
-              anonStruct
+              pAnonStruct
                 decls
           , unTUnion $ \n decls ->
-              union
+              pUnion
                 n
                 decls
           , unTAnonUnion $ \decls ->
-              anonUnion
+              pAnonUnion
                 decls
           , unTEnum $ \n enums ->
               pEnum
@@ -296,11 +328,25 @@ pprTypeSpec = do
           ]
   return pTypeSpec
 
-decl :: TypeSpecifier
-decl = TStruct "complex" [StructDecl [Spec (TAnonStruct [StructDecl [Spec (TAnonEnum [EnumeratorName "A", EnumeratorName "B", EnumeratorWithValue "C" (LitExp (IntL (Int 4)))])] [SDecl (DirectDecl (DIdent "xyz"))], StructDecl [Qual TConst, Spec TInt] [SDecl (DPointer [Pointer [], Pointer []] (DIdent "x"))]])] [SDecl (DirectDecl (DIdent "nestedStruct"))], StructDecl [Qual TConst, Qual TVolatile, Spec TInt] [SDecl (DPointer [Pointer []] (DIdent "x"))]]
-
 keywords :: [String]
-keywords = ["void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "const", "volatile", "auto", "register", "static", "extern", "typedef"]
+keywords =
+  [ "void"
+  , "char"
+  , "short"
+  , "int"
+  , "long"
+  , "float"
+  , "double"
+  , "signed"
+  , "unsigned"
+  , "const"
+  , "volatile"
+  , "auto"
+  , "register"
+  , "static"
+  , "extern"
+  , "typedef"
+  ]
 
 ident :: AM.DFA Char
 ident =
@@ -326,7 +372,10 @@ pprExp = do
   return pExp
 
 pprProgram :: TypeSpecifier -> Doc ann
-pprProgram = pprMode (flippr $ fromFunction <$> pprTypeSpec)
+pprProgram = pprMode (flippr $ fromFunction <$> (pprTypeSpec pprExp))
 
 parseProgram :: [Char] -> Err ann [TypeSpecifier]
-parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprTypeSpec)
+parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> (pprTypeSpec pprExp))
+
+exmp :: TypeSpecifier
+exmp = TStruct "complex" [StructDecl [Spec (TAnonStruct [StructDecl [Spec (TAnonEnum (NCons (EnumeratorName "A") (NCons (EnumeratorName "B") (NNil (EnumeratorWithValue "C" (LitExp (IntL (Int 4))))))))] (NNil (SDecl (DirectDecl (DIdent "xyz")))), StructDecl [Qual TConst, Spec TInt] (NNil (SDecl (DPointer (NCons (Pointer []) (NNil (Pointer []))) (DIdent "x"))))])] (NNil (SBits (DirectDecl (DFunction (DIdent "nestedStruct"))) (LitExp (IntL (Int 3))))), StructDecl [Qual TConst, Qual TVolatile, Spec TInt] (NNil (SDecl (DPointer (NNil (Pointer [])) (DIdent "x"))))]

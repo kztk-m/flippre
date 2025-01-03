@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -11,7 +12,9 @@ module Helper (
     list,
     inlineList,
     sepBy,
+    sepByNonEmpty,
     manyParens,
+    NonEmpty (..),
 ) where
 
 import Text.FliPpr
@@ -63,6 +66,12 @@ sepBy comma p = do
             , unCons $ \_ _ -> commaSep' xs
             ]
 -}
+
+data NonEmpty a = NCons a (NonEmpty a) | NNil a
+    deriving (Show, Eq)
+
+$(mkUn ''NonEmpty)
+
 list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 list p = do
     rec listNE <- define $ \t ts ->
@@ -95,7 +104,7 @@ inlineList p = do
                 ]
     return list'
 
--- sepBy :: (FliPprD a e, Eq v) => d -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+sepBy :: (FliPprD a e, Eq v) => E e D -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepBy comma p = do
     rec commaSepNE <- define $ \x xs ->
             case_
@@ -108,6 +117,21 @@ sepBy comma p = do
             xs
             [ unNil $ text ""
             , unCons commaSepNE
+            ]
+
+sepByNonEmpty :: (FliPprD a e, Eq v) => E e D -> (A a v -> E e D) -> FliPprM e (A a (NonEmpty v) -> E e D)
+sepByNonEmpty comma p = do
+    rec commaSepNE <- define $ \x xs ->
+            case_
+                xs
+                [ unNNil $ \t -> p x <> comma <> p t
+                , unNCons $ \t ts -> p x <> comma <> commaSepNE t ts
+                ]
+    return $ \xs ->
+        case_
+            xs
+            [ unNNil p
+            , unNCons commaSepNE
             ]
 
 {-
