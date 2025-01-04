@@ -14,10 +14,14 @@ module Helper (
     sepBy,
     sepByNonEmpty,
     manyParens,
+    ident,
     NonEmpty (..),
 ) where
 
+import Data.String (fromString)
+import Literals (digit)
 import Text.FliPpr
+import qualified Text.FliPpr.Automaton as AM
 import Prelude
 
 -- necessary for recursions within do blocks
@@ -133,6 +137,33 @@ sepByNonEmpty comma p = do
             [ unNNil p
             , unNCons commaSepNE
             ]
+
+keywords :: [String]
+keywords =
+    [ "void"
+    , "char"
+    , "short"
+    , "int"
+    , "long"
+    , "float"
+    , "double"
+    , "signed"
+    , "unsigned"
+    , "const"
+    , "volatile"
+    , "auto"
+    , "register"
+    , "static"
+    , "extern"
+    , "typedef"
+    ]
+
+ident :: AM.DFA Char
+ident =
+    ( AM.unions [AM.range 'a' 'z', AM.range 'A' 'Z', AM.singleton '_']
+        <> AM.star (AM.unions [AM.range 'a' 'z', AM.range 'A' 'Z', digit, AM.singleton '_'])
+    )
+        `AM.difference` AM.unions (map fromString keywords)
 
 {-
 sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)

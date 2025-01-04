@@ -6,16 +6,133 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
-import Data.String (fromString)
 import Helper
 import Literals
 import Prettyprinter (Doc)
 import Text.FliPpr
-import qualified Text.FliPpr.Automaton as AM
 import Text.FliPpr.Grammar.Driver.Earley as E
 import Prelude
 
-data Exp = LitExp Literal | IdentExp String | FunctionCall String [Exp]
+data Exp = Comma Exp AssignmentExp | Assignment AssignmentExp
+  deriving (Show, Eq)
+
+data PrimaryExp = LitExp Literal | IdentExp String | Exp Exp
+  deriving (Show, Eq)
+
+data AssignmentExp = Assign AssignmentOp UnaryExp AssignmentExp | CondExp CondExp
+  deriving (Show, Eq)
+
+data AssignmentOp
+  = AssignOp
+  | MulAssign
+  | DivAssign
+  | ModAssign
+  | AddAssign
+  | SubAssign
+  | LeftAssign
+  | RightAssign
+  | AndAssign
+  | XorAssign
+  | OrAssign
+  deriving (Show, Eq)
+
+data UnaryExp
+  = PostfixExp PostfixExp
+  | Inc UnaryExp
+  | Dec UnaryExp
+  | UnaryOp UnaryOp CastExp
+  | SizeofExp UnaryExp
+  | SizeofType TypeName
+  deriving (Show, Eq)
+
+data UnaryOp
+  = Address
+  | Indirection
+  | Plus
+  | Minus
+  | BitwiseNot
+  | LogicalNot
+  deriving (Show, Eq)
+
+data CastExp
+  = Cast TypeName CastExp
+  | Unary UnaryExp
+  deriving (Show, Eq)
+
+data CondExp
+  = LogicalOrExp LogicalOrExp
+  | LogicalOrExpCond LogicalOrExp Exp CondExp
+  deriving (Show, Eq)
+
+data LogicalOrExp
+  = LogicalAndExp LogicalAndExp
+  | LogicalOrExpOr LogicalOrExp LogicalAndExp
+  deriving (Show, Eq)
+
+data LogicalAndExp
+  = InclusiveOrExp InclusiveOrExp
+  | LogicalAndExpAnd LogicalAndExp InclusiveOrExp
+  deriving (Show, Eq)
+
+data InclusiveOrExp
+  = ExclusiveOrExp ExclusiveOrExp
+  | InclusiveOrExpOr InclusiveOrExp ExclusiveOrExp
+  deriving (Show, Eq)
+
+data ExclusiveOrExp
+  = AndExp AndExp
+  | ExclusiveOrExpXor ExclusiveOrExp AndExp
+  deriving (Show, Eq)
+
+data AndExp
+  = EqualityExp EqualityExp
+  | AndExpAnd AndExp EqualityExp
+  deriving (Show, Eq)
+
+data EqualityExp
+  = RelationalExp RelationalExp
+  | EqualityExpEq EqualityExp RelationalExp
+  | EqualityExpNeq EqualityExp RelationalExp
+  deriving (Show, Eq)
+
+data RelationalExp
+  = ShiftExp ShiftExp
+  | RelationalExpLt RelationalExp ShiftExp
+  | RelationalExpGt RelationalExp ShiftExp
+  | RelationalExpLe RelationalExp ShiftExp
+  | RelationalExpGe RelationalExp ShiftExp
+  deriving (Show, Eq)
+
+data ShiftExp
+  = AdditiveExp AdditiveExp
+  | ShiftExpLeft ShiftExp AdditiveExp
+  | ShiftExpRight ShiftExp AdditiveExp
+  deriving (Show, Eq)
+
+data AdditiveExp
+  = MultiplicativeExp MultiplicativeExp
+  | AdditiveExpPlus AdditiveExp MultiplicativeExp
+  | AdditiveExpMinus AdditiveExp MultiplicativeExp
+  deriving (Show, Eq)
+
+data MultiplicativeExp
+  = CastExp CastExp
+  | MultiplicativeExpMul MultiplicativeExp CastExp
+  | MultiplicativeExpDiv MultiplicativeExp CastExp
+  | MultiplicativeExpMod MultiplicativeExp CastExp
+  deriving (Show, Eq)
+
+data PostfixExp
+  = PrimaryExp PrimaryExp
+  | PostfixExpCall PostfixExp [AssignmentExp]
+  | PostfixExpArray PostfixExp Exp
+  | PostfixExpDot PostfixExp String
+  | PostfixExpArrow PostfixExp String
+  | PostfixExpInc PostfixExp
+  | PostfixExpDec PostfixExp
+  deriving (Show, Eq)
+
+data TypeName = TSpecQualifier [SpecQualifier] | TSpecQualifierDecl [SpecQualifier] AbsDecl
   deriving (Show, Eq)
 
 data StorageClass = Auto | Register | Static | Extern | Typedef
@@ -33,15 +150,12 @@ data ParamList = Variadic (NonEmpty Parameter) | Fixed (NonEmpty Parameter)
   deriving (Show, Eq)
 
 data AbsDirect
-  = AbsArray Exp
+  = AbsArray CondExp
   | AbsArrayUnsized
   | AbsFunction
   | AbsDecl AbsDecl
   | AbsProto ParamList
-  deriving
-    ( Show
-    , Eq
-    )
+  deriving (Show, Eq)
 
 data AbsDecl = AbsPointer (NonEmpty Pointer) | AbsPointerDecl (NonEmpty Pointer) AbsDirect | AbsDirectDecl AbsDirect
   deriving (Show, Eq)
@@ -51,18 +165,15 @@ data Parameter = PDecl [DeclSpecifier] Decl | PAbsDecl [DeclSpecifier] AbsDecl |
 
 data DirectDecl
   = DIdent String
-  | DArray DirectDecl Exp
+  | DArray DirectDecl CondExp
   | DArrayUnsized DirectDecl
   | DIdents DirectDecl (NonEmpty String)
   | DFunction DirectDecl
   | DDecl Decl
   | DProto DirectDecl ParamList
-  deriving
-    ( Show
-    , Eq
-    )
+  deriving (Show, Eq)
 
-data Pointer = Pointer [TypeQualifier]
+newtype Pointer = Pointer [TypeQualifier]
   deriving (Show, Eq)
 
 data SpecQualifier = Spec TypeSpecifier | Qual TypeQualifier
@@ -74,10 +185,10 @@ data DeclSpecifier = DeclStor StorageClass | DeclSpec TypeSpecifier | DeclQual T
 data StructDeclaration = StructDecl [SpecQualifier] (NonEmpty StructDeclarator)
   deriving (Show, Eq)
 
-data StructDeclarator = SDecl Decl | SBits Decl Exp | SAnonBits Exp
+data StructDeclarator = SDecl Decl | SBits Decl CondExp | SAnonBits CondExp
   deriving (Show, Eq)
 
-data Enumerator = EnumeratorName String | EnumeratorWithValue String Exp
+data Enumerator = EnumeratorName String | EnumeratorWithValue String CondExp
   deriving (Show, Eq)
 
 data TypeSpecifier
@@ -104,6 +215,26 @@ data TypeSpecifier
   deriving (Show, Eq)
 
 $(mkUn ''Exp)
+$(mkUn ''PrimaryExp)
+$(mkUn ''AssignmentExp)
+$(mkUn ''AssignmentOp)
+$(mkUn ''UnaryExp)
+$(mkUn ''UnaryOp)
+$(mkUn ''CastExp)
+$(mkUn ''CondExp)
+$(mkUn ''LogicalOrExp)
+$(mkUn ''LogicalAndExp)
+$(mkUn ''InclusiveOrExp)
+$(mkUn ''ExclusiveOrExp)
+$(mkUn ''AndExp)
+$(mkUn ''EqualityExp)
+$(mkUn ''RelationalExp)
+$(mkUn ''ShiftExp)
+$(mkUn ''AdditiveExp)
+$(mkUn ''MultiplicativeExp)
+$(mkUn ''PostfixExp)
+$(mkUn ''TypeName)
+
 $(mkUn ''StorageClass)
 $(mkUn ''TypeQualifier)
 $(mkUn ''TypeSpecifier)
@@ -157,10 +288,8 @@ pprPointerList = do
 -- helpPrint = putStrLn . unlines . map (show . pprProgram')
 
 -- BIG TODO: *x doesn't parse (generally: non-tokenized parsing needs some more work)
-pprTypeSpec :: (FliPprD a e) => FliPprM e (A a Exp -> E e D) -> FliPprM e (A a TypeSpecifier -> E e D)
-pprTypeSpec pprExp = do
-  -- for later knot-tying
-  pExp <- pprExp
+pprTypes :: (FliPprD a e) => (A a CondExp -> E e D) -> FliPprM e (A a TypeSpecifier -> E e D, A a TypeName -> E e D)
+pprTypes pCondExp = do
   -- seperate out anything that is not recursive
   pTypeQualifier <- pprTypeQualifier
   pStorageClass <- pprStorageClass
@@ -170,7 +299,7 @@ pprTypeSpec pprExp = do
     case_
       x
       [ unEnumeratorName $ \n -> textAs n ident
-      , unEnumeratorWithValue $ \n e -> textAs n ident <+> text "=" <+> pExp e
+      , unEnumeratorWithValue $ \n e -> textAs n ident <+> text "=" <+> pCondExp e
       ]
   -- enumerators can only be nonempty
   pEnumeratorList <- sepByNonEmpty (text "," <> line) pEnumerator
@@ -185,13 +314,13 @@ pprTypeSpec pprExp = do
           , unDeclSpec pTypeSpec
           , unDeclQual pTypeQualifier
           ]
-      pDeclSpecList <- sepBy (text "") $ pDeclSpec
-      pDeclSpecListNonEmpty <- sepByNonEmpty (text "") $ pDeclSpec
+      pDeclSpecList <- sepBy (text "") pDeclSpec
+      pDeclSpecListNonEmpty <- sepByNonEmpty (text "") pDeclSpec
       pSpecQual <- define $ \x ->
         case_
           x
-          [ unSpec $ pTypeSpec
-          , unQual $ pTypeQualifier
+          [ unSpec pTypeSpec
+          , unQual pTypeQualifier
           ]
       pSpecQualList <- inlineList pSpecQual
       pParameter <- define $ \x ->
@@ -214,8 +343,8 @@ pprTypeSpec pprExp = do
         case_
           x
           [ unSDecl $ \d -> pDecl d
-          , unSBits $ \d e -> pDecl d <+> text ":" <+> pExp e
-          , unSAnonBits $ \e -> text ":" <+> pExp e
+          , unSBits $ \d e -> pDecl d <+> text ":" <+> pCondExp e
+          , unSAnonBits $ \e -> text ":" <+> pCondExp e
           ]
       pStructDeclaratorList <- sepByNonEmpty (text "," <> space) pStructDeclarator
       pStructDeclaration <- define $
@@ -227,7 +356,7 @@ pprTypeSpec pprExp = do
           text "struct"
             <+> textAs name ident
             <+>. text "{"
-            <> nest 1 (line <> (pStructDeclarationList decls))
+            <> nest 1 (line <> pStructDeclarationList decls)
             <> line
             <> text "}"
       pAnonStruct <- define $
@@ -258,7 +387,7 @@ pprTypeSpec pprExp = do
         case_
           x
           [ unDIdent $ \i -> textAs i ident
-          , unDArray $ \d e -> pDirectDecl d <> text "[" <> pExp e <> text "]"
+          , unDArray $ \d e -> pDirectDecl d <> text "[" <> pCondExp e <> text "]"
           , unDFunction $ \d -> pDirectDecl d <> parens (text "")
           , unDIdents $ \d args -> pDirectDecl d <> parens (identList args)
           , unDArrayUnsized $ \d -> pDirectDecl d <> text "[" <> text "]"
@@ -276,7 +405,7 @@ pprTypeSpec pprExp = do
       pAbsDirectDecl <- define $ \x ->
         case_
           x
-          [ unAbsArray $ \e -> text "[" <> pExp e <> text "]"
+          [ unAbsArray $ \e -> text "[" <> pCondExp e <> text "]"
           , unAbsFunction $ parens $ text ""
           , unAbsArrayUnsized $ text "[" <> text "]"
           , unAbsDecl $ \d -> parens $ pAbsDecl d
@@ -326,56 +455,177 @@ pprTypeSpec pprExp = do
           , unTName $
               \n -> textAs n ident
           ]
-  return pTypeSpec
-
-keywords :: [String]
-keywords =
-  [ "void"
-  , "char"
-  , "short"
-  , "int"
-  , "long"
-  , "float"
-  , "double"
-  , "signed"
-  , "unsigned"
-  , "const"
-  , "volatile"
-  , "auto"
-  , "register"
-  , "static"
-  , "extern"
-  , "typedef"
-  ]
-
-ident :: AM.DFA Char
-ident =
-  ( AM.unions [AM.range 'a' 'z', AM.range 'A' 'Z', AM.singleton '_']
-      <> AM.star (AM.unions [AM.range 'a' 'z', AM.range 'A' 'Z', digit, AM.singleton '_'])
-  )
-    `AM.difference` AM.unions (map fromString keywords)
-
-pprExp :: (FliPprD a e) => FliPprM e (A a Exp -> E e D)
-pprExp = do
-  lit <- pprLit
-  identExp <- define $ \x -> textAs x ident
-  rec pExp <- define $ \l ->
+      pTypeName <- define $ \x ->
         case_
-          l
-          [ unLitExp lit
-          , unIdentExp identExp
-          , unFunctionCall $ \f args ->
-              identExp f
-                <#> parens (pExpList args)
+          x
+          [ unTSpecQualifier $ \t -> pSpecQualList t
+          , unTSpecQualifierDecl $ \t d -> pSpecQualList t <+> pAbsDecl d
           ]
-      pExpList <- inlineList pExp
+  return (pTypeSpec, pTypeName)
+
+pprExp :: (FliPprD a e) => (A a TypeName -> E e D) -> FliPprM e (A a Exp -> E e D, A a CondExp -> E e D)
+pprExp pTypeName = do
+  lit <- pprLit
+  pAssignmentOp <- define $ \x ->
+    case_
+      x
+      [ unAssignOp $ text "="
+      , unMulAssign $ text "*="
+      , unDivAssign $ text "/="
+      , unModAssign $ text "%="
+      , unAddAssign $ text "+="
+      , unSubAssign $ text "-="
+      , unLeftAssign $ text "<<="
+      , unRightAssign $ text ">>="
+      , unAndAssign $ text "&="
+      , unXorAssign $ text "^="
+      , unOrAssign $ text "|="
+      ]
+  identExp <- define $ \x -> textAs x ident
+  rec pExp <- define $ \x ->
+        case_
+          x
+          [ unComma $ \e1 e2 -> align $ group $ pExp e1 </>. text "," <+>. pAssignmentExp e2
+          , unAssignment $ \e -> pAssignmentExp e
+          ]
+      pAssignmentExp <- define $ \x ->
+        case_
+          x
+          [ unAssign $ \op e1 e2 -> pUnaryExp e1 <+>. pAssignmentOp op <+>. pAssignmentExp e2
+          , unCondExp $ \e -> pCondExp e
+          ]
+      pCondExp <- define $ \x ->
+        case_
+          x
+          [ unLogicalOrExp $ \e -> pLogicalOrExp e
+          , unLogicalOrExpCond $ \e1 e2 e3 -> pLogicalOrExp e1 <+> align (vsep [text "?" <+>. pExp e2, text ":" <+>. pCondExp e3])
+          ]
+      pLogicalOrExp <- define $ \x ->
+        case_
+          x
+          [ unLogicalAndExp $ \e -> pLogicalAndExp e
+          , unLogicalOrExpOr $ \e1 e2 -> align $ group $ pLogicalOrExp e1 </>. text "||" <+>. pLogicalAndExp e2
+          ]
+      pLogicalAndExp <- define $ \x ->
+        case_
+          x
+          [ unInclusiveOrExp $ \e -> pInclusiveOrExp e
+          , unLogicalAndExpAnd $ \e1 e2 -> align $ group $ pLogicalAndExp e1 </>. text "&&" <+>. pInclusiveOrExp e2
+          ]
+      pInclusiveOrExp <- define $ \x ->
+        case_
+          x
+          [ unExclusiveOrExp $ \e -> pExclusiveOrExp e
+          , unInclusiveOrExpOr $ \e1 e2 -> pInclusiveOrExp e1 <+>. text "|" <+>. pExclusiveOrExp e2
+          ]
+      pExclusiveOrExp <- define $ \x ->
+        case_
+          x
+          [ unAndExp $ \e -> pAndExp e
+          , unExclusiveOrExpXor $ \e1 e2 -> pExclusiveOrExp e1 <+>. text "^" <+>. pAndExp e2
+          ]
+      pAndExp <- define $ \x ->
+        case_
+          x
+          [ unEqualityExp $ \e -> pEqualityExp e
+          , unAndExpAnd $ \e1 e2 -> pAndExp e1 <+>. text "&" <+>. pEqualityExp e2
+          ]
+      pEqualityExp <- define $ \x ->
+        case_
+          x
+          [ unRelationalExp $ \e -> pRelationalExp e
+          , unEqualityExpEq $ \e1 e2 -> align $ group $ pEqualityExp e1 </>. text "==" <+>. pRelationalExp e2
+          , unEqualityExpNeq $ \e1 e2 -> align $ group $ pEqualityExp e1 </>. text "!=" <+>. pRelationalExp e2
+          ]
+      pRelationalExp <- define $ \x ->
+        case_
+          x
+          [ unShiftExp $ \e -> pShiftExp e
+          , unRelationalExpLt $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text "<" <+>. pShiftExp e2
+          , unRelationalExpGt $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text ">" <+>. pShiftExp e2
+          , unRelationalExpLe $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text "<=" <+>. pShiftExp e2
+          , unRelationalExpGe $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text ">=" <+>. pShiftExp e2
+          ]
+      pShiftExp <- define $ \x ->
+        case_
+          x
+          [ unAdditiveExp $ \e -> pAdditiveExp e
+          , unShiftExpLeft $ \e1 e2 -> pShiftExp e1 <+>. text "<<" <+>. pAdditiveExp e2
+          , unShiftExpRight $ \e1 e2 -> pShiftExp e1 <+>. text ">>" <+>. pAdditiveExp e2
+          ]
+      pAdditiveExp <- define $ \x ->
+        case_
+          x
+          [ unMultiplicativeExp $ \e -> pMultiplicativeExp e
+          , unAdditiveExpPlus $ \e1 e2 -> align $ group $ pAdditiveExp e1 </>. text "+" <+>. pMultiplicativeExp e2
+          , unAdditiveExpMinus $ \e1 e2 -> align $ group $ pAdditiveExp e1 </>. text "-" <+>. pMultiplicativeExp e2
+          ]
+      pMultiplicativeExp <- define $ \x ->
+        case_
+          x
+          [ unCastExp $ \e -> pCastExp e
+          , unMultiplicativeExpMul $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "*" <+>. pCastExp e2
+          , unMultiplicativeExpDiv $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "/" <+>. pCastExp e2
+          , unMultiplicativeExpMod $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "%" <+>. pCastExp e2
+          ]
+      pAssignmentList <- sepBy (text "," <> space) pAssignmentExp
+      pPostfixExp <- define $ \x ->
+        case_
+          x
+          [ unPrimaryExp $ \e -> pPrimaryExp e
+          , -- hardcats necessary
+            unPostfixExpCall $ \e args -> pPostfixExp e <#> parens (pAssignmentList args)
+          , unPostfixExpArray $ \e1 e2 -> pPostfixExp e1 <#> text "[" <> pExp e2 <> text "]"
+          , unPostfixExpDot $ \e s -> pPostfixExp e <#> text "." <#> textAs s ident
+          , unPostfixExpArrow $ \e s -> pPostfixExp e <#> text "->" <#> textAs s ident
+          , unPostfixExpInc $ \e -> pPostfixExp e <#> text "++"
+          , unPostfixExpDec $ \e -> pPostfixExp e <#> text "--"
+          ]
+      pUnaryExp <- define $ \x ->
+        case_
+          x
+          [ unPostfixExp $ \e -> pPostfixExp e
+          , unInc $ \e -> text "++" <#> pUnaryExp e
+          , unDec $ \e -> text "--" <#> pUnaryExp e
+          , unUnaryOp $ \op e -> pUnaryOp op <#> pCastExp e
+          , unSizeofExp $ \e -> text "sizeof" <> parens (pUnaryExp e)
+          , unSizeofType $ \t -> text "sizeof" <> parens (pTypeName t)
+          ]
+      pUnaryOp <- define $ \x ->
+        case_
+          x
+          [ unAddress $ text "&"
+          , unIndirection $ text "*"
+          , unPlus $ text "+"
+          , unMinus $ text "-"
+          , unBitwiseNot $ text "~"
+          , unLogicalNot $ text "!"
+          ]
+      pCastExp <- define $ \x ->
+        case_
+          x
+          [ unCast $ \t e -> parens (pTypeName t) <+>. pCastExp e
+          , unUnary $ \e -> pUnaryExp e
+          ]
+      pPrimaryExp <-
+        define $ \x ->
+          case_
+            x
+            [ unLitExp $ \l -> lit l
+            , unIdentExp $ \i -> identExp i
+            , unExp $ \e -> parens (pExp e)
+            ]
+
+  return (pExp, pCondExp)
+
+pprKnots :: (FliPprD a e) => FliPprM e (A a Exp -> E e D)
+pprKnots = do
+  rec (pExp, pCondExp) <- pprExp pTypeName
+      (_, pTypeName) <- pprTypes pCondExp
   return pExp
 
-pprProgram :: TypeSpecifier -> Doc ann
-pprProgram = pprMode (flippr $ fromFunction <$> (pprTypeSpec pprExp))
+pprProgram :: Exp -> Doc ann
+pprProgram = pprMode (flippr $ fromFunction <$> pprKnots)
 
-parseProgram :: [Char] -> Err ann [TypeSpecifier]
-parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> (pprTypeSpec pprExp))
-
-exmp :: TypeSpecifier
-exmp = TStruct "complex" [StructDecl [Spec (TAnonStruct [StructDecl [Spec (TAnonEnum (NCons (EnumeratorName "A") (NCons (EnumeratorName "B") (NNil (EnumeratorWithValue "C" (LitExp (IntL (Int 4))))))))] (NNil (SDecl (DirectDecl (DIdent "xyz")))), StructDecl [Qual TConst, Spec TInt] (NNil (SDecl (DPointer (NCons (Pointer []) (NNil (Pointer []))) (DIdent "x"))))])] (NNil (SBits (DirectDecl (DFunction (DIdent "nestedStruct"))) (LitExp (IntL (Int 3))))), StructDecl [Qual TConst, Qual TVolatile, Spec TInt] (NNil (SDecl (DPointer (NNil (Pointer [])) (DIdent "x"))))]
+parseProgram :: [Char] -> Err ann [Exp]
+parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprKnots)
