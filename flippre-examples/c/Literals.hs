@@ -52,7 +52,7 @@ pprInt = do
   where
     atoi = Branch $ PartialBij "atoi" (Just . show) (Just . read)
     atoiHex = Branch $ PartialBij "atoiHex" (Just . \x -> showHex x "") (\x -> Just $ read $ "0x" ++ x)
-    atoiOct = Branch $ PartialBij "atoiOct" (Just . \x -> showOct x "") (\x -> Just $ read $ "0o" ++ x)
+    atoiOct = Branch $ PartialBij "atoiOct" (Just . \x -> showOct x "") (\x -> Just $ read $ "0o0" ++ x)
 
 data FloatLit = Float Double | Double Double | LDouble Double
     deriving (Show, Eq)

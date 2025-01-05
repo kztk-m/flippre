@@ -86,4 +86,4 @@ executable c
     hs-source-dirs: c
     main-is: c/C.hs
     build-depends: prettyprinter
-    other-modules: Helper, Literals
+    other-modules: Helper, Literals, TypeSpecifier, Exp, Types

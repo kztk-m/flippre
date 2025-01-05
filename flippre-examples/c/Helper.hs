@@ -156,6 +156,21 @@ keywords =
     , "static"
     , "extern"
     , "typedef"
+    , "struct"
+    , "union"
+    , "enum"
+    , "case"
+    , "default"
+    , "if"
+    , "else"
+    , "switch"
+    , "while"
+    , "do"
+    , "for"
+    , "goto"
+    , "continue"
+    , "break"
+    , "return"
     ]
 
 ident :: AM.DFA Char
