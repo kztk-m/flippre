@@ -38,6 +38,7 @@ module Text.FliPpr (
 
   -- ** Biased choice
   (<?),
+  abort,
 
   -- ** Case
   case_,
