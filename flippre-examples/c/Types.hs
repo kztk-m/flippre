@@ -32,7 +32,7 @@ data ParamList = Variadic (NonEmpty Parameter) | Fixed (NonEmpty Parameter)
     deriving (Show, Eq)
 
 data AbsDirect
-    = AbsArray CondExp
+    = AbsArray Exp
     | AbsArrayUnsized
     | AbsFunction
     | AbsDecl AbsDecl
@@ -51,7 +51,7 @@ data Parameter
 
 data DirectDecl
     = DIdent String
-    | DArray DirectDecl CondExp
+    | DArray DirectDecl Exp
     | DArrayUnsized DirectDecl
     | DIdents DirectDecl (NonEmpty String)
     | DFunction DirectDecl
@@ -71,10 +71,10 @@ data DeclSpecifier = DeclStor StorageClass | DeclSpec TypeSpecifier | DeclQual T
 data StructDeclaration = StructDecl [SpecQualifier] (NonEmpty StructDeclarator)
     deriving (Show, Eq)
 
-data StructDeclarator = SDecl Decl | SBits Decl CondExp | SAnonBits CondExp
+data StructDeclarator = SDecl Decl | SBits Decl Exp | SAnonBits Exp
     deriving (Show, Eq)
 
-data Enumerator = EnumeratorName String | EnumeratorWithValue String CondExp
+data Enumerator = EnumeratorName String | EnumeratorWithValue String Exp
     deriving (Show, Eq)
 
 data TypeSpecifier
@@ -100,13 +100,59 @@ data TypeSpecifier
         String
     deriving (Show, Eq)
 
-data Exp = Comma Exp AssignmentExp | Assignment AssignmentExp
-    deriving (Show, Eq)
-
-data PrimaryExp = LitExp Literal | IdentExp String | Exp Exp
-    deriving (Show, Eq)
-
-data AssignmentExp = Assign AssignmentOp UnaryExp AssignmentExp | CondExp CondExp
+data Exp
+    = Comma Exp Exp
+    | -- assignmentexp
+      Assign AssignmentOp Exp Exp
+    | -- condexp
+      Ternary Exp Exp Exp
+    | -- or
+      LogicalOrExpOr Exp Exp
+    | -- and
+      LogicalAndExpAnd Exp Exp
+    | -- inclusive or
+      InclusiveOrExpOr Exp Exp
+    | -- exclusive or
+      ExclusiveOrExpXor Exp Exp
+    | -- and
+      AndExpAnd Exp Exp
+    | -- equality
+      EqualityExpEq Exp Exp
+    | EqualityExpNeq Exp Exp
+    | -- relational
+      RelationalExpLt Exp Exp
+    | RelationalExpGt Exp Exp
+    | RelationalExpLe Exp Exp
+    | RelationalExpGe Exp Exp
+    | -- shift
+      ShiftExpLeft Exp Exp
+    | ShiftExpRight Exp Exp
+    | -- additive
+      AdditiveExpPlus Exp Exp
+    | AdditiveExpMinus Exp Exp
+    | -- multiplicative
+      MultiplicativeExpMul Exp Exp
+    | MultiplicativeExpDiv Exp Exp
+    | MultiplicativeExpMod Exp Exp
+    | -- cast
+      Cast TypeName Exp
+    | -- unary
+      Inc Exp
+    | Dec Exp
+    | UnaryOp UnaryOp Exp
+    | SizeofExp Exp
+    | SizeofType
+        TypeName
+    | -- postfix
+      PostfixExpCall Exp [Exp]
+    | PostfixExpArray Exp Exp
+    | PostfixExpDot Exp String
+    | PostfixExpArrow Exp String
+    | PostfixExpInc Exp
+    | PostfixExpDec Exp
+    | -- primary exp
+      LitExp Literal
+    | IdentExp String
     deriving (Show, Eq)
 
 data AssignmentOp
@@ -123,15 +169,6 @@ data AssignmentOp
     | OrAssign
     deriving (Show, Eq)
 
-data UnaryExp
-    = PostfixExp PostfixExp
-    | Inc UnaryExp
-    | Dec UnaryExp
-    | UnaryOp UnaryOp CastExp
-    | SizeofExp UnaryExp
-    | SizeofType TypeName
-    deriving (Show, Eq)
-
 data UnaryOp
     = Address
     | Indirection
@@ -139,84 +176,6 @@ data UnaryOp
     | Minus
     | BitwiseNot
     | LogicalNot
-    deriving (Show, Eq)
-
-data CastExp
-    = Cast TypeName CastExp
-    | Unary UnaryExp
-    deriving (Show, Eq)
-
-data CondExp
-    = LogicalOrExp LogicalOrExp
-    | LogicalOrExpCond LogicalOrExp Exp CondExp
-    deriving (Show, Eq)
-
-data LogicalOrExp
-    = LogicalAndExp LogicalAndExp
-    | LogicalOrExpOr LogicalOrExp LogicalAndExp
-    deriving (Show, Eq)
-
-data LogicalAndExp
-    = InclusiveOrExp InclusiveOrExp
-    | LogicalAndExpAnd LogicalAndExp InclusiveOrExp
-    deriving (Show, Eq)
-
-data InclusiveOrExp
-    = ExclusiveOrExp ExclusiveOrExp
-    | InclusiveOrExpOr InclusiveOrExp ExclusiveOrExp
-    deriving (Show, Eq)
-
-data ExclusiveOrExp
-    = AndExp AndExp
-    | ExclusiveOrExpXor ExclusiveOrExp AndExp
-    deriving (Show, Eq)
-
-data AndExp
-    = EqualityExp EqualityExp
-    | AndExpAnd AndExp EqualityExp
-    deriving (Show, Eq)
-
-data EqualityExp
-    = RelationalExp RelationalExp
-    | EqualityExpEq EqualityExp RelationalExp
-    | EqualityExpNeq EqualityExp RelationalExp
-    deriving (Show, Eq)
-
-data RelationalExp
-    = ShiftExp ShiftExp
-    | RelationalExpLt RelationalExp ShiftExp
-    | RelationalExpGt RelationalExp ShiftExp
-    | RelationalExpLe RelationalExp ShiftExp
-    | RelationalExpGe RelationalExp ShiftExp
-    deriving (Show, Eq)
-
-data ShiftExp
-    = AdditiveExp AdditiveExp
-    | ShiftExpLeft ShiftExp AdditiveExp
-    | ShiftExpRight ShiftExp AdditiveExp
-    deriving (Show, Eq)
-
-data AdditiveExp
-    = MultiplicativeExp MultiplicativeExp
-    | AdditiveExpPlus AdditiveExp MultiplicativeExp
-    | AdditiveExpMinus AdditiveExp MultiplicativeExp
-    deriving (Show, Eq)
-
-data MultiplicativeExp
-    = CastExp CastExp
-    | MultiplicativeExpMul MultiplicativeExp CastExp
-    | MultiplicativeExpDiv MultiplicativeExp CastExp
-    | MultiplicativeExpMod MultiplicativeExp CastExp
-    deriving (Show, Eq)
-
-data PostfixExp
-    = PrimaryExp PrimaryExp
-    | PostfixExpCall PostfixExp [AssignmentExp]
-    | PostfixExpArray PostfixExp Exp
-    | PostfixExpDot PostfixExp String
-    | PostfixExpArrow PostfixExp String
-    | PostfixExpInc PostfixExp
-    | PostfixExpDec PostfixExp
     deriving (Show, Eq)
 
 $(mkUn ''TypeName)
@@ -237,21 +196,5 @@ $(mkUn ''SpecQualifier)
 $(mkUn ''Enumerator)
 
 $(mkUn ''Exp)
-$(mkUn ''PrimaryExp)
-$(mkUn ''AssignmentExp)
 $(mkUn ''AssignmentOp)
-$(mkUn ''UnaryExp)
 $(mkUn ''UnaryOp)
-$(mkUn ''CastExp)
-$(mkUn ''CondExp)
-$(mkUn ''LogicalOrExp)
-$(mkUn ''LogicalAndExp)
-$(mkUn ''InclusiveOrExp)
-$(mkUn ''ExclusiveOrExp)
-$(mkUn ''AndExp)
-$(mkUn ''EqualityExp)
-$(mkUn ''RelationalExp)
-$(mkUn ''ShiftExp)
-$(mkUn ''AdditiveExp)
-$(mkUn ''MultiplicativeExp)
-$(mkUn ''PostfixExp)

@@ -16,6 +16,7 @@ module Helper (
     sepByNonEmpty,
     manyParens,
     ident,
+    otherwiseP,
     NonEmpty (..),
 ) where
 
@@ -35,6 +36,9 @@ ifThenElse False _ f = f
 
 space' :: (FliPprD a e) => E e D
 space' = text " " <? text ""
+
+otherwiseP :: (arg b -> exp t) -> Branch arg exp b t
+otherwiseP = Branch (PartialBij "otherwiseP" Just Just)
 
 {-
 

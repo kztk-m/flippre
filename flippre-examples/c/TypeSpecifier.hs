@@ -51,7 +51,7 @@ pprPointerList = do
 
 pprStruct ::
     (FliPprD a e) =>
-    (A a CondExp -> E e D) ->
+    (A a Exp -> E e D) ->
     (A a Decl -> E e D) ->
     (A a [SpecQualifier] -> E e D) ->
     FliPprM
@@ -101,7 +101,7 @@ pprStruct pCondExp pDecl pSpecQualList = do
 pprDecls ::
     (FliPprD a e) =>
     (A a (NonEmpty String) -> E e D) ->
-    (A a CondExp -> E e D) ->
+    (A a Exp -> E e D) ->
     (A a ParamList -> E e D) ->
     FliPprM
         e
@@ -149,7 +149,7 @@ pprDecls pIdentList pCondExp pParamList = do
 
 pprEnumerator ::
     (FliPprD a e) =>
-    (A a CondExp -> E e D) ->
+    (A a Exp -> E e D) ->
     FliPprM
         e
         ( A a String -> A a (NonEmpty Enumerator) -> E e D
@@ -194,7 +194,7 @@ pprParamList pDecl pAbsDecl pDeclSpecListNonEmpty = do
 -- BIG TODO: *x doesn't parse (generally: non-tokenized parsing needs some more work)
 pprTypes ::
     (FliPprD a e) =>
-    (A a CondExp -> E e D) ->
+    (A a Exp -> E e D) ->
     FliPprM
         e
         ( A a TypeName -> E e D
