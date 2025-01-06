@@ -21,16 +21,13 @@ type Program = [ExternalDeclaration]
 data ExternalDeclaration = ExtDecl Declaration | FunDef FunctionDefinition
   deriving (Show, Eq)
 
-data FunctionDefinition = FunctionDefinition (Maybe (NonEmpty DeclSpecifier)) Decl (Maybe (NonEmpty Declaration)) (Maybe CompoundStatement)
+data FunctionDefinition = FunctionDefinition (Maybe (NonEmpty DeclarationSpecifier)) Declarator (Maybe (NonEmpty Declaration)) (Maybe CompoundStatement)
   deriving (Show, Eq)
 
-data CompoundStatement = CompoundStatement (Maybe (NonEmpty Declaration)) [Statement]
+data Declaration = Declaration [DeclarationSpecifier] [InitDeclarator]
   deriving (Show, Eq)
 
-data Declaration = Declaration [DeclSpecifier] [InitDeclarator]
-  deriving (Show, Eq)
-
-data InitDeclarator = InitDecl Decl (Maybe Initializer)
+data InitDeclarator = InitDeclarator Declarator (Maybe Initializer)
   deriving (Show, Eq)
 
 data Initializer = InitExp Exp | InitList (NonEmpty Initializer)
@@ -49,6 +46,9 @@ data LabeledStatement
   = LStmtIdent String Statement
   | LStmtCase Exp Statement
   | LStmtDefault Statement
+  deriving (Show, Eq)
+
+data CompoundStatement = CompoundStatement (Maybe (NonEmpty Declaration)) [Statement]
   deriving (Show, Eq)
 
 data SelectionStatement
@@ -71,12 +71,12 @@ data JumpStatement
 
 $(mkUn ''ExternalDeclaration)
 $(mkUn ''FunctionDefinition)
-$(mkUn ''CompoundStatement)
 $(mkUn ''Declaration)
 $(mkUn ''InitDeclarator)
 $(mkUn ''Initializer)
 $(mkUn ''Statement)
 $(mkUn ''LabeledStatement)
+$(mkUn ''CompoundStatement)
 $(mkUn ''SelectionStatement)
 $(mkUn ''IterationStatement)
 $(mkUn ''JumpStatement)
@@ -84,21 +84,21 @@ $(mkUn ''Maybe)
 
 pprDeclaration ::
   (FliPprD a e) =>
-  (A a [DeclSpecifier] -> E e D) ->
-  (A a Decl -> E e D) ->
+  (A a [DeclarationSpecifier] -> E e D) ->
+  (A a Declarator -> E e D) ->
   (A a Exp -> E e D) ->
   FliPprM e (A a Declaration -> E e D)
-pprDeclaration pDeclSpecList pDecl pAssignmentExp = do
+pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp = do
   rec pDeclaration <- share $ \x ->
-        case_ x [unDeclaration $ \d i -> pDeclSpecList d <+> pInitDeclList i <> text ";"]
+        case_ x [unDeclaration $ \d i -> pDeclarationSpecifierList d <+> pInitDeclList i <> text ";"]
       pInitDecl <- share $ \x ->
         case_
           x
-          [ unInitDecl $ \d i ->
+          [ unInitDeclarator $ \d i ->
               case_
                 i
-                [ unNothing $ pDecl d
-                , unJust $ \i' -> pDecl d <+>. text "=" <+>. pInitializer i'
+                [ unNothing $ pDeclarator d
+                , unJust $ \i' -> pDeclarator d <+>. text "=" <+>. pInitializer i'
                 ]
           ]
       pInitializer <- share $ \x ->
@@ -114,11 +114,11 @@ pprDeclaration pDeclSpecList pDecl pAssignmentExp = do
 pprFunDef ::
   (FliPprD a e) =>
   (A a CompoundStatement -> E e D) ->
-  (A a Decl -> E e D) ->
-  (A a (NonEmpty DeclSpecifier) -> E e D) ->
+  (A a Declarator -> E e D) ->
+  (A a (NonEmpty DeclarationSpecifier) -> E e D) ->
   (A a (NonEmpty Declaration) -> E e D) ->
   FliPprM e (A a FunctionDefinition -> E e D)
-pprFunDef pCompoundStatement pDecl pDeclSpecListNonEmpty pDeclarationList = do
+pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDeclarationList = do
   -- seperated into 3 different functions to get spacing right
   pFunDef2 <- share $ \c ->
     case_
@@ -127,7 +127,7 @@ pprFunDef pCompoundStatement pDecl pDeclSpecListNonEmpty pDeclarationList = do
       , unJust $ \s -> text "" <+>. pCompoundStatement s
       ]
   pFunDef1 <- share $ \d p c ->
-    pDecl d
+    pDeclarator d
       <> case_
         p
         [ unNothing $ pFunDef2 c
@@ -140,7 +140,7 @@ pprFunDef pCompoundStatement pDecl pDeclSpecListNonEmpty pDeclarationList = do
           case_
             s
             [ unNothing $ pFunDef1 d p c
-            , unJust $ \l -> pDeclSpecListNonEmpty l <+> pFunDef1 d p c
+            , unJust $ \l -> pDeclarationSpecifierListNonEmpty l <+> pFunDef1 d p c
             ]
       ]
   return pFunDef
@@ -254,10 +254,10 @@ pprJumpStatement pExp = share $ \x ->
 pprProgram :: (FliPprD a e) => FliPprM e (A a Program -> E e D)
 pprProgram = do
   rec (pExp, pCondExp, pAssignmentExp) <- pprExp pTypeName
-      (pTypeName, pDecl, pDeclSpecList, pDeclSpecListNonEmpty) <- pprTypes pCondExp
-  rec pDeclaration <- pprDeclaration pDeclSpecList pDecl pAssignmentExp
+      (pTypeName, pDeclarator, pDeclarationSpecifierList, pDeclarationSpecifierListNonEmpty) <- pprTypes pCondExp
+  rec pDeclaration <- pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp
       pDeclarationList <- sepByNonEmpty line pDeclaration
-      pFunDef <- pprFunDef pCompoundStatement pDecl pDeclSpecListNonEmpty pDeclarationList
+      pFunDef <- pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDeclarationList
       -- statements
       pStatement <- share $ \x ->
         case_

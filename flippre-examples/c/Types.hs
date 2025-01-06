@@ -13,68 +13,70 @@ import Literals
 import Text.FliPpr
 import Prelude
 
-data TypeName = TSpecQualifier [SpecQualifier] | TSpecQualifierDecl [SpecQualifier] AbsDecl
+data TypeName = TNSpecifierQualifier [SpecifierQualifier] | TNSpecifierQualifierDeclarator [SpecifierQualifier] AbsDeclarator
     deriving (Show, Eq)
 
-data StorageClass = Auto | Register | Static | Extern | Typedef
+data StorageClass = SCAuto | SCRegister | SCStatic | SCExtern | SCTypedef
     deriving (Show, Eq)
 
-data TypeQualifier = TConst | TVolatile
+data TypeQualifier = TQConst | TQVolatile
     deriving (Show, Eq)
 
--- TODO Decl->Declarator
-data Decl
-    = DPointer (NonEmpty Pointer) DirectDecl
-    | DirectDecl DirectDecl
+data SpecifierQualifier = SQSpec TypeSpecifier | SQQual TypeQualifier
     deriving (Show, Eq)
 
-data ParamList = Variadic (NonEmpty Parameter) | Fixed (NonEmpty Parameter)
-    deriving (Show, Eq)
-
-data AbsDirect
-    = AbsArray Exp
-    | AbsArrayUnsized
-    | AbsFunction
-    | AbsDecl AbsDecl
-    | AbsProto ParamList
-    deriving (Show, Eq)
-
-data AbsDecl = AbsPointer (NonEmpty Pointer) | AbsPointerDecl (NonEmpty Pointer) AbsDirect | AbsDirectDecl AbsDirect
-    deriving (Show, Eq)
-
-data Parameter
-    = PDecl (NonEmpty DeclSpecifier) Decl
-    | PAbsDecl (NonEmpty DeclSpecifier) AbsDecl
-    -- \| PSpecOnly (NonEmpty DeclSpecifier)
-    -- the existence of PSpecOnly makes the parser ambiguous! and I can't think of any case where it would be useful
-    deriving (Show, Eq)
-
-data DirectDecl
-    = DIdent String
-    | DArray DirectDecl Exp
-    | DArrayUnsized DirectDecl
-    | DIdents DirectDecl (NonEmpty String)
-    | DFunction DirectDecl
-    | DDecl Decl
-    | DProto DirectDecl ParamList
+data DeclarationSpecifier = DSStor StorageClass | DSSpec TypeSpecifier | DSQual TypeQualifier
     deriving (Show, Eq)
 
 newtype Pointer = Pointer [TypeQualifier]
     deriving (Show, Eq)
 
-data SpecQualifier = Spec TypeSpecifier | Qual TypeQualifier
+data Declarator
+    = DPointer (NonEmpty Pointer) DirectDeclarator
+    | DDirect DirectDeclarator
     deriving (Show, Eq)
 
-data DeclSpecifier = DeclStor StorageClass | DeclSpec TypeSpecifier | DeclQual TypeQualifier
+data DirectDeclarator
+    = DDIdent String
+    | DDArray DirectDeclarator Exp
+    | DDArrayUnsized DirectDeclarator
+    | DDIdents DirectDeclarator (NonEmpty String)
+    | DDFunction DirectDeclarator
+    | DDDecl Declarator
+    | DDProto DirectDeclarator ParamList
     deriving (Show, Eq)
 
-data StructDeclaration = StructDecl [SpecQualifier] (NonEmpty StructDeclarator)
+data AbsDeclarator
+    = AbsPointer (NonEmpty Pointer)
+    | AbsPointerDecl (NonEmpty Pointer) AbsDirectDeclarator
+    | AbsDirect AbsDirectDeclarator
     deriving (Show, Eq)
 
-data StructDeclarator = SDecl Decl | SBits Decl Exp | SAnonBits Exp
+data AbsDirectDeclarator
+    = AbsDArray Exp
+    | AbsDArrayUnsized
+    | AbsDFunction
+    | AbsDDecl AbsDeclarator
+    | AbsDProto ParamList
     deriving (Show, Eq)
 
-data Enumerator = EnumeratorName String | EnumeratorWithValue String Exp
+data Param
+    = PDeclarator (NonEmpty DeclarationSpecifier) Declarator
+    | PAbsDeclarator (NonEmpty DeclarationSpecifier) AbsDeclarator
+    -- \| PSpecOnly (NonEmpty DeclarationSpecifier)
+    -- the existence of PSpecOnly makes the parser ambiguous! and I can't think of any case where it would be useful
+    deriving (Show, Eq)
+
+data ParamList = PLVariadic (NonEmpty Param) | PLFixed (NonEmpty Param)
+    deriving (Show, Eq)
+
+data StructDeclaration = StructDeclaration [SpecifierQualifier] (NonEmpty StructDeclarator)
+    deriving (Show, Eq)
+
+data StructDeclarator = SDDeclarator Declarator | SDBits Declarator Exp | SDAnonBits Exp
+    deriving (Show, Eq)
+
+data Enumerator = EName String | EWithValue String Exp
     deriving (Show, Eq)
 
 data TypeSpecifier
@@ -102,47 +104,47 @@ data TypeSpecifier
 
 data Exp
     = Comma Exp Exp
-    | -- assignmentexp
+    | -- assignment exp
       Assign AssignmentOp Exp Exp
-    | -- condexp
+    | -- cond exp
       Ternary Exp Exp Exp
-    | -- or
+    | -- logical or exp
       LogicalOr Exp Exp
-    | -- and
+    | -- logical and exp
       LogicalAnd Exp Exp
     | -- inclusive or
       BitewiseOr Exp Exp
     | -- exclusive or
       BitewiseXor Exp Exp
-    | -- and
+    | -- and exp
       BitewiseAnd Exp Exp
-    | -- equality
+    | -- equality exp
       Eq Exp Exp
     | Neq Exp Exp
-    | -- relational
+    | -- relational exp
       Lt Exp Exp
     | Gt Exp Exp
     | Le Exp Exp
     | Ge Exp Exp
-    | -- shift
+    | -- shift exp
       ShiftLeft Exp Exp
     | ShiftRight Exp Exp
-    | -- additive
+    | -- additive exp
       Add Exp Exp
     | Sub Exp Exp
-    | -- multiplicative
+    | -- multiplicative exp
       Mul Exp Exp
     | Div Exp Exp
     | Mod Exp Exp
-    | -- cast
+    | -- cast exp
       Cast TypeName Exp
-    | -- unary
+    | -- unary exp
       Inc Exp
     | Dec Exp
     | UnaryOp UnaryOp Exp
     | SizeofExp Exp
     | SizeofType TypeName
-    | -- postfix
+    | -- postfix exp
       PostfixCall Exp [Exp]
     | PostfixArrayIndex Exp Exp
     | PostfixDot Exp String
@@ -183,15 +185,15 @@ $(mkUn ''TypeQualifier)
 $(mkUn ''TypeSpecifier)
 $(mkUn ''StructDeclaration)
 $(mkUn ''StructDeclarator)
-$(mkUn ''Decl)
-$(mkUn ''DirectDecl)
+$(mkUn ''Declarator)
+$(mkUn ''DirectDeclarator)
 $(mkUn ''Pointer)
-$(mkUn ''DeclSpecifier)
-$(mkUn ''AbsDecl)
-$(mkUn ''AbsDirect)
-$(mkUn ''Parameter)
+$(mkUn ''DeclarationSpecifier)
+$(mkUn ''AbsDeclarator)
+$(mkUn ''AbsDirectDeclarator)
+$(mkUn ''Param)
 $(mkUn ''ParamList)
-$(mkUn ''SpecQualifier)
+$(mkUn ''SpecifierQualifier)
 $(mkUn ''Enumerator)
 
 $(mkUn ''Exp)

@@ -19,19 +19,19 @@ pprStorageClass :: (FliPprD a e) => FliPprM e (A a StorageClass -> E e D)
 pprStorageClass = share $ \x ->
     case_
         x
-        [ unAuto $ text "auto"
-        , unRegister $ text "register"
-        , unStatic $ text "static"
-        , unExtern $ text "extern"
-        , unTypedef $ text "typedef"
+        [ unSCAuto $ text "auto"
+        , unSCRegister $ text "register"
+        , unSCStatic $ text "static"
+        , unSCExtern $ text "extern"
+        , unSCTypedef $ text "typedef"
         ]
 
 pprTypeQualifier :: (FliPprD a e) => FliPprM e (A a TypeQualifier -> E e D)
 pprTypeQualifier = share $ \x ->
     case_
         x
-        [ unTConst $ text "const"
-        , unTVolatile $ text "volatile"
+        [ unTQConst $ text "const"
+        , unTQVolatile $ text "volatile"
         ]
 
 -- todo make prettier
@@ -52,8 +52,8 @@ pprPointerList = do
 pprStruct ::
     (FliPprD a e) =>
     (A a Exp -> E e D) ->
-    (A a Decl -> E e D) ->
-    (A a [SpecQualifier] -> E e D) ->
+    (A a Declarator -> E e D) ->
+    (A a [SpecifierQualifier] -> E e D) ->
     FliPprM
         e
         ( A a String -> A a [StructDeclaration] -> E e D
@@ -61,17 +61,17 @@ pprStruct ::
         , A a String -> A a [StructDeclaration] -> E e D
         , A a [StructDeclaration] -> E e D
         )
-pprStruct pCondExp pDecl pSpecQualList = do
+pprStruct pCondExp pDeclarator pSpecQualList = do
     rec pStructDeclarator <- share $ \x ->
             case_
                 x
-                [ unSDecl $ \d -> pDecl d
-                , unSBits $ \d e -> pDecl d <+> text ":" <+> pCondExp e
-                , unSAnonBits $ \e -> text ":" <+> pCondExp e
+                [ unSDDeclarator $ \d -> pDeclarator d
+                , unSDBits $ \d e -> pDeclarator d <+> text ":" <+> pCondExp e
+                , unSDAnonBits $ \e -> text ":" <+> pCondExp e
                 ]
         pStructDeclaratorList <- sepByNonEmpty (text "," <+>. text "") pStructDeclarator
         pStructDeclaration <- share $
-            \t -> case_ t [unStructDecl $ \s d -> pSpecQualList s <+> pStructDeclaratorList d <> text ";"]
+            \t -> case_ t [unStructDeclaration $ \s d -> pSpecQualList s <+> pStructDeclaratorList d <> text ";"]
         pStructDeclarationList <- list pStructDeclaration
         pInner <- share $ \decls ->
             text "{"
@@ -105,47 +105,47 @@ pprDecls ::
     (A a ParamList -> E e D) ->
     FliPprM
         e
-        ( A a Decl -> E e D
-        , A a AbsDecl -> E e D
+        ( A a Declarator -> E e D
+        , A a AbsDeclarator -> E e D
         )
 pprDecls pIdentList pCondExp pParamList = do
     pointerList <- pprPointerList
-    rec pDirectDecl <- share $ \x ->
+    rec pDirectDeclarator <- share $ \x ->
             case_
                 x
-                [ unDIdent $ \i -> textAs i ident
-                , unDArray $ \d e -> pDirectDecl d <> text "[" <> pCondExp e <> text "]"
-                , unDFunction $ \d -> pDirectDecl d <> parens (text "")
-                , unDIdents $ \d args -> pDirectDecl d <> parens (pIdentList args)
-                , unDArrayUnsized $ \d -> pDirectDecl d <> text "[" <> text "]"
-                , unDDecl $ \d -> parens $ pDecl d
-                , unDProto $ \d ps -> pDirectDecl d <> parens (pParamList ps)
+                [ unDDIdent $ \i -> textAs i ident
+                , unDDArray $ \d e -> pDirectDeclarator d <> text "[" <> pCondExp e <> text "]"
+                , unDDFunction $ \d -> pDirectDeclarator d <> parens (text "")
+                , unDDIdents $ \d args -> pDirectDeclarator d <> parens (pIdentList args)
+                , unDDArrayUnsized $ \d -> pDirectDeclarator d <> text "[" <> text "]"
+                , unDDDecl $ \d -> parens $ pDeclarator d
+                , unDDProto $ \d ps -> pDirectDeclarator d <> parens (pParamList ps)
                 ]
-        pDecl <- share $ \x ->
+        pDeclarator <- share $ \x ->
             case_
                 x
-                [ unDirectDecl pDirectDecl
-                , unDPointer $ \ps d -> pointerList ps <> pDirectDecl d
+                [ unDDirect pDirectDeclarator
+                , unDPointer $ \ps d -> pointerList ps <> pDirectDeclarator d
                 ]
 
         -- abstract declarations
-        pAbsDirectDecl <- share $ \x ->
+        pAbsDirectDeclarator <- share $ \x ->
             case_
                 x
-                [ unAbsArray $ \e -> text "[" <> pCondExp e <> text "]"
-                , unAbsFunction $ parens $ text ""
-                , unAbsArrayUnsized $ text "[" <> text "]"
-                , unAbsDecl $ \d -> parens $ pAbsDecl d
-                , unAbsProto $ \ps -> parens $ pParamList ps
+                [ unAbsDArray $ \e -> text "[" <> pCondExp e <> text "]"
+                , unAbsDFunction $ parens $ text ""
+                , unAbsDArrayUnsized $ text "[" <> text "]"
+                , unAbsDDecl $ \d -> parens $ pAbsDeclarator d
+                , unAbsDProto $ \ps -> parens $ pParamList ps
                 ]
-        pAbsDecl <- share $ \x ->
+        pAbsDeclarator <- share $ \x ->
             case_
                 x
-                [ unAbsDirectDecl $ \ds -> pAbsDirectDecl ds
-                , unAbsPointerDecl $ \ps ds -> pointerList ps <> pAbsDirectDecl ds
+                [ unAbsDirect $ \ds -> pAbsDirectDeclarator ds
+                , unAbsPointerDecl $ \ps ds -> pointerList ps <> pAbsDirectDeclarator ds
                 , unAbsPointer $ \ps -> pointerList ps
                 ]
-    return (pDecl, pAbsDecl)
+    return (pDeclarator, pAbsDeclarator)
 
 pprEnumerator ::
     (FliPprD a e) =>
@@ -159,8 +159,8 @@ pprEnumerator pCondExp = do
     pEnumerator <- share $ \x ->
         case_
             x
-            [ unEnumeratorName $ \n -> textAs n ident
-            , unEnumeratorWithValue $ \n e -> textAs n ident <+> text "=" <+> pCondExp e
+            [ unEName $ \n -> textAs n ident
+            , unEWithValue $ \n e -> textAs n ident <+> text "=" <+> pCondExp e
             ]
     -- enumerators can only be nonempty
     pEnumeratorList <- sepByNonEmpty (text "," <> line) pEnumerator
@@ -170,24 +170,24 @@ pprEnumerator pCondExp = do
 
 pprParamList ::
     (FliPprD a e) =>
-    (A a Decl -> E e D) ->
-    (A a AbsDecl -> E e D) ->
-    (A a (NonEmpty DeclSpecifier) -> E e D) ->
+    (A a Declarator -> E e D) ->
+    (A a AbsDeclarator -> E e D) ->
+    (A a (NonEmpty DeclarationSpecifier) -> E e D) ->
     FliPprM e (A a ParamList -> E e D)
-pprParamList pDecl pAbsDecl pDeclSpecListNonEmpty = do
-    rec pParameter <- share $ \x ->
+pprParamList pDeclarator pAbsDeclarator pDeclaratorSpecifierListNonEmpty = do
+    rec pParam <- share $ \x ->
             case_
                 x
-                [ unPDecl $ \ds d -> pDeclSpecListNonEmpty ds <+> pDecl d
-                , unPAbsDecl $ \ds d -> pDeclSpecListNonEmpty ds <+> pAbsDecl d
-                -- , unPSpecOnly $ \ds -> pDeclSpecListNonEmpty ds -- (makes the parser ambiguous)
+                [ unPDeclarator $ \ds d -> pDeclaratorSpecifierListNonEmpty ds <+> pDeclarator d
+                , unPAbsDeclarator $ \ds d -> pDeclaratorSpecifierListNonEmpty ds <+> pAbsDeclarator d
+                -- , unPSpecifierOnly $ \ds -> pDeclaratorSpecifierListNonEmpty ds -- (makes the parser ambiguous)
                 ]
-        pParameterList <- sepByNonEmpty (text "," <> space) pParameter
+        pInnerList <- sepByNonEmpty (text "," <+>. text "") pParam
         pParamList <- share $ \x ->
             case_
                 x
-                [ unVariadic $ \ps -> pParameterList ps <> text "," <+> text "..."
-                , unFixed $ \ps -> pParameterList ps
+                [ unPLVariadic $ \ps -> pInnerList ps <> text "," <+>. text "..."
+                , unPLFixed $ \ps -> pInnerList ps
                 ]
     return pParamList
 
@@ -198,9 +198,9 @@ pprTypes ::
     FliPprM
         e
         ( A a TypeName -> E e D
-        , A a Decl -> E e D
-        , A a [DeclSpecifier] -> E e D
-        , A a (NonEmpty DeclSpecifier) -> E e D
+        , A a Declarator -> E e D
+        , A a [DeclarationSpecifier] -> E e D
+        , A a (NonEmpty DeclarationSpecifier) -> E e D
         )
 pprTypes pCondExp = do
     -- seperate out anything that is not recursive
@@ -210,23 +210,23 @@ pprTypes pCondExp = do
     pIdentList <- sepByNonEmpty (text "," <> space) (`textAs` ident)
 
     -- declarations for parameters
-    rec (pStruct, pAnonStruct, pUnion, pAnonUnion) <- pprStruct pCondExp pDecl pSpecQualList
-        (pDecl, pAbsDecl) <- pprDecls pIdentList pCondExp pParamList
-        pParamList <- pprParamList pDecl pAbsDecl pDeclSpecListNonEmpty
-        pDeclSpec <- share $ \x ->
+    rec (pStruct, pAnonStruct, pUnion, pAnonUnion) <- pprStruct pCondExp pDeclarator pSpecQualList
+        (pDeclarator, pAbsDeclarator) <- pprDecls pIdentList pCondExp pParamList
+        pParamList <- pprParamList pDeclarator pAbsDeclarator pDeclarationSpecifierListNonEmpty
+        pDeclarationSpecifier <- share $ \x ->
             case_
                 x
-                [ unDeclStor pStorageClass
-                , unDeclSpec pTypeSpec
-                , unDeclQual pTypeQualifier
+                [ unDSStor pStorageClass
+                , unDSSpec pTypeSpec
+                , unDSQual pTypeQualifier
                 ]
-        pDeclSpecList <- sepBy space pDeclSpec
-        pDeclSpecListNonEmpty <- sepByNonEmpty space pDeclSpec
+        pDeclarationSpecifierList <- sepBy space pDeclarationSpecifier
+        pDeclarationSpecifierListNonEmpty <- sepByNonEmpty space pDeclarationSpecifier
         pSpecQual <- share $ \x ->
             case_
                 x
-                [ unSpec pTypeSpec
-                , unQual pTypeQualifier
+                [ unSQSpec pTypeSpec
+                , unSQQual pTypeQualifier
                 ]
         pSpecQualList <- inlineList pSpecQual
 
@@ -269,7 +269,7 @@ pprTypes pCondExp = do
         pTypeName <- share $ \x ->
             case_
                 x
-                [ unTSpecQualifier $ \t -> pSpecQualList t
-                , unTSpecQualifierDecl $ \t d -> pSpecQualList t <+> pAbsDecl d
+                [ unTNSpecifierQualifier $ \t -> pSpecQualList t
+                , unTNSpecifierQualifierDeclarator $ \t d -> pSpecQualList t <+> pAbsDeclarator d
                 ]
-    return (pTypeName, pDecl, pDeclSpecList, pDeclSpecListNonEmpty)
+    return (pTypeName, pDeclarator, pDeclarationSpecifierList, pDeclarationSpecifierListNonEmpty)
