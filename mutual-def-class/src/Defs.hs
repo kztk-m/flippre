@@ -149,6 +149,8 @@ import Data.Word (Word8)
 
 import Prettyprinter as D
 
+import Internal.THUtil
+
 {- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
 
 @let rec x1 = e1 and x2 = e2 in e@ is represented by:
@@ -406,7 +408,7 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (
     return ((b1, b2, b3), ((b4, b5, b6), r))
 
 -- Use template haskell to generate instances for n-tuples
-$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 20]])
+$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 22]])
 
 instance (Defs f) => Arg f (HList g '[]) where
   letr f = do
@@ -468,33 +470,6 @@ instance (Arg f (b -> a)) => Arg f (Identity b -> a) where
 instance (Arg f (b -> a)) => Arg f (Const b x -> a) where
   letr :: forall r. ((Const b x -> a) -> DefM f (Const b x -> a, r)) -> DefM f r
   letr h = letr (coerce h :: (Const b x -> a) -> DefM f (Const b x -> a, r))
-
--- | A variant of 'mfix'. This function is supported to be used as:
-
---- > {-# LANGUAGE RecursiveDo, RebindableSyntax #-}
---  >
---  > someFunc = do
---  >     rec a <- share $ ... a ... b ...
---  >         b <- share $ ... a ... b ...
---  >     ...
---  >   where mfix = mfixDefM
-mfixDefM :: (Arg f a) => (a -> DefM f a) -> DefM f a
-mfixDefM f = letr $ \a -> (,a) <$> f a
-
--- | 'share's computation.
-share :: (Defs f) => f a -> DefM f (f a)
-share s = DefM $ \k -> letrD $ \a -> consD s (k a)
-
-{- | Makes definions to be 'local'.
-
-For example, in the follownig code, the scope of shared computation is limited to @foo@; so using @foo@ twice copies @defa@.
-
-> foo = local $ do
->    a <- share defa
->     ...
--}
-local :: (Defs f) => DefM f (f t) -> f t
-local m = unliftD $ unDefM m liftD
 
 {-# WARNING VarM "This class will be removed soon. Use 'EbU' library for pretty-printing" #-}
 
