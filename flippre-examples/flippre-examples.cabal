@@ -80,3 +80,8 @@ executable simple-lang
     import: warnings, deps 
     main-is:  SimpleLang.hs 
     build-depends: prettyprinter
+
+executable simple-fl 
+    import: warnings, deps
+    main-is: SimpleFL.hs
+    build-depends: prettyprinter
