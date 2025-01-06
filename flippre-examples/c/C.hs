@@ -86,19 +86,16 @@ pprProgram :: (FliPprD a e) => FliPprM e (A a Program -> E e D)
 pprProgram = do
   rec (pExp, pCondExp, pAssignmentExp) <- pprExp pTypeName
       (pTypeName, pDecl, pDeclSpecList, pDeclSpecListNonEmpty) <- pprTypes pCondExp
-  rec pExternalDeclaration <- define $ \x ->
+  rec pExternalDeclaration <- share $ \x ->
         case_
           x
           [ unExtDecl $ \d -> pDeclaration d
           , unFunDef $ \f -> pFunDef f
           ]
-      pDeclaration <- define $ \x ->
-        case_
-          x
-          [ unDeclaration $ \d i -> pDeclSpecList d <+> pInitDeclList i <> text ";"
-          ]
+      pDeclaration <- share $ \x ->
+        case_ x [unDeclaration $ \d i -> pDeclSpecList d <+> pInitDeclList i <> text ";"]
       pDeclarationList <- sepByNonEmpty line pDeclaration
-      pInitDecl <- define $ \x ->
+      pInitDecl <- share $ \x ->
         case_
           x
           [ unInitDecl $ \d i ->
@@ -108,16 +105,16 @@ pprProgram = do
                 , unJust $ \i' -> pDecl d <+>. text "=" <+>. pInitializer i'
                 ]
           ]
-      pInitializer <- define $ \x ->
+      pInitializer <- share $ \x ->
         case_
           x
           [ unInitExp $ \e -> pAssignmentExp e
           , unInitList $ \l -> text "{" <+>. pInitListNonEmpty l <> (text "" <? text ",") <+>. text "}"
           ]
-      pInitListNonEmpty <- sepByNonEmpty (text ",") pInitializer
-      pInitDeclList <- sepBy (text ",") pInitDecl
+      pInitListNonEmpty <- sepByNonEmpty (text "," <+>. text "") pInitializer
+      pInitDeclList <- sepBy (text "," <+>. text "") pInitDecl
       -- seperated into three different functions to get spacing right
-      pFunDef <- define $ \x ->
+      pFunDef <- share $ \x ->
         case_
           x
           [ unFunctionDefinition $ \s d p c ->
@@ -127,33 +124,33 @@ pprProgram = do
                 , unJust $ \l -> pDeclSpecListNonEmpty l <+> pFunDef1 d p c
                 ]
           ]
-      pFunDef1 <- define $ \d p c ->
+      pFunDef1 <- share $ \d p c ->
         pDecl d
           <> case_
             p
             [ unNothing $ pFunDef2 c
             , unJust $ \l -> pDeclarationList l <+> pFunDef2 c
             ]
-      pFunDef2 <- define $ \c ->
+      pFunDef2 <- share $ \c ->
         case_
           c
           [ unNothing $ text ";"
-          , unJust $ \s -> pCompoundStatement s
+          , unJust $ \s -> text "" <+>. pCompoundStatement s
           ]
-      pCompoundStatement <- define $ \x ->
+      pCompoundStatement <- share $ \x ->
         case_
           x
           [ unCompoundStatement $ \d s ->
               text "{"
                 <> nest
-                  1
+                  4
                   ( case_ d [unNothing $ text "", unJust $ \l -> line <> pDeclarationList l] <> line <> pStatementList s
                   )
                 <> line'
                 <> text "}"
           ]
       pStatementList <- list pStatement
-      pStatement <- define $ \x ->
+      pStatement <- share $ \x ->
         case_
           x
           [ unStmtLabeled $ \l -> pLabeledStatement l
@@ -168,14 +165,14 @@ pprProgram = do
           , unStmtIter $ \i -> pIterationStatement i
           , unStmtJump $ \j -> pJumpStatement j
           ]
-      pLabeledStatement <- define $ \x ->
+      pLabeledStatement <- share $ \x ->
         case_
           x
           [ unLStmtIdent $ \i s -> textAs i ident <> text ":" <+>. pStatement s -- TODO: spacing on this
           , unLStmtCase $ \e s -> text "case" <+> pCondExp e <> text ":" <> line <> pStatement s -- TODO
           , unLStmtDefault $ \s -> text "default" <> text ":" <+>. pStatement s
           ]
-      pSelectionStatement <- define $ \x ->
+      pSelectionStatement <- share $ \x ->
         case_
           x
           [ unSelStmtIfMaybeElse $ \e s m ->
@@ -194,7 +191,7 @@ pprProgram = do
                 ]
           , unSelStmtSwitch $ \e s -> text "switch" <+>. parens (pExp e) <+> pStatement s
           ]
-      pIterationStatement <- define $ \x ->
+      pIterationStatement <- share $ \x ->
         case_
           x
           [ unIterStmtWhile $ \e s -> text "while" <+>. parens (pExp e) <+>. pStatement s
@@ -220,7 +217,7 @@ pprProgram = do
                   )
                 <+>. pStatement s
           ]
-      pJumpStatement <- define $ \x ->
+      pJumpStatement <- share $ \x ->
         case_
           x
           [ unJumpStmtGoto $ \i -> text "goto" <+> textAs i ident <> text ";"
@@ -236,8 +233,9 @@ pprProgram = do
   list pExternalDeclaration
 
 test :: String
--- test = "void processArray(int *arr, int size) { int i, choice; int index; int value; printf(abc); printf(def); scanf(a, &choice); switch (choice) { case 1: printf(string); for (i = 1; i < 10; i++) { printf(string, *(arr + i)); } break; case 2: printf(string, size - 1); scanf(string, &index); if (index < 0 || index >= size) { printf(string); goto menu;  } scanf(string, &value); *(arr + index) = value; printf(string); break; case 3: printf(string); return; default: printf(string); goto menu;  } menu: processArray(arr, size); } int main() { int array[5] = {10, 20, 30, 40, 50} ; printf(welcome_string); processArray(array, 5); return 0; }"
-test = "int main() { return 0; }"
+test = "void processArray(int *arr, int size) { int i, choice; int index; int value; printf(abc); printf(def); scanf(a, &choice); switch (choice) { case 1: printf(string); for (i = 1; i < 10; i++) { printf(string, *(arr + i)); } break; case 2: printf(string, size - 1); scanf(string, &index); if (index < 0 || index >= size) { printf(string); goto menu;  } scanf(string, &value); *(arr + index) = value; printf(string); break; case 3: printf(string); return; default: printf(string); goto menu;  } menu: processArray(arr, size); } int main() { int array[5] = {10, 20, 30, 40, 50} ; printf(welcome_string); while( x <= 2) { while(x >= 2 ) hello();} processArray(array, 5); do { test(); } while (x >= 0); return 0; }"
+
+-- test = "int main() { return 0; }"
 
 pExp :: (FliPprD a e) => FliPprM e (A a Exp -> E e D)
 pExp = do

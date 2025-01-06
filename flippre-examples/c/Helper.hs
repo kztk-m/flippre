@@ -9,6 +9,7 @@
 module Helper (
     mfix,
     ifThenElse,
+    space',
     list,
     inlineList,
     sepBy,
@@ -32,13 +33,16 @@ ifThenElse :: Bool -> t -> t -> t
 ifThenElse True t _ = t
 ifThenElse False _ f = f
 
+space' :: (FliPprD a e) => E e D
+space' = text " " <? text ""
+
 {-
 
 cautionary tale about being not linear
 
 list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 list p = do
-    rec list' <- define $ \xs ->
+    rec list' <- share $ \xs ->
             case_
                 xs
                 [ unNil $ text ""
@@ -53,7 +57,7 @@ list p = do
 
 sepBy :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepBy comma p = do
-    rec commaSep' <- define $ \xs ->
+    rec commaSep' <- share $ \xs ->
             case_
                 xs
                 [ unCons $ \t ts ->
@@ -78,13 +82,13 @@ $(mkUn ''NonEmpty)
 
 list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 list p = do
-    rec listNE <- define $ \t ts ->
+    rec listNE <- share $ \t ts ->
             case_
                 ts
                 [ unNil $ p t -- singleton case
                 , unCons $ \t' ts' -> p t <> line <> listNE t' ts' -- cons case
                 ]
-        list' <- define $ \ts ->
+        list' <- share $ \ts ->
             case_
                 ts
                 [ unNil $ text "" -- empty case
@@ -94,13 +98,13 @@ list p = do
 
 inlineList :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 inlineList p = do
-    rec listNE <- define $ \t ts ->
+    rec listNE <- share $ \t ts ->
             case_
                 ts
                 [ unNil $ p t -- singleton case
                 , unCons $ \t' ts' -> p t <+> listNE t' ts' -- cons case
                 ]
-        list' <- define $ \ts ->
+        list' <- share $ \ts ->
             case_
                 ts
                 [ unNil $ text "" -- empty case
@@ -110,7 +114,7 @@ inlineList p = do
 
 sepBy :: (FliPprD a e, Eq v) => E e D -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepBy comma p = do
-    rec commaSepNE <- define $ \x xs ->
+    rec commaSepNE <- share $ \x xs ->
             case_
                 xs
                 [ unNil $ p x
@@ -125,7 +129,7 @@ sepBy comma p = do
 
 sepByNonEmpty :: (FliPprD a e, Eq v) => E e D -> (A a v -> E e D) -> FliPprM e (A a (NonEmpty v) -> E e D)
 sepByNonEmpty comma p = do
-    rec commaSepNE <- define $ \x xs ->
+    rec commaSepNE <- share $ \x xs ->
             case_
                 xs
                 [ unNNil $ \t -> p x <> comma <> p t
@@ -183,7 +187,7 @@ ident =
 {-
 sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepByClose comma p = do
-    rec commaSepNE <- define $ \x xs ->
+    rec commaSepNE <- share $ \x xs ->
             case_
                 xs
                 [ unNil $ p x
@@ -198,7 +202,7 @@ sepByClose comma p = do
 {-
 sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepByClose comma p = do
-    rec commaSep' <- define $ \xs ->
+    rec commaSep' <- share $ \xs ->
             case_
                 xs
                 [ unCons $ \t ts ->
@@ -220,5 +224,5 @@ sepByClose comma p = do
 
 -- manyParens :: (FliPprE arg exp, Defs exp) => E exp D -> E exp D
 manyParens d = local $ do
-    rec m <- define $ d <? parens m
+    rec m <- share $ d <? parens m
     return m

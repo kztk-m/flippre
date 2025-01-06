@@ -19,13 +19,13 @@ import Prelude
 -- Code for defining the automata for int literals
 -- would be much nicer if we could just use regex here (like in most other parser generators)
 decimalNum :: AM.DFA Char
-decimalNum = AM.range '1' '9' <> AM.star (AM.range '0' '9')
+decimalNum = AM.union (AM.range '1' '9' <> AM.star (AM.range '0' '9')) (AM.singleton '0')
 
 hexNum :: AM.DFA Char
 hexNum = AM.plus $ AM.unions [AM.range 'A' 'F', AM.range 'a' 'f', AM.range '0' '9']
 
 octalNum :: AM.DFA Char
-octalNum = AM.star $ AM.range '0' '7'
+octalNum = AM.plus $ AM.range '0' '7'
 
 data IntLit = Int Word64 | UInt Word64 | LInt Word64 | ULInt Word64
     deriving (Show, Eq)
@@ -35,12 +35,12 @@ $(mkUn ''IntLit)
 -- Int Printer
 pprInt :: (FliPprD a e) => FliPprM e (A a IntLit -> E e D)
 pprInt = do
-    u <- define $ text "u" <? text "U"
-    l <- define $ text "l" <? text "L"
-    decInt <- define $ \x -> case_ x [atoi $ \s -> textAs s decimalNum]
-    hexInt <- define $ \x -> (text "0x" <? text "0X") <> case_ x [atoiHex $ \s -> textAs s hexNum]
-    octInt <- define $ \x -> text "0" <> case_ x [atoiOct $ \s -> textAs s octalNum]
-    int <- define $ \x -> decInt x <? hexInt x <? octInt x
+    u <- share $ text "u" <? text "U"
+    l <- share $ text "l" <? text "L"
+    decInt <- share $ \x -> case_ x [atoi $ \s -> textAs s decimalNum]
+    hexInt <- share $ \x -> (text "0x" <? text "0X") <> case_ x [atoiHex $ \s -> textAs s hexNum]
+    octInt <- share $ \x -> text "0" <> case_ x [atoiOct $ \s -> textAs s octalNum]
+    int <- share $ \x -> decInt x <? hexInt x <? octInt x
     return $ \x ->
         case_
             x
@@ -52,7 +52,7 @@ pprInt = do
   where
     atoi = Branch $ PartialBij "atoi" (Just . show) (Just . read)
     atoiHex = Branch $ PartialBij "atoiHex" (Just . \x -> showHex x "") (\x -> Just $ read $ "0x" ++ x)
-    atoiOct = Branch $ PartialBij "atoiOct" (Just . \x -> showOct x "") (\x -> Just $ read $ "0o0" ++ x)
+    atoiOct = Branch $ PartialBij "atoiOct" (Just . \x -> showOct x "") (\x -> Just $ read $ "0o" ++ x)
 
 data FloatLit = Float Double | Double Double | LDouble Double
     deriving (Show, Eq)
@@ -95,9 +95,9 @@ readFloat = read . addTrailingZeroes . addBeginningZeroes
 
 pprFloat :: (FliPprD a e) => FliPprM e (A a FloatLit -> E e D)
 pprFloat = do
-    doubleExp <- define $ \x -> case_ x [atof $ \s -> textAs s doubleNum]
-    floatExp <- define $ \x -> doubleExp x <> (text "F" <? text "f")
-    ldoubleExp <- define $ \x -> doubleExp x <> (text "L" <? text "l")
+    doubleExp <- share $ \x -> case_ x [atof $ \s -> textAs s doubleNum]
+    floatExp <- share $ \x -> doubleExp x <> (text "F" <? text "f")
+    ldoubleExp <- share $ \x -> doubleExp x <> (text "L" <? text "l")
     let float f = case_ f [unDouble doubleExp, unFloat floatExp, unLDouble ldoubleExp]
     return float
   where
