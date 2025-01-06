@@ -16,10 +16,9 @@ import Text.FliPpr
 import Types
 import Prelude
 
-pprExp :: (FliPprD a e) => (A a TypeName -> E e D) -> FliPprM e (A a Exp -> E e D, A a Exp -> E e D, A a Exp -> E e D)
-pprExp pTypeName = do
-    lit <- pprLit
-    pAssignmentOp <- share $ \x ->
+pprAssignmentOp :: (FliPprD a e) => FliPprM e (A a AssignmentOp -> E e D)
+pprAssignmentOp =
+    share $ \x ->
         case_
             x
             [ unAssignOp $ text "="
@@ -34,16 +33,24 @@ pprExp pTypeName = do
             , unXorAssign $ text "^="
             , unOrAssign $ text "|="
             ]
-    pUnaryOp <- share $ \x ->
-        case_
-            x
-            [ unAddress $ text "&"
-            , unIndirection $ text "*"
-            , unPlus $ text "+"
-            , unMinus $ text "-"
-            , unBitwiseNot $ text "~"
-            , unLogicalNot $ text "!"
-            ]
+
+pprUnaryOp :: (FliPprD a e) => FliPprM e (A a UnaryOp -> E e D)
+pprUnaryOp = share $ \x ->
+    case_
+        x
+        [ unAddress $ text "&"
+        , unIndirection $ text "*"
+        , unPlus $ text "+"
+        , unMinus $ text "-"
+        , unBitwiseNot $ text "~"
+        , unLogicalNot $ text "!"
+        ]
+
+pprExp :: (FliPprD a e) => (A a TypeName -> E e D) -> FliPprM e (A a Exp -> E e D, A a Exp -> E e D, A a Exp -> E e D)
+pprExp pTypeName = do
+    lit <- pprLit
+    pAssignmentOp <- pprAssignmentOp
+    pUnaryOp <- pprUnaryOp
     identExp <- share $ \x -> textAs x ident
     rec pExp <- share $ \x ->
             case_
@@ -66,69 +73,69 @@ pprExp pTypeName = do
         pLogicalOrExp <- share $ \x ->
             case_
                 x
-                [ unLogicalOrExpOr $ \e1 e2 -> align $ group $ pLogicalOrExp e1 </>. text "||" <+>. pLogicalAndExp e2
+                [ unLogicalOr $ \e1 e2 -> align $ group $ pLogicalOrExp e1 </>. text "||" <+>. pLogicalAndExp e2
                 , otherwiseP pLogicalAndExp
                 ]
         pLogicalAndExp <- share $ \x ->
             case_
                 x
-                [ unLogicalAndExpAnd $ \e1 e2 -> align $ group $ pLogicalAndExp e1 </>. text "&&" <+>. pInclusiveOrExp e2
+                [ unLogicalAnd $ \e1 e2 -> align $ group $ pLogicalAndExp e1 </>. text "&&" <+>. pInclusiveOrExp e2
                 , otherwiseP pInclusiveOrExp
                 ]
         pInclusiveOrExp <- share $ \x ->
             case_
                 x
-                [ unInclusiveOrExpOr $ \e1 e2 -> pInclusiveOrExp e1 <+>. text "|" <+>. pExclusiveOrExp e2
+                [ unBitewiseOr $ \e1 e2 -> pInclusiveOrExp e1 <+>. text "|" <+>. pExclusiveOrExp e2
                 , otherwiseP pExclusiveOrExp
                 ]
         pExclusiveOrExp <- share $ \x ->
             case_
                 x
-                [ unExclusiveOrExpXor $ \e1 e2 -> pExclusiveOrExp e1 <+>. text "^" <+>. pAndExp e2
+                [ unBitewiseXor $ \e1 e2 -> pExclusiveOrExp e1 <+>. text "^" <+>. pAndExp e2
                 , otherwiseP pAndExp
                 ]
         pAndExp <- share $ \x ->
             case_
                 x
-                [ unAndExpAnd $ \e1 e2 -> pAndExp e1 <+>. text "&" <+>. pEqualityExp e2
+                [ unBitewiseAnd $ \e1 e2 -> pAndExp e1 <+>. text "&" <+>. pEqualityExp e2
                 , otherwiseP pEqualityExp
                 ]
         pEqualityExp <- share $ \x ->
             case_
                 x
-                [ unEqualityExpEq $ \e1 e2 -> align $ group $ pEqualityExp e1 </>. text "==" <+>. pRelationalExp e2
-                , unEqualityExpNeq $ \e1 e2 -> align $ group $ pEqualityExp e1 </>. text "!=" <+>. pRelationalExp e2
+                [ unEq $ \e1 e2 -> align $ group $ pEqualityExp e1 </>. text "==" <+>. pRelationalExp e2
+                , unNeq $ \e1 e2 -> align $ group $ pEqualityExp e1 </>. text "!=" <+>. pRelationalExp e2
                 , otherwiseP pRelationalExp
                 ]
         pRelationalExp <- share $ \x ->
             case_
                 x
-                [ unRelationalExpLt $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text "<" <+>. pShiftExp e2
-                , unRelationalExpGt $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text ">" <+>. pShiftExp e2
-                , unRelationalExpLe $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text "<=" <+>. pShiftExp e2
-                , unRelationalExpGe $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text ">=" <+>. pShiftExp e2
+                [ unLt $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text "<" <+>. pShiftExp e2
+                , unGt $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text ">" <+>. pShiftExp e2
+                , unLe $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text "<=" <+>. pShiftExp e2
+                , unGe $ \e1 e2 -> align $ group $ pRelationalExp e1 </>. text ">=" <+>. pShiftExp e2
                 , otherwiseP pShiftExp
                 ]
         pShiftExp <- share $ \x ->
             case_
                 x
-                [ unShiftExpLeft $ \e1 e2 -> pShiftExp e1 <+>. text "<<" <+>. pAdditiveExp e2
-                , unShiftExpRight $ \e1 e2 -> pShiftExp e1 <+>. text ">>" <+>. pAdditiveExp e2
+                [ unShiftLeft $ \e1 e2 -> pShiftExp e1 <+>. text "<<" <+>. pAdditiveExp e2
+                , unShiftRight $ \e1 e2 -> pShiftExp e1 <+>. text ">>" <+>. pAdditiveExp e2
                 , otherwiseP pAdditiveExp
                 ]
         pAdditiveExp <- share $ \x ->
             case_
                 x
-                [ unAdditiveExpPlus $ \e1 e2 -> align $ group $ pAdditiveExp e1 </>. text "+" <+>. pMultiplicativeExp e2
-                , unAdditiveExpMinus $ \e1 e2 -> align $ group $ pAdditiveExp e1 </>. text "-" <+>. pMultiplicativeExp e2
+                [ unAdd $ \e1 e2 -> align $ group $ pAdditiveExp e1 </>. text "+" <+>. pMultiplicativeExp e2
+                , unSub $ \e1 e2 -> align $ group $ pAdditiveExp e1 </>. text "-" <+>. pMultiplicativeExp e2
                 , otherwiseP pMultiplicativeExp
                 ]
         pMultiplicativeExp <- share $ \x ->
             case_
                 x
-                [ unMultiplicativeExpMul $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "*" <+>. pCastExp e2
-                , unMultiplicativeExpDiv $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "/" <+>. pCastExp e2
-                , unMultiplicativeExpMod $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "%" <+>. pCastExp e2
+                [ unMul $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "*" <+>. pCastExp e2
+                , unDiv $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "/" <+>. pCastExp e2
+                , unMod $ \e1 e2 -> pMultiplicativeExp e1 <+>. text "%" <+>. pCastExp e2
                 , otherwiseP pCastExp
                 ]
         pCastExp <- share $ \x ->
@@ -152,12 +159,12 @@ pprExp pTypeName = do
             case_
                 x
                 [ -- hardcats necessary
-                  unPostfixExpCall $ \e args -> pPostfixExp e <#> parens (pAssignmentList args)
-                , unPostfixExpArray $ \e1 e2 -> pPostfixExp e1 <#> text "[" <> pExp e2 <> text "]"
-                , unPostfixExpDot $ \e s -> pPostfixExp e <#> text "." <#> textAs s ident
-                , unPostfixExpArrow $ \e s -> pPostfixExp e <#> text "->" <#> textAs s ident
-                , unPostfixExpInc $ \e -> pPostfixExp e <#> text "++"
-                , unPostfixExpDec $ \e -> pPostfixExp e <#> text "--"
+                  unPostfixCall $ \e args -> pPostfixExp e <#> parens (pAssignmentList args)
+                , unPostfixArrayIndex $ \e1 e2 -> pPostfixExp e1 <#> text "[" <> pExp e2 <> text "]"
+                , unPostfixDot $ \e s -> pPostfixExp e <#> text "." <#> textAs s ident
+                , unPostfixArrow $ \e s -> pPostfixExp e <#> text "->" <#> textAs s ident
+                , unPostfixInc $ \e -> pPostfixExp e <#> text "++"
+                , unPostfixDec $ \e -> pPostfixExp e <#> text "--"
                 , otherwiseP pPrimaryExp
                 ]
         pPrimaryExp <-

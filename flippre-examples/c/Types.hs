@@ -107,33 +107,33 @@ data Exp
     | -- condexp
       Ternary Exp Exp Exp
     | -- or
-      LogicalOrExpOr Exp Exp
+      LogicalOr Exp Exp
     | -- and
-      LogicalAndExpAnd Exp Exp
+      LogicalAnd Exp Exp
     | -- inclusive or
-      InclusiveOrExpOr Exp Exp
+      BitewiseOr Exp Exp
     | -- exclusive or
-      ExclusiveOrExpXor Exp Exp
+      BitewiseXor Exp Exp
     | -- and
-      AndExpAnd Exp Exp
+      BitewiseAnd Exp Exp
     | -- equality
-      EqualityExpEq Exp Exp
-    | EqualityExpNeq Exp Exp
+      Eq Exp Exp
+    | Neq Exp Exp
     | -- relational
-      RelationalExpLt Exp Exp
-    | RelationalExpGt Exp Exp
-    | RelationalExpLe Exp Exp
-    | RelationalExpGe Exp Exp
+      Lt Exp Exp
+    | Gt Exp Exp
+    | Le Exp Exp
+    | Ge Exp Exp
     | -- shift
-      ShiftExpLeft Exp Exp
-    | ShiftExpRight Exp Exp
+      ShiftLeft Exp Exp
+    | ShiftRight Exp Exp
     | -- additive
-      AdditiveExpPlus Exp Exp
-    | AdditiveExpMinus Exp Exp
+      Add Exp Exp
+    | Sub Exp Exp
     | -- multiplicative
-      MultiplicativeExpMul Exp Exp
-    | MultiplicativeExpDiv Exp Exp
-    | MultiplicativeExpMod Exp Exp
+      Mul Exp Exp
+    | Div Exp Exp
+    | Mod Exp Exp
     | -- cast
       Cast TypeName Exp
     | -- unary
@@ -141,15 +141,14 @@ data Exp
     | Dec Exp
     | UnaryOp UnaryOp Exp
     | SizeofExp Exp
-    | SizeofType
-        TypeName
+    | SizeofType TypeName
     | -- postfix
-      PostfixExpCall Exp [Exp]
-    | PostfixExpArray Exp Exp
-    | PostfixExpDot Exp String
-    | PostfixExpArrow Exp String
-    | PostfixExpInc Exp
-    | PostfixExpDec Exp
+      PostfixCall Exp [Exp]
+    | PostfixArrayIndex Exp Exp
+    | PostfixDot Exp String
+    | PostfixArrow Exp String
+    | PostfixInc Exp
+    | PostfixDec Exp
     | -- primary exp
       LitExp Literal
     | IdentExp String
