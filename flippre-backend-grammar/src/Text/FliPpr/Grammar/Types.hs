@@ -19,7 +19,7 @@ module Text.FliPpr.Grammar.Types (
 
   -- * Datatype for flat CFGs
   FlatGrammar (..),
-  Ix (..),
+  UE.Ix (..),
   IxN (..),
   fromIx,
   toIx,
@@ -29,9 +29,9 @@ module Text.FliPpr.Grammar.Types (
   RHS (..),
 
   -- * Treatment of environments
-  Env (..),
-  mapEnv,
-  lookEnv,
+  UE.Env (..),
+  UE.mapEnv,
+  UE.lookEnv,
 ) where
 
 import Data.RangeSet.List (RSet)
@@ -40,7 +40,7 @@ import qualified Data.RangeSet.List as RS
 import Control.Applicative (Alternative (..))
 import Defs (Defs (..))
 
-import Unembedding.Env (Env (..), Ix (..), lookEnv, mapEnv)
+import qualified Unembedding.Env as UE
 
 import Data.Coerce (coerce)
 import qualified Data.List.Split as Sp
@@ -66,19 +66,19 @@ type GrammarD c e = (Defs e, Grammar c e)
 
 newtype IxN (env :: [k]) (a :: k) = IxN Word deriving stock Show
 
-fromIx :: Ix env a -> IxN env a
+fromIx :: UE.Ix env a -> IxN env a
 fromIx x0 = IxN (go x0 0)
   where
-    go :: Ix env' a' -> Word -> Word
-    go IxZ r = r
-    go (IxS x) r = go x $! r + 1
+    go :: UE.Ix env' a' -> Word -> Word
+    go UE.IxZ r = r
+    go (UE.IxS x) r = go x $! r + 1
 
-toIx :: IxN env a -> Ix env a
-toIx (IxN n0) = go n0 IxZ unsafeCoerce
+toIx :: IxN env a -> UE.Ix env a
+toIx (IxN n0) = go n0 UE.IxZ unsafeCoerce
   where
-    go :: Word -> Ix env a -> (forall env'. Ix env' a -> r) -> r
+    go :: Word -> UE.Ix env a -> (forall env'. UE.Ix env' a -> r) -> r
     go 0 x k = k x
-    go n x k = go (n - 1) (IxS x) k
+    go n x k = go (n - 1) (UE.IxS x) k
 
 data Symb c env a where
   NT :: !(IxN env a) -> Symb c env a
@@ -146,10 +146,10 @@ instance (Show c) => PP.Pretty (RHS c env a) where
 
 -- | Type-safe representation of grammars in de Bruijn indices.
 data FlatGrammar c a
-  = forall env. FlatGrammar !(Env (RHS c env) env) !(RHS c env a)
+  = forall env. FlatGrammar !(UE.Env (RHS c env) env) !(RHS c env a)
 
 instance (Show c) => PP.Pretty (FlatGrammar c a) where
-  pretty (FlatGrammar ENil r) =
+  pretty (FlatGrammar UE.ENil r) =
     PP.align $ PP.pretty r
   pretty (FlatGrammar bs r) =
     PP.align $
@@ -159,12 +159,12 @@ instance (Show c) => PP.Pretty (FlatGrammar c a) where
     where
       --    PP.align $ PP.vsep (pprDefs bs) <> PP.line <> pprDefN (fromString "Start") r
 
-      pprDefs :: Env (RHS c env) as -> [PP.Doc ann]
+      pprDefs :: UE.Env (RHS c env) as -> [PP.Doc ann]
       pprDefs = go 0
         where
-          go :: Int -> Env (RHS c env) as -> [PP.Doc ann]
-          go _ ENil = mempty
-          go n (ECons e es) = pprDef (show n) e : go (n + 1) es
+          go :: Int -> UE.Env (RHS c env) as -> [PP.Doc ann]
+          go _ UE.ENil = mempty
+          go n (UE.ECons e es) = pprDef (show n) e : go (n + 1) es
 
       pprDef x rhs =
         fromString ("N" ++ x)

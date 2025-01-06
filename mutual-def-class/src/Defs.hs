@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -12,6 +13,8 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -131,21 +134,19 @@ module Defs (
 )
 where
 
-import Data.Functor.Identity (Identity (..))
-
 import Control.Applicative (Alternative (..))
+import Data.Coerce (coerce)
 import qualified Data.Fin as F
+import Data.Functor.Compose
+import Data.Functor.Const (Const (..))
+import Data.Functor.Identity (Identity (..))
 import Data.Int (Int8)
 import Data.Kind (Type)
+import Data.Proxy
+import Data.String (IsString (..))
 import qualified Data.Type.Nat as F
 import Data.Word (Word8)
 
-import Data.Coerce (coerce)
-import Data.Functor.Const (Const)
-
-import Data.Functor.Compose
-import Data.Proxy
-import Data.String (IsString (..))
 import Prettyprinter as D
 
 {- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
@@ -290,6 +291,21 @@ someD d = local $ letr1 $ \m -> letr1 $ \s ->
     def (pure [] <|> s) $
       return s
 
+-- | 'share's computation.
+share :: (Defs f) => f a -> DefM f (f a)
+share s = DefM $ \k -> letrD $ \a -> consD s (k a)
+
+{- | Makes definions to be 'local'.
+
+For example, in the follownig code, the scope of shared computation is limited to @foo@; so using @foo@ twice copies @defa@.
+
+> foo = local $ do
+>    a <- share defa
+>     ...
+-}
+local :: (Defs f) => DefM f (f t) -> f t
+local m = unliftD $ unDefM m liftD
+
 -- | @def a@ is a synonym for @fmap (a,)@, which is convenient to be used with 'letr'.
 def :: (Functor f) => a -> f b -> f (a, b)
 def a = fmap (a,)
@@ -328,9 +344,29 @@ def a = fmap (a,)
 --     arr :: (DTypeVal f (a ** b), r) -> (DTypeVal f a, (DTypeVal f b, r))
 --     arr (VCons a b, r) = (a, (b, r))
 
--- | A class that provides a generalized version of 'letr'.
+{- | A class that provides a generalized version of 'letr'.
+Intuitively, @Arg f t@ means @t@ can be recursively defined
+in the EDSL @f@.
+
+Due to the restriction of Haskell type classes, no instance is provided
+for @Arg f (f a)@. Instead, we provide an instance @Arg f (Identity (f a))@.
+Use the instance via @DerivingVia@ to provide @Arg F (Identity (F a)@ for a
+concrete EDSL expression @F@.
+-}
 class (Defs f) => Arg f t where
   letr :: (t -> DefM f (t, r)) -> DefM f r
+
+-- | A variant of 'mfix'. This function is supported to be used as:
+
+--- > {-# LANGUAGE RecursiveDo, RebindableSyntax #-}
+--  >
+--  > someFunc = do
+--  >     rec a <- share $ ... a ... b ...
+--  >         b <- share $ ... a ... b ...
+--  >     ...
+--  >   where mfix = mfixDefM
+mfixDefM :: (Arg f a) => (a -> DefM f a) -> DefM f a
+mfixDefM f = letr $ \a -> (,a) <$> f a
 
 instance (Defs f) => Arg f () where
   letr f = snd <$> f ()
@@ -341,11 +377,14 @@ instance (Defs f) => Arg f (Tip (f a)) where
   letr :: forall r. (Tip (f a) -> DefM f (Tip (f a), r)) -> DefM f r
   letr f = letr1 (coerce f :: f a -> DefM f (f a, r))
 
+instance (Defs f) => Arg f (Identity (f a)) where
+  letr :: forall r. (Identity (f a) -> DefM f (Identity (f a), r)) -> DefM f r
+  letr f = letr1 (coerce f :: f a -> DefM f (f a, r))
+
 instance (Arg f a, Arg f b) => Arg f (a, b) where
   letr f = letr $ \b -> letr $ \a -> do
     ((a', b'), r) <- f (a, b)
     return (a', (b', r))
-
 instance (Arg f a, Arg f b, Arg f c) => Arg f (a, b, c) where
   letr f = letr $ \c -> letr $ \b -> letr $ \a -> do
     ((a', b', c'), r) <- f (a, b, c)
@@ -366,85 +405,23 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (
     ((b1, b2, b3, b4, b5, b6), r) <- f (a1, a2, a3, a4, a5, a6)
     return ((b1, b2, b3), ((b4, b5, b6), r))
 
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7) => Arg f (a1, a2, a3, a4, a5, a6, a7) where
-  letr f = letr $ \ ~(a4, a5, a6, a7) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7), r) <- f (a1, a2, a3, a4, a5, a6, a7)
-    return ((b1, b2, b3), ((b4, b5, b6, b7), r))
+-- Use template haskell to generate instances for n-tuples
+$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 20]])
 
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8), r))
+instance (Defs f) => Arg f (HList g '[]) where
+  letr f = do
+    (_, r) <- f HNil
+    pure r
 
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15, Arg f a16) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15, Arg f a16, Arg f a17) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15, Arg f a16, Arg f a17, Arg f a18) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15, Arg f a16, Arg f a17, Arg f a18, Arg f a19) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15, Arg f a16, Arg f a17, Arg f a18, Arg f a19, Arg f a20) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19, b20), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19, b20), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15, Arg f a16, Arg f a17, Arg f a18, Arg f a19, Arg f a20, Arg f a21) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19, b20, b21), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19, b20, b21), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, Arg f a8, Arg f a9, Arg f a10, Arg f a11, Arg f a12, Arg f a13, Arg f a14, Arg f a15, Arg f a16, Arg f a17, Arg f a18, Arg f a19, Arg f a20, Arg f a21, Arg f a22) => Arg f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22) where
-  letr f = letr $ \ ~(a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19, b20, b21, b22), r) <- f (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22)
-    return ((b1, b2, b3), ((b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16, b17, b18, b19, b20, b21, b22), r))
+instance
+  (Defs f, Arg f a, Arg f (HList Identity as)) =>
+  Arg f (HList Identity (a : as))
+  where
+  letr f = letr $ \a -> letr $ \as -> do
+    (res, r) <- f (HCons (Identity a) as)
+    case res of
+      HCons (Identity v) vs ->
+        pure (vs, (v, r))
 
 {- | @letrs [k1,...,kn] $ \f -> (def fdef r)@ to mean
 
@@ -454,11 +431,15 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6, Arg f a7, 
 >   r
 -}
 letrs :: (Eq k, Arg f a) => [k] -> ((k -> a) -> DefM f (k -> a, r)) -> DefM f r
-letrs [] h = snd <$> h (const $ error "Text.FliPpr.Internal.Defs.letrs: out of bounds")
+letrs [] h = snd <$> h (const $ error "Defs.letrs: out of bounds")
 letrs (k : ks) h = letr $ \fk -> letrs ks $ \f -> do
   (f', r) <- h $ \x -> if x == k then fk else f x
   return (f', (f' k, r))
 
+{- | A newtype wrapper for Bounded types. A typical use is an instance declaration such as:
+
+> deriving via (FromBounded YourType -> a) instance (Arg f a) => Arg f (YourType -> a)
+-}
 newtype FromBounded b = FromBounded {getBounded :: b}
   deriving newtype (Eq, Ord, Enum, Bounded, Num, Real, Integral, Show)
 
@@ -474,20 +455,11 @@ instance (Eq b, Enum b, Bounded b, Arg f a) => Arg f (FromBounded b -> a) where
 -- Instances of concrete bounded types: we don't make instances like Arg f (Int -> a),
 -- as they are unrealistic.
 
-instance (Arg f a) => Arg f (Bool -> a) where
-  letr = letrsB
-
-instance (Arg f a, F.SNatI m, 'F.S m ~ n) => Arg f (F.Fin n -> a) where
-  letr = letrsB
-
-instance (Arg f a) => Arg f (Word8 -> a) where
-  letr = letrsB
-
-instance (Arg f a) => Arg f (Int8 -> a) where
-  letr = letrsB
-
-instance (Arg f a) => Arg f (() -> a) where
-  letr = letrsB
+deriving via (FromBounded Bool -> a) instance (Arg f a) => Arg f (Bool -> a)
+deriving via (FromBounded (F.Fin n) -> a) instance (Arg f a, F.SNatI m, F.S m ~ n) => Arg f (F.Fin n -> a)
+deriving via (FromBounded Word8 -> a) instance (Arg f a) => Arg f (Word8 -> a)
+deriving via (FromBounded Int8 -> a) instance (Arg f a) => Arg f (Int8 -> a)
+deriving via (FromBounded () -> a) instance (Arg f a) => Arg f (() -> a)
 
 instance (Arg f (b -> a)) => Arg f (Identity b -> a) where
   letr :: forall r. ((Identity b -> a) -> DefM f (Identity b -> a, r)) -> DefM f r
@@ -524,6 +496,8 @@ For example, in the follownig code, the scope of shared computation is limited t
 local :: (Defs f) => DefM f (f t) -> f t
 local m = unliftD $ unDefM m liftD
 
+{-# WARNING VarM "This class will be removed soon. Use 'EbU' library for pretty-printing" #-}
+
 -- | Monads for managing variable names
 class (Monad m) => VarM m where
   -- | A new variable name, which may or may not differ in calls.
@@ -544,6 +518,8 @@ class (Monad m) => VarM m where
 type Precedence = Int
 
 -- | A general pretty-printer for 'Defs' methods. Use different @m@ printing different HOAS, to avoid overlapping instance.
+{-# WARNING PprExp "To be removed" #-}
+
 newtype PprExp m ann _a = PprExp {pprExp :: Precedence -> m (D.Doc ann)}
 
 pattern PprExpN :: (Precedence -> m (D.Doc ann)) -> Norm (PprExp m ann) a

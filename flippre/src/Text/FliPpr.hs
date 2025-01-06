@@ -19,7 +19,6 @@ module Text.FliPpr (
   FliPprM,
   Branch (..),
   PartialBij (..),
-  In,
   Err (..),
 
   -- * Syntax
@@ -127,6 +126,7 @@ module Text.FliPpr (
   opPrinter,
   is,
   isMember,
+  convertInput,
 )
 where
 
@@ -206,6 +206,11 @@ infixr 4 </>.
 --     Just m -> m
 --     Nothing -> error "defines: out of bounds"
 
+-- | @is c f@ is a branch for the case where the input is equal to @c@.
+--
+-- This will be used with 'case_' as:
+--
+-- > case_ x [ is '0' ..., is '1' ... , ... ]
 is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) c r
 is c f =
   PartialBij
@@ -214,20 +219,26 @@ is c f =
     (\_ -> Just c)
     `Branch` (`ununit` f)
 
+-- | @isMember cs f@ is a branch for the case where the input belongs to the set @cs@.
 isMember :: (Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
 isMember cs f =
   PartialBij
     ("isMember " ++ show cs)
     (\x -> if x `RS.member` cs then Just x else Nothing)
-    Just
+    (\x -> if x `RS.member` cs then Just x else Nothing)
     `Branch` f
 
+-- Converts an input by using a bijection.
+convertInput :: (FliPprE arg exp) => PartialBij a b -> A arg a -> (A arg b -> E exp r) -> E exp r
+convertInput pij a r = case_ a [pij `Branch` r]
+
 -- |
--- A synonym of 'share'.
+-- A synonym of 'share' (remains for backward compatibility)
+{-# WARNING define "to be removed" #-}
 define :: (Arg (E f) r) => r -> FliPprM f r
 define = share
 
--- | Precedence.
+-- | Precedence. An operator with a higher precedence binds more tighter.
 type Prec = Int
 
 -- | Fixity is a pair of associativity and precedence.
@@ -297,7 +308,7 @@ textAs' (A.DFAImpl i qs fs tr) = local $
 -- In FliPpr, one can only define recursive printers that can be interpreted as context-free grammars.
 -- By returning lists depending the input AST, we can do anything with lists---in particular, we can
 -- define different printers for different indices. This is beyond context-free.
-foldPpr :: (FliPprD arg exp, Eq i) => (A arg i -> E exp D -> E exp D) -> E exp D -> A arg [i] -> E exp D
+foldPpr :: (FliPprD arg exp) => (A arg i -> E exp D -> E exp D) -> E exp D -> A arg [i] -> E exp D
 foldPpr c n = local $ foldPprShared c n
 
 -- | If 'foldPpr' is used with the same arguments more than once, the following version
@@ -306,7 +317,7 @@ foldPpr c n = local $ foldPprShared c n
 --  > do p <- foldPprShared (...) (...)
 --  >    ... p xs ... p ys ...
 foldPprShared ::
-  (FliPprD arg exp, Eq i) =>
+  (FliPprD arg exp) =>
   (A arg i -> E exp D -> E exp D)
   -> E exp D
   -> FliPprM exp (A arg [i] -> E exp D)
@@ -326,13 +337,13 @@ foldPprShared c n =
 --
 -- For example, the following prints lists separated by commas
 -- > foldPprL (\a d -> pprElem a <> text "," <+>. d) pprElem (text "")
-foldPprL :: (FliPprD arg exp, Eq i) => (A arg i -> E exp D -> E exp D) -> (A arg i -> E exp D) -> E exp D -> A arg [i] -> E exp D
+foldPprL :: (FliPprD arg exp) => (A arg i -> E exp D -> E exp D) -> (A arg i -> E exp D) -> E exp D -> A arg [i] -> E exp D
 foldPprL c s n = local $ foldPprLShared c s n
 
 -- | If 'foldPprL' is used with the same arguments more than once, the following version
 --   is more efficient.
 foldPprLShared ::
-  (FliPprD arg exp, Eq i) =>
+  (FliPprD arg exp) =>
   (A arg i -> E exp D -> E exp D)
   -> (A arg i -> E exp D)
   -> E exp D

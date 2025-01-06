@@ -20,7 +20,6 @@ module Text.FliPpr.Internal.Type (
   FType (..),
   type D,
   type (~>),
-  In,
   FliPprE (..),
   FliPprD,
   A (..),
@@ -83,37 +82,44 @@ import Control.Arrow (first)
 import Data.Function.Compat (applyWhen)
 import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
-import GHC.Stack (HasCallStack)
+import GHC.Stack (HasCallStack, withFrozenCallStack)
 
--- | A kind for datatypes in FliPpr.
+-- | The kind for FliPpr types.
 data FType = FTypeD | Type :~> FType
 
--- | Unticked synonym for :~>
-type a ~> b = a ':~> b
+-- | Unticked synonym for :~> used for readability.
+type a ~> b = a :~> b
+
+infixr 0 ~>
+infixr 0 :~>
 
 -- | Unticked synonym for FTypeD
 type D = 'FTypeD
 
-type In a = Eq a
-
--- | A type for partial bijections. The 'String'-typed field will be used in pretty-printing
---   of FliPpr expressions.
-data PartialBij a b = PartialBij !String !(a -> Maybe b) !(b -> Maybe a)
+-- | Partial bijections between @a@ and @b@.
+data PartialBij a b
+  = PartialBij
+      !String
+      -- ^ field used for pretty-printing
+      !(a -> Maybe b)
+      -- ^ forward transformation
+      !(b -> Maybe a)
+      -- ^ backward transformation
 
 -- | A datatype represents branches.
 data Branch arg exp a (t :: FType)
   = -- | the part @arg b -> exp t@ must be a linear function
-    forall b. (In b) => Branch (PartialBij a b) (arg b -> exp t)
+    forall b. Branch (PartialBij a b) (arg b -> exp t)
 
 -- | A finally-tagless implementation of FliPpr expressions.
---   The APIs are only for internal use.
+--   The API is only for internal use.
 class FliPprE (arg :: Type -> Type) (exp :: FType -> Type) | exp -> arg where
-  fapp :: (In a) => exp (a ~> t) -> arg a -> exp t
-  farg :: (In a) => (arg a -> exp t) -> exp (a ~> t)
+  fapp :: exp (a ~> t) -> arg a -> exp t
+  farg :: (arg a -> exp t) -> exp (a ~> t)
 
-  fcase :: (In a) => arg a -> [Branch arg exp a t] -> exp t
+  fcase :: (HasCallStack) => arg a -> [Branch arg exp a t] -> exp t
 
-  funpair :: (In a, In b) => arg (a, b) -> (arg a -> arg b -> exp t) -> exp t
+  funpair :: (HasCallStack) => arg (a, b) -> (arg a -> arg b -> exp t) -> exp t
   fununit :: arg () -> exp t -> exp t
 
   fbchoice :: exp D -> exp D -> exp D
@@ -222,17 +228,23 @@ type FliPprD arg exp = (Defs exp, FliPprE arg exp)
 --   fshare :: exp t -> m (exp t)
 --   flocal :: m (exp t) -> exp t
 
--- | @A arg a@ is nothing but @arg a@, but used for controlling type inference.
+-- | @A arg a@ represents an input of a pretty-printer in FliPpr. ("A" stands for "a"rgument.)
+-- Here, @a@ ranges over Haskell types.
+-- The value of this type must be used linearly to ensure that a resulting parser can recover this information.
+--
+-- Internally, this is just a newtype wrapper for @arg a@. Having 'A' is handy for declaring type class instances.
 newtype A (arg :: Type -> Type) (a :: Type) = A {unA :: arg a}
 
--- | Similarly, @E exp t@ is nothing but @exp t@.
+-- | @E exp t@ represents a pretty-printing expression in FliPpr. ("E" stands for "e"xpression.)
+-- Unlike @A arg a@, @t@ ranges over 'FType' instead of 'Type'.
+--
+-- Internally, this is just a newtype wrapper for @exp a@. Having 'E' is handy for declaring type class instances.
 newtype E (exp :: FType -> Type) (t :: FType) = E {unE :: exp t}
 
+-- | A newtype wrapper for the FliPpr expression type: @forall arg exp. (FliPprD arg exp) => exp t@.
 newtype FliPpr t = FliPpr (forall arg exp. (FliPprD arg exp) => exp t)
 
--- flipprPure :: (forall arg exp. FliPprD arg exp => E exp t) -> FliPpr t
--- flipprPure x = FliPpr (unE x)
-
+-- | A monad convenient for sharing and recursive definitions.
 type FliPprM exp = Defs.DefM (E exp)
 
 -- | Make a closed FliPpr definition. A typical use is:
@@ -241,7 +253,7 @@ type FliPprM exp = Defs.DefM (E exp)
 --   >   rec ppr <- share $ arg $ \i -> ...
 --   >   return ppr
 flippr :: (forall arg exp. (FliPprD arg exp) => FliPprM exp (E exp t)) -> FliPpr t
-flippr x = FliPpr (unE $ Defs.local x) -- flipprPure (unC x)
+flippr x = FliPpr (unE $ Defs.local x)
 
 -- | Indicating that there can be zero-or-more spaces in parsing.
 --   In pretty-printing, it is equivalent to @text ""@.
@@ -250,7 +262,7 @@ spaces :: (FliPprE arg exp) => E exp D
 spaces = (coerce :: exp D -> E exp D) fspaces
 
 -- | In pretty-printing, it works as @text " "@. In parsing
---   it behaves a single space in some sense.
+--   it behaves a single space.
 {-# INLINEABLE space #-}
 space :: (FliPprE arg exp) => E exp D
 space = (coerce :: exp D -> E exp D) fspace
@@ -276,10 +288,12 @@ line' = (coerce :: exp D -> E exp D) fline'
 abort :: (FliPprE arg exp, HasCallStack) => E exp D
 abort = (coerce :: exp D -> E exp D) fabort
 
--- | A wrapper for 'farg'.
--- @f@ of @arg f@ must be a linear function. In other words, @f@ must use its input exactly once.
+-- | @arg@ represents a function in FliPpr.
+-- @f@ of @arg f@ must be a linear function: @f@ must use its input exactly once.
+--
+-- Internally, it is a wrapper for the method 'farg' of 'FliPprE'.
 {-# INLINEABLE arg #-}
-arg :: (In a, FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
+arg :: (FliPprE arg exp) => (A arg a -> E exp t) -> E exp (a ~> t)
 arg =
   ( coerce ::
       ((arg a -> exp t) -> exp (a ~> t))
@@ -288,9 +302,9 @@ arg =
   )
     farg
 
--- | A wrapper for 'fapp'.
+-- | Application in FliPpr. Observed that the application is restricted to @A arg a@-typed values.
 {-# INLINEABLE app #-}
-app :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
+app :: (FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
 app =
   ( coerce ::
       (exp (a ~> t) -> arg a -> exp t)
@@ -298,13 +312,14 @@ app =
   )
     fapp
 
--- | FliPpr version of '$'.
+-- | A synonym for 'app'. A FliPpr version of '$'.
 {-# INLINE (@@) #-}
-(@@) :: (In a, FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
+(@@) :: (FliPprE arg exp) => E exp (a ~> t) -> A arg a -> E exp t
 (@@) = app
 
 infixr 0 @@
 
+-- | Prints a 'Char' ensuring the char is in the given set.
 charAs :: (FliPprE arg exp) => A arg Char -> RS.RSet Char -> E exp D
 charAs =
   ( coerce ::
@@ -313,21 +328,18 @@ charAs =
   )
     fcharAs
 
--- charAs a cs = E $ fcharAs (unA a) cs
-
 -- | case branching.
 {-# INLINEABLE case_ #-}
-case_ :: (In a, FliPprE arg exp) => A arg a -> [Branch (A arg) (E exp) a r] -> E exp r
+case_ :: (FliPprE arg exp, HasCallStack) => A arg a -> [Branch (A arg) (E exp) a r] -> E exp r
 case_ =
-  ( coerce ::
-      (arg a -> [Branch arg exp a r] -> exp r)
-      -> A arg a
-      -> [Branch (A arg) (E exp) a r]
-      -> E exp r
-  )
-    fcase
-
--- case_ (A a) bs = E (fcase a (coerce bs))
+  withFrozenCallStack $
+    ( coerce ::
+        (arg a -> [Branch arg exp a r] -> exp r)
+        -> A arg a
+        -> [Branch (A arg) (E exp) a r]
+        -> E exp r
+    )
+      fcase
 
 -- | A CPS style conversion from @A arg (a,b)@ to a pair of @A arg a@ and @A arg b@.
 --   A typical use of 'unpair' is to implement (invertible) pattern matching in FliPpr.
@@ -336,17 +348,16 @@ case_ =
 --   'Language.FliPpr.TH' provides 'un' and 'branch'. By using these functions,
 --   one can avoid using a bit awkward 'unpair' explicitly.
 {-# INLINEABLE unpair #-}
-unpair :: (In a, In b, FliPprE arg exp) => A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r
+unpair :: (HasCallStack) => (FliPprE arg exp) => A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r
 unpair =
-  ( coerce ::
-      (arg (a, b) -> (arg a -> arg b -> exp r) -> exp r)
-      -> (A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r)
-  )
-    funpair
+  withFrozenCallStack $
+    ( coerce ::
+        (arg (a, b) -> (arg a -> arg b -> exp r) -> exp r)
+        -> (A arg (a, b) -> (A arg a -> A arg b -> E exp r) -> E exp r)
+    )
+      funpair
 
--- unpair (A x) k = E $ funpair x (coerce k)
-
--- | An explicit disposal of `A arg ()`, required by the invertibility guarantee.
+-- | An explicit disposal of `A arg ()`, required for the invertibility guarantee.
 {-# INLINEABLE ununit #-}
 ununit :: (FliPprE arg exp) => A arg () -> E exp r -> E exp r
 ununit =
@@ -357,8 +368,6 @@ ununit =
       -> E exp r
   )
     fununit
-
--- ununit (A x) y = E $ fununit x (coerce y)
 
 -- | Biased choice. @a <? b = a@ in parsing, but it accepts strings indicated by both @a@ and @b$ in parsing.
 (<?) :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
@@ -371,7 +380,7 @@ ununit =
   )
     fbchoice
 
--- (<?) (E x) (E y) = E (fbchoice x y)
+infixr 4 <?
 
 instance (Defs.Defs e) => Defs.Defs (E e) where
   newtype D (E e) as a = RE (Defs.D e as a)
@@ -391,10 +400,9 @@ instance (Defs.Defs e) => Defs.Defs (E e) where
   -- letrDS h = RE $ Defs.letrDS (coerce h)
   letrD = coerce (Defs.letrD :: (e a -> Defs.D e (a : as) b) -> Defs.D e as b)
 
-infixr 4 <?
-
 -- |
--- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction'.
+-- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction', which
+-- perform interconversion between FliPpr functions and Haskell functions.
 class Repr (arg :: Type -> Type) exp (t :: FType) r | exp -> arg, r -> arg exp t where
   toFunction :: E exp t -> r
   -- ^ @toFunction :: E exp (a1 ~> ... ~> an ~> D) -> A arg a1 -> ... -> A arg an -> E exp D@
@@ -406,18 +414,18 @@ instance (FliPprE arg exp) => Repr arg exp t (E exp t) where
   toFunction = id
   fromFunction = id
 
-instance (FliPprE arg exp, Repr arg exp t r, In a) => Repr arg exp (a ~> t) (A arg a -> r) where
+instance (FliPprE arg exp, Repr arg exp t r) => Repr arg exp (a ~> t) (A arg a -> r) where
   toFunction f = \a -> toFunction (f `app` a)
   fromFunction k = arg (fromFunction . k)
 
--- | A specialized version of 'mfixDefM'
--- mfixF :: forall exp a d. (Defs exp, Defs.DefType d, Defs.Convertible (E exp) d a) => (a -> FliPprM exp a) -> FliPprM exp a
+-- | A restricted version of 'mfix'. Use 'Text.FliPpr.MFix' to export this function as 'mfix', which
+-- supposed to be used with @RecursiveDo@/@RebindableSyntax@ (and @QualifiedDo@ in future).
 mfixF :: (Defs.Arg (E f) a) => (a -> FliPprM f a) -> FliPprM f a
 mfixF = Defs.mfixDefM
 
 -- type DefsF exp = Defs.DTypeVal (E exp)
 
--- | A specialized version of 'letr', which would be useful for defining mutual recursions.
+-- -- | A specialized version of 'letr', which would be useful for defining mutual recursions.
 
 --- Typical usage:
 --  @
@@ -457,109 +465,55 @@ mfixF = Defs.mfixDefM
 --     unJust Nothing  = "letrs: out of bounds"
 
 -- | Useful combinator that can be used with 'letr'.
+--
+-- > letr $ \a -> letr $ \b ->
+-- >         def body_a >>>
+-- >         def body_b $
+-- >         code_using_a_and_b
+--
+-- However, in most situations, using @RecursiveDo@ is much convenient.
+--
+-- > do rec a <- share body_a
+-- >    rec b <- share body_b
+-- >    code_using_a_and_b
+-- >   where
+-- >     mfix = mfixF
 def :: (Functor m) => a -> m b -> m (a, b)
 def a b = (a,) <$> b
 
--- | Sharing a computation.
+-- | Sharing a computation. Roughly speaking, a (generalized) "let" in FliPpr.
+--
+-- For example, the following code has is inefficient in parsing as it
+-- copies the productions corresponding to @e@.
+--
+-- > ... e ... e ...
+--
+-- In contrast, the following code share the productions to @e@.
+--
+-- > do v <- share e
+-- >    ... v ... v ...
 share :: (Defs.Arg (E f) r) => r -> FliPprM f r
 share e = Defs.letr $ \x -> return (e, x)
 
--- | Localize declarations.
+-- | Localize declarations. There is a performance caveat: 'local' cancels sharing instroduced by 'share'.
+--   Similarly to @e@ of @(let x = e in x) + (let x = e in x)@ is evaluated twice,
+--   @... local (do {x <- share e; pure x}) ... local (do {x <- share e; pure x}) ...@ invovles
+--   the productions correspoding @e@ twice.
 local :: (Repr arg exp ft rep, FliPprD arg exp) => FliPprM exp rep -> rep
 local = toFunction . Defs.local . fmap fromFunction
-
--- One-level unfolding to avoid overlapping instances.
 
 instance (Defs.Defs exp) => Defs.Arg (E exp) (E exp a) where
   letr f = Defs.letr $ fmap (first Defs.Tip) . f . Defs.unTip
 
-instance (FliPprE arg exp, In a, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E exp) (A arg a -> r) where
+-- One-level unfolding to avoid overlapping instances.
+instance (FliPprE arg exp, Repr arg exp t r, Defs.Defs exp) => Defs.Arg (E exp) (A arg a -> r) where
   letr f = Defs.letr $ fmap (first fromFunction) . f . toFunction
-
--- instance Defs.Convertible (E exp) (Defs.Lift a) (E exp a) where
---   fromDTypeVal (Defs.VT x) = x
---   toDTypeVal x = return $ Defs.VT x
-
--- instance (FliPprE arg exp, In a, Repr arg exp t r) => Defs.Convertible (E exp) (Defs.Lift (a ~> t)) (A arg a -> r) where
---   toDTypeVal = return . Defs.VT . fromFunction
---   fromDTypeVal (Defs.VT x) = toFunction x
-
--- instance Convertible (E exp) t r => Convertible (E exp) t (FinNE F.Z -> r) where
---   toDTypeVal x = toDTypeVal (x F.FZ)
---   fromDTypeVal n = const (fromDTypeVal n)
-
--- instance (Convertible (E exp) t r, Convertible (E exp) ts (FinNE n -> r)) => Convertible (E exp) (t :*: ts) (FinNE (F.S n) -> r) where
---   toDTypeVal x = VProd <$> toDTypeVal (x F.FZ) <*> toDTypeVal (\n -> x (F.FS n))
---   fromDTypeVal (VProd v0 h) = \x -> case x of
---     F.FZ -> fromDTypeVal v0
---     F.FS n -> fromDTypeVal h n
-
--- type family Prods t (n :: F.Nat) = r where
---   Prods t 'F.Z = t
---   Prods t ( 'F.S n) = t ** Prods t n
-
--- newtype ToDTypeVal exp r t m = ToDTypeVal {runToDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))}
-
--- newtype FromDTypeVal exp r t m = FromDTypeVal {runFromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r}
-
--- instance (Defs.Convertible (E exp) t r, F.SNatI m, ts ~ Prods t m) => Defs.Convertible (E exp) ts (FinNE m -> r) where
---   toDTypeVal :: (FinNE m -> r) -> Defs.DefM (E exp) (Defs.DTypeVal (E exp) (Prods t m))
---   toDTypeVal = runToDTypeVal $ F.induction f0 fstep
---     where
---       f0 = ToDTypeVal $ \f -> Defs.toDTypeVal (f F.FZ)
-
---       fstep :: forall k. F.SNatI k => ToDTypeVal exp r t k -> ToDTypeVal exp r t ( 'F.S k)
---       fstep p = ToDTypeVal $ \f -> Defs.VProd <$> Defs.toDTypeVal (f F.FZ) <*> runToDTypeVal p (f . F.FS)
-
---   fromDTypeVal :: Defs.DTypeVal (E exp) (Prods t m) -> FinNE m -> r
---   fromDTypeVal = runFromDTypeVal $ F.induction f0 fstep
---     where
---       f0 = FromDTypeVal $ \x _ -> Defs.fromDTypeVal x
---       fstep :: forall k. F.SNatI k => FromDTypeVal exp r t k -> FromDTypeVal exp r t ( 'F.S k)
---       fstep p = FromDTypeVal $ \(Defs.VProd v0 h) x -> case x of
---         F.FZ   -> Defs.fromDTypeVal v0
---         F.FS n -> runFromDTypeVal p h n
 
 -- | FinNE n represents {0,..,n} (NB: n is included)
 type FinNE n = F.Fin ('F.S n)
 
--- data Wit c where
---   Wit :: c => Wit c
-
--- newtype Wit' t n = Wit' (Wit (Defs.DefType (Prods t n)))
-
--- propDefTypeProds :: forall n t. (Defs.DefType t, F.SNatI n) => Proxy n -> Proxy t -> Wit (Defs.DefType (Prods t n))
--- propDefTypeProds _ _ = case F.induction @n f0 fstep of Wit' w -> w
---   where
---     f0 :: Wit' t 'F.Z
---     f0 = Wit' Wit
---     fstep :: forall k. Wit' t k -> Wit' t ( 'F.S k)
---     fstep (Wit' Wit) = Wit' Wit
-
--- reifySNat :: forall n r. (Integral n) => n -> (forall m. F.SNatI m => F.SNat m -> (forall t. Defs.DefType t => Proxy t -> Wit (Defs.DefType (Prods t m))) -> r) -> r
--- reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy k) -> k (F.snat @k) (\(_ :: Proxy t) -> propDefTypeProds @k Proxy (Proxy :: Proxy t))
-
 reifySNat :: forall n r. (Integral n) => n -> (forall m. (F.SNatI m) => F.SNat m -> r) -> r
 reifySNat n k = F.reify (fromIntegral n) $ \(_ :: Proxy m) -> k (F.snat :: F.SNat m)
-
--- where
---   makeWit :: forall n r. F.SNatI n => (forall a. DefType (Prods (T a) n) => Proxy a -> r) -> r
---   makeWit = case F.snat :: F.SNat n of
---     F.SZ -> k Proxy
---     F.SS -> makeWit k
-
--- -- | Knot-tying operator. To guarantee that we generate CFGs, every recursive function must be
--- --   defined via 'share'. Also, even for non-recursive function, 'share' ensures that its definition will be
--- --   shared instead of copied in parser construction. Thus, it is recommended that every function is defined
--- --   in the style of:
--- --
--- --   > func <- share $ arg $ \i -> ...
--- share :: FliPprD m arg exp => E exp t -> m (E exp t)
--- share e = E <$> fshare (unE e)
-
--- -- | 'local' enables us to define recursive functions in the body of other functions.
--- local :: FliPprD m arg exp => m (E exp t) -> E exp t
--- local m = E $ flocal (unE <$> m)
 
 -- | Unlike '(<>)' that allows spaces between concatenated elementes in parsing,
 --   'hardcat' does not allow such extra spaces in parsing.
@@ -602,6 +556,7 @@ newtype IName = IName Int deriving newtype (Num, Show, Enum)
 
 -- newtype Defs.PprExp (a :: FType) = Defs.PprExp {Defs.pprExp :: Prec -> State (RName, IName) D.Doc}
 
+{-# WARNING VarMFliPpr "to be removed" #-}
 newtype VarMFliPpr a = VarMFliPpr {runVarMFliPpr :: State (RName, IName) a}
   deriving newtype (Functor, Applicative, Monad, MonadState (RName, IName))
 
@@ -728,169 +683,3 @@ instance FliPprE (Const IName) (PrinterI ann) where
 
 instance D.Pretty (FliPpr t) where
   pretty (FliPpr m) = evalState (runVarMFliPpr $ Defs.pprExpN m 0) (0, 0)
-
--- type RName = Int
-
--- type VCount = Int
-
--- pprVName :: RName -> D.Doc
--- pprVName n
---   | n < length fancyNames = fromString [fancyNames !! n]
---   | otherwise = fromString ("x" ++ show n)
---   where
---     fancyNames = "xyzwsturabcdeijklmnpqv"
-
--- type Prec = Rational
-
--- data Printer s a
---   = Printer (VCount -> Prec -> PrinterM s Doc)
---   | Pointer (Ref s ())
-
--- Defs.pprExp ::inter s a -> VCount -> Prec -> PrinterM s Doc
--- Defs.pprExp (Pter f) vn k = f vn k
--- Defs.pprExp (Pter p) _ _ = return $ pprRef p
-
--- pprRef :: Ref s a -> Doc
--- pprRef ref = fromString ("ppr" ++ show (refID ref))
-
--- -- FIXME: The current implementation does not track the number of free variables.
-
--- newtype PrinterM s a = PrinterM {runPrinterM :: ReaderT [Ref s (M.Map (Ref s ()) (PrinterM s Doc))] (RefM s) a}
---   deriving (Functor, Applicative, Monad, MonadFix, MonadFail)
-
--- instance MonadRef s (PrinterM s) where
---   newRef a = PrinterM $ newRef a
---   readRef r = PrinterM $ readRef r
---   writeRef r a = PrinterM $ writeRef r a
-
---   newRawRef a = PrinterM $ newRawRef a
---   readRawRef r = PrinterM $ readRawRef r
---   writeRawRef r a = PrinterM $ writeRawRef r a
-
--- instance MonadReader [Ref s (M.Map (Ref s ()) (PrinterM s Doc))] (PrinterM s) where
---   ask = PrinterM $ ask
---   local f (PrinterM m) = PrinterM $ RM.local f m
-
--- toPrinter :: Doc -> Printer s a
--- toPrinter d = Printer $ \_ _ -> return d
-
--- -- | An instance for pretty-printing FliPpr expressions themselves (not for pretty-printing interpretation).
--- instance FliPprE (Printer s) (Printer s) where
---   farg f = Printer $ \vn k -> do
---     df <- Defs.pprExp (foPrinter $ pprVName vn)) (vn + 1) 0
---     return $ D.group $ D.nest 2 $ parensIf (k > 0) $ fromString "\\" <> pprVName vn <+> fromString "->" </> df
-
---   fapp f a = Printer $ \vn k -> do
---     df <- Defs.pprExp f 9
---     da <- Defs.pprExp a 10
---     return $ parensIf (k > 9) $ df <+> da
-
---   fcase a bs = Printer $ \vn k -> do
---     da <- Defs.pprExp a 10
---     ds <-
---       mapM
---         ( \(Branch (PartialBij s _ _) f) -> do
---             df <- Defs.pprExp (foPrinter $ pprVName vn)) (vn + 1) 0
---             return $ D.group $ D.nest 2 $ fromString s <+> fromString "$" <+> fromString "\\" <> pprVName vn <+> fromString "->" <+> df
---         )
---         bs
---     return $
---       parensIf (k > 9) $
---         D.group $
---           fromString "case_" <+> da
---             <+> fromString "[" <> D.align (foldDoc (\x y -> x <> fromString "," </> y) ds <> fromString "]")
-
---   funpair a f = Printer $ \vn k -> do
---     da <- Defs.pprExp a 10
---     let dx = pprVName vn
---     let dy = pprVName (vn + 1)
---     db <- Defs.pprExp (foPrinter dx) (toPrinter dy)) (vn + 2) 0
---     return $
---       parensIf (k > 0) $
---         D.align $
---           D.group $
---             fromString "let" <+> parens (dx <> fromString "," <+> dy) <+> fromString "=" <+> D.align da
---               </> fromString "in" <+> D.align db
-
---   fununit a e = Printer $ \vn k -> do
---     da <- Defs.pprExp a 10
---     de <- Defs.pprExp e 0
---     return $
---       parensIf (k > 0) $
---         D.align $
---           D.group $
---             fromString "let () =" <+> D.align da
---               </> fromString "in" <+> D.align de
-
---   ftext s = Printer $ \_ k ->
---     return $ parensIf (k > 9) $ fromString "text" <+> fromString (show s)
-
---   fcat a b = Printer $ \vn k -> do
---     da <- Defs.pprExp a 5
---     db <- Defs.pprExp b 5
---     return $ parensIf (k > 5) $ D.group $ da </> fromString "<#>" <+> db
-
---   fbchoice a b = Printer $ \vn k -> do
---     da <- Defs.pprExp a 4
---     db <- Defs.pprExp b 4
---     return $ parensIf (k > 4) $ D.group $ da </> fromString "<?" <+> db
-
---   fempty = toPrinter $ fromString "empty"
---   fline = toPrinter $ fromString "line"
---   flinebreak = toPrinter $ fromString "linebreak"
-
---   fspace = toPrinter $ fromString "space"
---   fspaces = toPrinter $ fromString "spaces"
-
---   fline' = toPrinter $ fromString "line'"
---   fnespaces' = toPrinter $ fromString "nespaces'"
-
---   fgroup a = Printer $ \vn k -> do
---     da <- Defs.pprExp a 10
---     return $ parensIf (k > 9) $ fromString "group" <+> da
-
---   falign a = Printer $ \vn k -> do
---     da <- Defs.pprExp a 10
---     return $ parensIf (k > 9) $ fromString "align" <+> da
-
---   fnest n a = Printer $ \vn k -> do
---     da <- Defs.pprExp a 10
---     return $ parensIf (k > 9) $ fromString "nest" <+> ppr n <+> da
-
--- -- | An instance for pretty-printing recursive defined FliPpr expressions.
--- instance FliPprD (PrinterM s) (Printer s) (Printer s) where
---   fshare e = do
---     let md = Defs.pprExp e
---     (tbRef : _) <- ask
---     r <- newRef $ ()
---     modifyRef tbRef (M.insert r md)
---     return $ Pointer $ r
-
---   flocal m = Printer $ \vn k -> do
---     tbRef <- newRef $ M.empty
---     d <- RM.local (tbRef :) $ m >>= \e -> Defs.pprExp e 0
---     list <- M.toList <$> readRef tbRef
---     defs <-
---       D.group . D.align . (fromString "rec" <+>)
---         . D.foldDoc (\x y -> x </> fromString "and" <+> y)
---         <$> mapM
---           ( \(ref, mdef) -> do
---               def <- mdef
---               return $ D.group $ D.align (pprRef ref <+> D.nest 2 (fromString "=" </> def))
---           )
---           list
---     return $
---       parensIf (k > 0) $
---         D.align $
---           fromString "let" <+> D.align defs
---             </> fromString "in" <+> d
-
--- instance D.Pretty (FliPpr t) where
---   pprPrec k (FliPpr m) = runRefM (pprFliPpr m k)
---     where
---       pprFliPpr :: PrinterM s (Printer s (t :: FType)) -> Prec -> RefM s Doc
---       pprFliPpr m k =
---         runReaderT (runPrinterM $ Defs.pprExp (fal m) 0 k) []
-
--- instance Show (FliPpr t) where
---   show = show . ppr

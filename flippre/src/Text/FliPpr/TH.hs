@@ -20,6 +20,7 @@ import           Text.FliPpr.Internal.Type
 import           Text.FliPpr.Pat              as Pat
 
 
+
 pattern ConP_compat :: TH.Name -> [TH.Pat] -> TH.Pat
 #if MIN_VERSION_template_haskell(2,18,0)
 pattern ConP_compat n ps <- TH.ConP n _ ps
@@ -55,6 +56,8 @@ mkUn n = do
       let bn = TH.nameBase cn
       fn <- makeUnName bn
       (t, e) <- unGen cn
+      -- t' <- [t| HasCallStack => $(pure t) |]
+      -- e' <- [| withFrozenCallStack $(pure e) |] 
       -- let sigd = TH.SigD fn t
       -- (sigd:) <$> [d| $(TH.varP fn) = $(return e) |]
       return [TH.SigD fn t, TH.ValD (TH.VarP fn) (TH.NormalB e) []]
@@ -62,11 +65,9 @@ mkUn n = do
         makeUnName :: String -> Q TH.Name
         makeUnName ":" = return $ TH.mkName "unCons"
         makeUnName "[]" = return $ TH.mkName "unNil"
-        makeUnName s | C.isUpper (head s) = return $ TH.mkName $ "un" ++ s
-        makeUnName s =
-          case [i | i <- 0 : [2 .. 5], s == TH.nameBase (TH.tupleDataName i)] of
-            j : _ -> return $ TH.mkName $ "unTuple" ++ show j
-            _ -> fail $ "mkUn does not support non-letter constructors in general: " ++ show n
+        makeUnName s | c:_ <- s, C.isUpper c = return $ TH.mkName $ "un" ++ s
+        makeUnName s | j:_ <-  [i | i <- 0 : [2 .. 5], s == TH.nameBase (TH.tupleDataName i)] = return $ TH.mkName $ "unTuple" ++ show j
+        makeUnName s = error $ "mkUn does not support non-letter constructors in general: " ++ show s 
 
 {- |
 Make an (injective) deconstructor from a constructor.
@@ -75,15 +76,16 @@ For example, we have:
 
 >>> :t $(un '(:))
 $(un '(:))
-  :: forall (arg :: * -> *) (exp :: FType -> *) a (r :: FType).
-     (FliPprE arg exp, Eq a) =>
-     (A arg a -> A arg [a] -> E exp r) -> Branch (A arg) (E exp) [a] r
+  :: FliPprE arg0 exp0 =>
+     (A arg0 a0 -> A arg0 [a0] -> E exp0 r0)
+     -> Branch (A arg0) (E exp0) [a0] r0
+
 
 >>> :t $(un 'Left)
 $(un 'Left)
-  :: forall (arg :: * -> *) (exp :: FType -> *) a (r :: FType) b.
-     (FliPprE arg exp, Eq a) =>
-     (A arg a -> E exp r) -> Branch (A arg) (E exp) (Either a b) r
+  :: FliPprE arg0 exp0 =>
+     (A arg0 a0 -> E exp0 r0)
+     -> Branch (A arg0) (E exp0) (Either a0 b0) r0
 -}
 un :: TH.Name -> Q TH.Exp
 un n = do
@@ -126,10 +128,11 @@ unGen cname = do
       let res = return res_
       let contTy = foldr (\a r -> [t|A $ar $(return a) -> $r|]) [t|E $exp $res|] argsTy
       let resultTy = [t|Branch (A $ar) (E $exp) $(return retTy) $res|]
-      let inCtxt t = do
-            cs <- mapM (\a -> [t|In $(return a)|]) argsTy
-            TH.ForallT [] cs <$> t
-      [t|FliPprE $ar $exp => $(inCtxt [t|$contTy -> $resultTy|])|]
+      -- let inCtxt t = do
+      --       cs <- mapM (\a -> [t|In $(return a)|]) argsTy
+      --       TH.ForallT [] cs <$> t
+      -- [t|FliPprE $ar $exp => $(inCtxt [t|$contTy -> $resultTy|])|]
+      [t| FliPprE $ar $exp => $contTy -> $resultTy |]
       where
         splitType :: TH.Type -> (TH.Type -> TH.Type, TH.Type)
         splitType (TH.ForallT tvs ctxt t) =

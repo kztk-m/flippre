@@ -35,20 +35,40 @@ common warnings
     if impl(ghc >= 8.10)
       ghc-options:       -Wunused-packages  
 
+    if impl(ghc >= 9.0) && impl(ghc < 9.3)
+      ghc-options:       -Wno-unticked-promoted-constructors
+
+    if impl(ghc >= 9.0)
+      ghc-options:   -Winvalid-haddock
+
+    if impl(ghc >= 9.2)
+      ghc-options:  
+        -Wredundant-bang-patterns
+        -Woperator-whitespace
+    if impl(ghc >= 9.4) 
+      ghc-options:  
+        -Wredundant-strictness-flags
+        -Wgadt-mono-local-binds
+
+    if impl(ghc >= 9.10.1) 
+      ghc-options: 
+         -Wbadly-staged-types
+
 library
   import: warnings
   hs-source-dirs:      src
   exposed-modules:     
     Text.FliPpr, 
     Text.FliPpr.Mfix, 
+    Text.FliPpr.QDo, 
     Text.FliPpr.Doc, 
     Text.FliPpr.TH, 
     Text.FliPpr.Internal.Type, 
     Text.FliPpr.Internal.HList, 
     Text.FliPpr.Internal.PrettyPrinting,
     Text.FliPpr.Internal.ParserGeneration,
-    Text.FliPpr.Internal.Env, 
-    Text.FliPpr.Internal.PartialEnv
+    -- Text.FliPpr.Internal.Env, 
+    -- Text.FliPpr.Internal.PartialEnv
     Text.FliPpr.Automaton 
     Text.FliPpr.Pat 
 
@@ -63,6 +83,7 @@ library
     th-abstraction >= 0.2 && < 0.8, 
     fin >= 0.1 && < 0.4,
     prettyprinter >= 1.7 && < 1.8, 
+    embedding-by-unembedding ^>= 0.8, 
     mutual-def-class, 
     flippre-backend-grammar 
     

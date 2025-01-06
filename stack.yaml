@@ -12,7 +12,9 @@ packages:
 # (e.g., acme-missiles-0.3)
 extra-deps: 
 - git: https://github.com/kztk-m/EbU.git
-  commit: 90c6ff890cca3d4836fa6c027aeb6f284f56ed84
+  commit: e8a40fda74d171f5fd61547e96edcd4800c724c6
+  subdirs:
+    - ebu 
 
 # Override default flag values for local packages and extra-deps
 flags: {}
