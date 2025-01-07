@@ -180,7 +180,7 @@ pprParamList pDeclarator pAbsDeclarator pDeclaratorSpecifierListNonEmpty = do
                 x
                 [ unPDeclarator $ \ds d -> pDeclaratorSpecifierListNonEmpty ds <+> pDeclarator d
                 , unPAbsDeclarator $ \ds d -> pDeclaratorSpecifierListNonEmpty ds <+> pAbsDeclarator d
-                -- , unPSpecifierOnly $ \ds -> pDeclaratorSpecifierListNonEmpty ds -- (makes the parser ambiguous)
+                , unPSpecifierOnly $ \ds -> pDeclaratorSpecifierListNonEmpty ds -- (makes the parser ambiguous)
                 ]
         pInnerList <- sepByNonEmpty (text "," <+>. text "") pParam
         pParamList <- share $ \x ->
@@ -220,7 +220,8 @@ pprTypes pCondExp = do
                 , unDSSpec pTypeSpec
                 , unDSQual pTypeQualifier
                 ]
-        pDeclarationSpecifierList <- sepBy space pDeclarationSpecifier
+        pDeclarationSpecifierSpace <- share $ \x -> pDeclarationSpecifier x <> space
+        pDeclarationSpecifierList <- sepBy (text "") pDeclarationSpecifierSpace
         pDeclarationSpecifierListNonEmpty <- sepByNonEmpty space pDeclarationSpecifier
         pSpecQual <- share $ \x ->
             case_

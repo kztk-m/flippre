@@ -9,7 +9,7 @@
 import Exp
 import Helper
 import Literals
-import Prettyprinter (Doc)
+import Prettyprinter (Doc, indent)
 import Text.FliPpr
 import Text.FliPpr.Grammar.Driver.Earley as E
 import TypeSpecifier
@@ -90,7 +90,7 @@ pprDeclaration ::
   FliPprM e (A a Declaration -> E e D)
 pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp = do
   rec pDeclaration <- share $ \x ->
-        case_ x [unDeclaration $ \d i -> pDeclarationSpecifierList d <+> pInitDeclList i <> text ";"]
+        case_ x [unDeclaration $ \d i -> pDeclarationSpecifierList d <> pInitDeclList i <> text ";"]
       pInitDecl <- share $ \x ->
         case_
           x
@@ -153,33 +153,33 @@ pprLabeledStatement ::
 pprLabeledStatement pCondExp pStatement = share $ \x ->
   case_
     x
-    [ unLStmtIdent $ \i s -> textAs i ident <> text ":" <+>. pStatement s -- TODO: spacing on this
-    , unLStmtCase $ \e s -> text "case" <+> pCondExp e <> text ":" <> line <> pStatement s -- TODO
-    , unLStmtDefault $ \s -> text "default" <> text ":" <+>. pStatement s
+    [ unLStmtIdent $ \i s -> (nest minBound (line' <> textAs i ident <> text ":")) <> pStatement s -- minBound because the label should be at the beginning of the line. kind of hacky?
+    , unLStmtCase $ \e s -> (nest (-4) (line' <> text "case" <+> pCondExp e <> text ":")) <> pStatement s
+    , unLStmtDefault $ \s -> (nest (-4) (line' <> text "default" <> text ":")) <> pStatement s
     ]
 
 pprCompoundStatement ::
   (FliPprD a e) =>
   (A a (NonEmpty Declaration) -> E e D) ->
   (A a [Statement] -> E e D) ->
-  FliPprM e (A a CompoundStatement -> E e D)
-pprCompoundStatement pDeclarationList pStatementList = share $ \x ->
-  case_
-    x
-    [ unCompoundStatement $ \d s ->
-        text "{"
-          <> nest
-            4
-            ( case_ d [unNothing $ text "", unJust $ \l -> line <> pDeclarationList l] <> line <> pStatementList s
-            )
-          <> line'
-          <> text "}"
-    ]
+  FliPprM e (Bool -> A a CompoundStatement -> E e D)
+pprCompoundStatement pDeclarationList pStatementList = do
+  return $ \withinSwitch x ->
+    case_
+      x
+      [ unCompoundStatement $ \d s ->
+          text "{"
+            <> nest
+              (if withinSwitch then 8 else 4)
+              ( case_ d [unNothing $ text "", unJust $ \l -> line' <> pDeclarationList l] <> pStatementList s
+              )
+              </>. text "}"
+      ]
 
 pprSelectionStatement ::
   (FliPprD a e) =>
   (A a Exp -> E e D) ->
-  (A a Statement -> E e D) ->
+  (Bool -> A a Statement -> E e D) ->
   FliPprM e (A a SelectionStatement -> E e D)
 pprSelectionStatement pExp pStatement = share $ \x ->
   case_
@@ -190,15 +190,15 @@ pprSelectionStatement pExp pStatement = share $ \x ->
           [ unNothing $
               text "if"
                 <+>. parens (pExp e)
-                <+>. pStatement s
+                <+>. pStatement False s
           , unJust $ \s' ->
               text "if"
                 <+>. parens (pExp e)
-                <+>. pStatement s
-                <+>. text "else"
-                <+> pStatement s'
+                <+>. pStatement False s
+                <+>. text "else" -- this inserts a superfluous space if the statement is not a compound statement. this is essentially the same issue as int*x and int *x; tokenization would make solving this easier
+                <+> pStatement False s'
           ]
-    , unSelStmtSwitch $ \e s -> text "switch" <+>. parens (pExp e) <+> pStatement s
+    , unSelStmtSwitch $ \e s -> text "switch" <+>. parens (pExp e) <+> pStatement True s
     ]
 
 pprIterationStatement ::
@@ -219,7 +219,7 @@ pprIterationStatement pStatement pExp = share $ \x ->
                 [ unNothing $ text ";"
                 , unJust $ \e -> pExp e <> text ";"
                 ]
-                <> case_
+                <+>. case_
                   i2
                   [ unNothing $ text ";"
                   , unJust $ \e -> pExp e <> text ";"
@@ -227,7 +227,7 @@ pprIterationStatement pStatement pExp = share $ \x ->
                 <> case_
                   i3
                   [ unNothing $ text ""
-                  , unJust $ \e -> pExp e
+                  , unJust $ \e -> space <> pExp e
                   ]
             )
           <+>. pStatement s
@@ -257,14 +257,28 @@ pprProgram = do
       (pTypeName, pDeclarator, pDeclarationSpecifierList, pDeclarationSpecifierListNonEmpty) <- pprTypes pCondExp
   rec pDeclaration <- pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp
       pDeclarationList <- sepByNonEmpty line pDeclaration
-      pFunDef <- pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDeclarationList
+      pFunDef <- pprFunDef (pCompoundStatement False) pDeclarator pDeclarationSpecifierListNonEmpty pDeclarationList
       -- statements
-      pStatement <- share $ \x ->
+      pStatement <- share $ \shouldIndent insertLineAfter withinSwitch x ->
         case_
           x
           [ unStmtLabeled pLabeledStatement
-          , unStmtCompound pCompoundStatement
-          , unStmtExp $ \e ->
+          , otherwiseP $ pStatementLineBefore shouldIndent insertLineAfter withinSwitch
+          ]
+      pStatementLineBefore <- share $ \shouldIndent insertLineAfter withinSwitch x ->
+        case_
+          x
+          [ unStmtCompound $ pCompoundStatement withinSwitch
+          , otherwiseP $ pStatement' shouldIndent insertLineAfter
+          ]
+      pStatement' <- share $ \shouldIndent insertLineAfter x ->
+        if shouldIndent
+          then nest 4 (line' <> pStatementInner x) <> (if insertLineAfter then line' else text "")
+          else line' <> pStatementInner x
+      pStatementInner <- share $ \x ->
+        case_
+          x
+          [ unStmtExp $ \e ->
               case_
                 e
                 [ unNothing $ text ";"
@@ -274,11 +288,11 @@ pprProgram = do
           , unStmtIter pIterationStatement
           , unStmtJump pJumpStatement
           ]
-      pStatementList <- list pStatement
-      pLabeledStatement <- pprLabeledStatement pCondExp pStatement
+      pStatementList <- sepBy (text "") (pStatement False False False)
+      pLabeledStatement <- pprLabeledStatement pCondExp (pStatement False False False)
       pCompoundStatement <- pprCompoundStatement pDeclarationList pStatementList
-      pSelectionStatement <- pprSelectionStatement pExp pStatement
-      pIterationStatement <- pprIterationStatement pStatement pExp
+      pSelectionStatement <- pprSelectionStatement pExp (pStatement True True)
+      pIterationStatement <- pprIterationStatement (pStatement True False False) pExp
       pJumpStatement <- pprJumpStatement pExp -- could technically be in the block above but is here for clarity
   pExternalDeclaration <- share $ \x ->
     case_
@@ -286,13 +300,15 @@ pprProgram = do
       [ unExtDecl $ \d -> pDeclaration d
       , unFunDef $ \f -> pFunDef f
       ]
-  list pExternalDeclaration
+  sepBy (line' <> line') pExternalDeclaration
 
 test :: String
-test = "void processArray(int *arr, int size) { int i, choice; int index; int value; printf(abc); printf(def); scanf(a, &choice); switch (choice) { case 1: printf(string); for (i = 1; i < 10; i++) { printf(string, *(arr + i)); } break; case 2: printf(string, size - 1); scanf(string, &index); if (index < 0 || index >= size) { printf(string); goto menu;  } scanf(string, &value); *(arr + index) = value; printf(string); break; case 3: printf(string); return; default: printf(string); goto menu;  } menu: processArray(arr, size); } int main() { int array[5] = {10, 20, 30, 40, 50} ; printf(welcome_string); while( x <= 2) { while(x >= 2 ) hello();} processArray(array, 5); do { test(); } while (x >= 0); return 0; }"
+test = "void processArray(int *arr, int size) { int i, choice; int index; int value; printf(abc); printf(def); if (a) b(); else c(); scanf(a, &choice); switch (choice) { case 1: printf(string); for (i = 1; i < 10; i++) { printf(string, *(arr + i)); label_2: some_function(); } break; case 2: printf(string, size - 1); scanf(string, &index); if (index < 0 || index >= size) { printf(string); goto menu;  } scanf(string, &value); *(arr + index) = value; printf(string); break; case 3: printf(string); return; default: printf(string); goto menu;  } menu: processArray(arr, size); } int main() { int array[5] = {10, 20, 30, 40, 50} ; printf(welcome_string);while( x <= 2) {while(x >= 2 ) hello();} processArray(array, 5); do { test(); } while (x >= 0); return 0; }"
 
 printProgram :: Program -> Doc ann
 printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
 
 parseProgram :: [Char] -> Err ann [Program]
 parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprProgram)
+
+testPrint = mapM_ putStrLn $ map (show . printProgram) $ (\(Ok x) -> x) $ parseProgram test

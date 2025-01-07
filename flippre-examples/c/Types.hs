@@ -63,7 +63,7 @@ data AbsDirectDeclarator
 data Param
     = PDeclarator (NonEmpty DeclarationSpecifier) Declarator
     | PAbsDeclarator (NonEmpty DeclarationSpecifier) AbsDeclarator
-    -- \| PSpecOnly (NonEmpty DeclarationSpecifier)
+    | PSpecifierOnly (NonEmpty DeclarationSpecifier)
     -- the existence of PSpecOnly makes the parser ambiguous! and I can't think of any case where it would be useful
     deriving (Show, Eq)
 
