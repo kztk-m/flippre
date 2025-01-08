@@ -179,7 +179,7 @@ pprCompoundStatement pDeclarationList pStatementList = do
 pprSelectionStatement ::
   (FliPprD a e) =>
   (A a Exp -> E e D) ->
-  (Bool -> A a Statement -> E e D) ->
+  (Bool -> Bool -> A a Statement -> E e D) ->
   FliPprM e (A a SelectionStatement -> E e D)
 pprSelectionStatement pExp pStatement = share $ \x ->
   case_
@@ -190,15 +190,15 @@ pprSelectionStatement pExp pStatement = share $ \x ->
           [ unNothing $
               text "if"
                 <+>. parens (pExp e)
-                <+>. pStatement False s
+                <+>. pStatement False False s
           , unJust $ \s' ->
               text "if"
                 <+>. parens (pExp e)
-                <+>. pStatement False s
-                <+>. text "else" -- this inserts a superfluous space if the statement is not a compound statement. this is essentially the same issue as int*x and int *x; tokenization would make solving this easier
-                <+> pStatement False s'
+                <+>. pStatement False True s -- insert space after compound statement
+                <> text "else"
+                  <+>. pStatement False False s'
           ]
-    , unSelStmtSwitch $ \e s -> text "switch" <+>. parens (pExp e) <+> pStatement True s
+    , unSelStmtSwitch $ \e s -> text "switch" <+>. parens (pExp e) <+> pStatement True False s
     ]
 
 pprIterationStatement ::
@@ -259,16 +259,16 @@ pprProgram = do
       pDeclarationList <- sepByNonEmpty line pDeclaration
       pFunDef <- pprFunDef (pCompoundStatement False) pDeclarator pDeclarationSpecifierListNonEmpty pDeclarationList
       -- statements
-      pStatement <- share $ \shouldIndent insertLineAfter withinSwitch x ->
+      pStatement <- share $ \shouldIndent insertLineAfter withinSwitch insertSpaceAfterCompound x ->
         case_
           x
           [ unStmtLabeled pLabeledStatement
-          , otherwiseP $ pStatementLineBefore shouldIndent insertLineAfter withinSwitch
+          , otherwiseP $ pStatementLineBefore shouldIndent insertLineAfter withinSwitch insertSpaceAfterCompound
           ]
-      pStatementLineBefore <- share $ \shouldIndent insertLineAfter withinSwitch x ->
+      pStatementLineBefore <- share $ \shouldIndent insertLineAfter withinSwitch insertSpaceAfterCompound x ->
         case_
           x
-          [ unStmtCompound $ pCompoundStatement withinSwitch
+          [ unStmtCompound $ (\x -> pCompoundStatement withinSwitch x <> if insertSpaceAfterCompound then text "" <+>. text "" else text "") -- add space if else comes next
           , otherwiseP $ pStatement' shouldIndent insertLineAfter
           ]
       pStatement' <- share $ \shouldIndent insertLineAfter x ->
@@ -288,11 +288,11 @@ pprProgram = do
           , unStmtIter pIterationStatement
           , unStmtJump pJumpStatement
           ]
-      pStatementList <- sepBy (text "") (pStatement False False False)
-      pLabeledStatement <- pprLabeledStatement pCondExp (pStatement False False False)
+      pStatementList <- sepBy (text "") (pStatement False False False False)
+      pLabeledStatement <- pprLabeledStatement pCondExp (pStatement False False False False)
       pCompoundStatement <- pprCompoundStatement pDeclarationList pStatementList
       pSelectionStatement <- pprSelectionStatement pExp (pStatement True True)
-      pIterationStatement <- pprIterationStatement (pStatement True False False) pExp
+      pIterationStatement <- pprIterationStatement (pStatement True False False False) pExp
       pJumpStatement <- pprJumpStatement pExp -- could technically be in the block above but is here for clarity
   pExternalDeclaration <- share $ \x ->
     case_
@@ -303,7 +303,7 @@ pprProgram = do
   sepBy (line' <> line') pExternalDeclaration
 
 test :: String
-test = "void processArray(int *arr, int size) { int i, choice; int index; int value; printf(abc); printf(def); if (a) b(); else c(); scanf(a, &choice); switch (choice) { case 1: printf(string); for (i = 1; i < 10; i++) { printf(string, *(arr + i)); label_2: some_function(); } break; case 2: printf(string, size - 1); scanf(string, &index); if (index < 0 || index >= size) { printf(string); goto menu;  } scanf(string, &value); *(arr + index) = value; printf(string); break; case 3: printf(string); return; default: printf(string); goto menu;  } menu: processArray(arr, size); } int main() { int array[5] = {10, 20, 30, 40, 50} ; printf(welcome_string);while( x <= 2) {while(x >= 2 ) hello();} processArray(array, 5); do { test(); } while (x >= 0); return 0; }"
+test = "void processArray(int *arr, int size) { int i, choice; int index; int value; char c = '\\''; if(a){a();} else{c();} printf(abc); printf(def); if (a) b(); else c(); scanf(\"ab \\\" c\", &choice); switch (choice) { case 1: printf(string); for (i = 1; i < 10; i++) { printf(string, *(arr + i)); label_2: some_function(); } break; case 2: printf(string, size - 1); scanf(string, &index); if (index < 0 || index >= size) { printf(string); goto menu;  } scanf(string, &value); *(arr + index) = value; printf(string); break; case 3: printf(string); return; default: printf(string); goto menu;  } menu: processArray(arr, size); } int main() { int array[5] = {10, 20, 30, 40, 50} ; printf(welcome_string);while( x <= 2) {while(x >= 2 ) hello();} processArray(array, 5); do { test(); } while (x >= 0); return 0; }"
 
 printProgram :: Program -> Doc ann
 printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
@@ -311,4 +311,7 @@ printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
 parseProgram :: [Char] -> Err ann [Program]
 parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprProgram)
 
-testPrint = mapM_ putStrLn $ map (show . printProgram) $ (\(Ok x) -> x) $ parseProgram test
+testPrint = do
+  let (Ok parsed) = parseProgram test
+  mapM_ putStrLn $ map (show . printProgram) $ parsed
+  putStrLn $ "Done, parsed " ++ show (length parsed) ++ " programs"

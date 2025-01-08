@@ -103,18 +103,28 @@ pprFloat = do
   where
     atof = Branch (PartialBij "atof" (Just . show) (Just . readFloat))
 
-data Literal = IntL IntLit | FloatL FloatLit -- TODO missing: Char, String
+data Literal = IntL IntLit | FloatL FloatLit | String String | Char String -- Char is a string in order to represent the specific escape sequence (in accordance with the grammar I am using)
     deriving (Show, Eq)
 
 $(mkUn ''Literal)
+
+stringContents :: AM.DFA Char
+stringContents = AM.star $ AM.union (AM.singleton '\\' <> AM.singleton '"') (AM.range ' ' '~')
+
+charContents :: AM.DFA Char
+charContents = AM.star $ AM.union (AM.singleton '\\' <> AM.singleton '\'') (AM.range ' ' '~')
 
 pprLit :: (FliPprD a e) => FliPprM e (A a Literal -> E e D)
 pprLit = do
     int <- pprInt
     float <- pprFloat
+    string <- share $ \x -> text "\"" <> textAs x stringContents <> text "\""
+    char <- share $ \x -> text "'" <> textAs x charContents <> text "'"
     return $ \x ->
         case_
             x
             [ unIntL int
             , unFloatL float
+            , unString string
+            , unChar char
             ]
