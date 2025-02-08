@@ -7,9 +7,9 @@
 {-# LANGUAGE TypeOperators #-}
 
 import Exp
+import GHC.Base (BCO)
 import Helper
-import Literals
-import Prettyprinter (Doc, indent)
+import Prettyprinter (Doc)
 import Text.FliPpr
 import Text.FliPpr.Grammar.Driver.Earley as E
 import TypeSpecifier
@@ -133,7 +133,7 @@ pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDecl
         [ unNothing $ pFunDef2 c
         , unJust $ \l -> pDeclarationList l <+> pFunDef2 c
         ]
-  pFunDef <- share $ \x ->
+  share $ \x ->
     case_
       x
       [ unFunctionDefinition $ \s d p c ->
@@ -143,7 +143,6 @@ pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDecl
             , unJust $ \l -> pDeclarationSpecifierListNonEmpty l <+> pFunDef1 d p c
             ]
       ]
-  return pFunDef
 
 pprLabeledStatement ::
   (FliPprD a e) =>
@@ -153,9 +152,15 @@ pprLabeledStatement ::
 pprLabeledStatement pCondExp pStatement = share $ \x ->
   case_
     x
-    [ unLStmtIdent $ \i s -> (nest minBound (line' <> textAs i ident <> text ":")) <> pStatement s -- minBound because the label should be at the beginning of the line. kind of hacky?
-    , unLStmtCase $ \e s -> (nest (-4) (line' <> text "case" <+> pCondExp e <> text ":")) <> pStatement s
-    , unLStmtDefault $ \s -> (nest (-4) (line' <> text "default" <> text ":")) <> pStatement s
+    [ unLStmtIdent $ \i s ->
+        nest minBound (line' <> textAs i ident <> text ":")
+          <> pStatement s -- minBound because the label should be at the beginning of the line. kind of hacky?
+    , unLStmtCase $ \e s ->
+        nest (-4) (line' <> text "case" <+> pCondExp e <> text ":")
+          <> pStatement s
+    , unLStmtDefault $ \s ->
+        nest (-4) (line' <> text "default" <> text ":")
+          <> pStatement s
     ]
 
 pprCompoundStatement ::
@@ -303,7 +308,7 @@ pprProgram = do
   sepBy (line' <> line') pExternalDeclaration
 
 test :: String
-test = "void processArray(int *arr, int size) { int i, choice; int index; int value; char c = '\\''; if(a){a();} else{c();} printf(abc); printf(def); if (a) b(); else c(); scanf(\"ab \\\" c\", &choice); switch (choice) { case 1: printf(string); for (i = 1; i < 10; i++) { printf(string, *(arr + i)); label_2: some_function(); } break; case 2: printf(string, size - 1); scanf(string, &index); if (index < 0 || index >= size) { printf(string); goto menu;  } scanf(string, &value); *(arr + index) = value; printf(string); break; case 3: printf(string); return; default: printf(string); goto menu;  } menu: processArray(arr, size); } int main() { int array[5] = {10, 20, 30, 40, 50} ; printf(welcome_string);while( x <= 2) {while(x >= 2 ) hello();} processArray(array, 5); do { test(); } while (x >= 0); return 0; }"
+test = "int main ( ) { callSomeFunction(); label: if (true) goto label; return 0; }"
 
 printProgram :: Program -> Doc ann
 printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
@@ -311,7 +316,9 @@ printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
 parseProgram :: [Char] -> Err ann [Program]
 parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprProgram)
 
+testPrint :: IO ()
 testPrint = do
   let (Ok parsed) = parseProgram test
-  mapM_ putStrLn $ map (show . printProgram) $ parsed
+  putStrLn $ "Parsed: " ++ show parsed
+  mapM_ (print . printProgram) parsed
   putStrLn $ "Done, parsed " ++ show (length parsed) ++ " programs"

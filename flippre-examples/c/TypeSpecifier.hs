@@ -3,14 +3,10 @@
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
 
 module TypeSpecifier where
 
-import Exp
 import Helper
-import Literals
 import Text.FliPpr
 import Types
 import Prelude

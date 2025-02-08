@@ -38,8 +38,8 @@ pprInt = do
     u <- share $ text "u" <? text "U"
     l <- share $ text "l" <? text "L"
     decInt <- share $ \x -> case_ x [atoi $ \s -> textAs s decimalNum]
-    hexInt <- share $ \x -> (text "0x" <? text "0X") <> case_ x [atoiHex $ \s -> textAs s hexNum]
-    octInt <- share $ \x -> text "0" <> case_ x [atoiOct $ \s -> textAs s octalNum]
+    hexInt <- share $ \x -> (text "0x" <? text "0X") <#> case_ x [atoiHex $ \s -> textAs s hexNum]
+    octInt <- share $ \x -> text "0" <#> case_ x [atoiOct $ \s -> textAs s octalNum]
     int <- share $ \x -> decInt x <? hexInt x <? octInt x
     return $ \x ->
         case_
@@ -109,10 +109,10 @@ data Literal = IntL IntLit | FloatL FloatLit | String String | Char String -- Ch
 $(mkUn ''Literal)
 
 stringContents :: AM.DFA Char
-stringContents = AM.star $ AM.union (AM.singleton '\\' <> AM.singleton '"') (AM.range ' ' '~')
+stringContents = AM.star $ AM.union (AM.singleton '\\' <> AM.singleton '"') (AM.difference (AM.range ' ' '~') (AM.singleton '"'))
 
 charContents :: AM.DFA Char
-charContents = AM.star $ AM.union (AM.singleton '\\' <> AM.singleton '\'') (AM.range ' ' '~')
+charContents = AM.star $ AM.union (AM.singleton '\\' <> AM.singleton '\'') (AM.difference (AM.range ' ' '~') (AM.singleton '\''))
 
 pprLit :: (FliPprD a e) => FliPprM e (A a Literal -> E e D)
 pprLit = do

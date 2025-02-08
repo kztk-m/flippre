@@ -40,12 +40,8 @@ space' = text " " <? text ""
 otherwiseP :: (arg b -> exp t) -> Branch arg exp b t
 otherwiseP = Branch (PartialBij "otherwiseP" Just Just)
 
-{-
-
-cautionary tale about being not linear
-
-list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
-list p = do
+badList :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+badList p = do
     rec list' <- share $ \xs ->
             case_
                 xs
@@ -59,6 +55,7 @@ list p = do
                 ]
     return list'
 
+{-
 sepBy :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepBy comma p = do
     rec commaSep' <- share $ \xs ->
