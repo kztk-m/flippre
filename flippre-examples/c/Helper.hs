@@ -24,6 +24,7 @@ import Data.String (fromString)
 import Literals (digit)
 import Text.FliPpr
 import qualified Text.FliPpr.Automaton as AM
+import Text.FliPpr.Grammar (Defs)
 import Prelude
 
 -- necessary for recursions within do blocks
@@ -40,48 +41,12 @@ space' = text " " <? text ""
 otherwiseP :: (arg b -> exp t) -> Branch arg exp b t
 otherwiseP = Branch (PartialBij "otherwiseP" Just Just)
 
-badList :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
-badList p = do
-    rec list' <- share $ \xs ->
-            case_
-                xs
-                [ unNil $ text ""
-                , unCons $ \t ts ->
-                    case_
-                        ts
-                        [ unNil $ p t
-                        , unCons $ \_ _ -> p t <+> list' ts
-                        ]
-                ]
-    return list'
-
-{-
-sepBy :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
-sepBy comma p = do
-    rec commaSep' <- share $ \xs ->
-            case_
-                xs
-                [ unCons $ \t ts ->
-                    case_
-                        ts
-                        [ unNil $ p t
-                        , unCons $ \_ _ -> p t <> text comma <+>. commaSep' ts
-                        ]
-                ]
-    return $ \xs ->
-        case_
-            xs
-            [ unNil $ text ""
-            , unCons $ \_ _ -> commaSep' xs
-            ]
--}
-
 data NonEmpty a = NCons a (NonEmpty a) | NNil a
     deriving (Show, Eq)
 
 $(mkUn ''NonEmpty)
 
-list :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+list :: (FliPprD a e) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 list p = do
     rec listNE <- share $ \t ts ->
             case_
@@ -97,7 +62,7 @@ list p = do
                 ]
     return list'
 
-inlineList :: (FliPprD a e, Eq v) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+inlineList :: (FliPprD a e) => (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 inlineList p = do
     rec listNE <- share $ \t ts ->
             case_
@@ -113,7 +78,7 @@ inlineList p = do
                 ]
     return list'
 
-sepBy :: (FliPprD a e, Eq v) => E e D -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
+sepBy :: (FliPprD a e) => E e D -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
 sepBy comma p = do
     rec commaSepNE <- share $ \x xs ->
             case_
@@ -128,7 +93,7 @@ sepBy comma p = do
             , unCons commaSepNE
             ]
 
-sepByNonEmpty :: (FliPprD a e, Eq v) => E e D -> (A a v -> E e D) -> FliPprM e (A a (NonEmpty v) -> E e D)
+sepByNonEmpty :: (FliPprD a e) => E e D -> (A a v -> E e D) -> FliPprM e (A a (NonEmpty v) -> E e D)
 sepByNonEmpty comma p = do
     rec commaSepNE <- share $ \x xs ->
             case_
@@ -185,45 +150,7 @@ ident =
     )
         `AM.difference` AM.unions (map fromString keywords)
 
-{-
-sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
-sepByClose comma p = do
-    rec commaSepNE <- share $ \x xs ->
-            case_
-                xs
-                [ unNil $ p x
-                , unCons $ \t ts -> p x <> text comma <> commaSepNE t ts
-                ]
-    return $ \xs ->
-        case_
-            xs
-            [ unCons commaSepNE
-            ]
--}
-{-
-sepByClose :: (FliPprD a e, Eq v) => String -> (A a v -> E e D) -> FliPprM e (A a [v] -> E e D)
-sepByClose comma p = do
-    rec commaSep' <- share $ \xs ->
-            case_
-                xs
-                [ unCons $ \t ts ->
-                    case_
-                        ts
-                        [ unNil $ p t
-                        , unCons $ \_ _ -> p t <> text comma <> commaSep' ts
-                        ]
-                ]
-    return $ \xs ->
-        case_
-            xs
-            [ unNil $ text ""
-            , unCons $ \_ _ -> commaSep' xs
-            ]
-            -}
-
--- TODO: space if necessary
-
--- manyParens :: (FliPprE arg exp, Defs exp) => E exp D -> E exp D
+manyParens :: (FliPprE arg exp, Defs exp) => E exp D -> E exp D
 manyParens d = local $ do
     rec m <- share $ d <? parens m
     return m
