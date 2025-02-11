@@ -314,7 +314,7 @@ printProgram :: Program -> Doc ann
 printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
 
 parseProgram :: [Char] -> Err ann [Program]
-parseProgram = E.parse $ parsingMode (flippr $ fromFunction <$> pprProgram)
+parseProgram = E.parse $ parsingModeWith (CommentSpec (Just "//") (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pprProgram)
 
 testPrint :: IO ()
 testPrint = do
