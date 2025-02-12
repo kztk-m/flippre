@@ -6,8 +6,16 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
+-- ANSI C Grammar example
+--
+-- Nils Oskar Nuernbergk, 2025
+--
+-- This implements an additional example that parses an ANSI C Grammar.
+-- Because of the lack of straightforward ways to implement greedy parsing,
+-- this ambiguously parses ++i as either +(+i) or ++i.
+-- Similarly, certain space-less declarators (like const*x) cannot be parsed.
+
 import Exp
-import GHC.Base (BCO)
 import Helper
 import Prettyprinter (Doc)
 import Text.FliPpr
