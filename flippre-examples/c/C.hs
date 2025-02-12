@@ -10,7 +10,9 @@
 --
 -- Nils Oskar Nuernbergk, 2025
 --
--- This implements an additional example that parses an ANSI C Grammar.
+-- This implements an additional example that parses an ANSI C Grammar:
+-- See https://www.lysator.liu.se/c/ANSI-C-grammar-y.html
+--
 -- Because of the lack of straightforward ways to implement greedy parsing,
 -- this ambiguously parses ++i as either +(+i) or ++i.
 -- Similarly, certain space-less declarators (like const*x) cannot be parsed.
