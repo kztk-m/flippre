@@ -12,7 +12,7 @@
 import Control.DeepSeq
 import System.CPUTime
 import Text.FliPpr
-import Text.FliPpr.Grammar.Driver.Earley as E (parse)
+import Text.FliPpr.Grammar.Driver.Earley as E
 import Prelude
 
 import Data.Word
@@ -87,10 +87,10 @@ pExp = flippr $ do
     lt10 :: (A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
     lt10 f = Branch (PartialBij "lt10" (\x -> if x < 10 then Just x else Nothing) Just) f
 
-  dm10 :: (FliPprE arg exp) => (A arg Int -> A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
-  dm10 f =
-    PartialBij "dm10" (\x -> if x < 10 then Nothing else Just (divMod x 10)) (\(d, r) -> Just (10 * d + r))
-      `Branch` \z -> unpair z f
+    dm10 :: (FliPprE arg exp) => (A arg Int -> A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
+    dm10 f =
+      PartialBij "dm10" (\x -> if x < 10 then Nothing else Just (divMod x 10)) (\(d, r) -> Just (10 * d + r))
+        `Branch` \z -> unpair z f
 
 pprExp :: Exp -> Doc ann
 pprExp = pprMode pExp
@@ -140,7 +140,7 @@ main = do
   rnf s3 `seq`
     countTime "Exp3" $
       parseExpP s3
- where
-  s1 = show $ pprExp exp1
-  s2 = show $ pprExp exp2
-  s3 = show $ pprExp exp3
+  where
+    s1 = show $ pprExp exp1
+    s2 = show $ pprExp exp2
+    s3 = show $ pprExp exp3

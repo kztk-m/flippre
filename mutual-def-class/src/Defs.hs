@@ -21,81 +21,80 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
-{- | A type class for mutually recursive definitions in finally-tagless DSLs.
-
-= Motivation
-
-When we implement DSLs, we sometimes do not want to use Haskell level
-recursions to represent recursions in a guest language. An example is
-context-free grammars, where recursive definitions should result in
-observable cycles so that we can use parsing algorithms. Similarly, we want
-to construct a graph.
-
-Having a function corresponds to @letrec@ seems not difficult. For example,
-given an expression type constructor @f@, we can easily give methods to
-define n-recursive definitions for each n.
-
-> letrec1 :: (f a -> f a) -> (f a -> f r) -> f r
-> letrec2 :: ((f a, f b) -> (f a, f b)) -> ((f a, f b) -> f r) -> f r
-> letrec3 :: ((f a, f b, f c) -> (f a, f b, c)) -> ((f a, f b, f c) -> f r) -> f r
-
-This suggests the following general interface
-
-> letrecN :: HList Proxy as -> (HList f as -> HList f as) -> (HList f as -> f r) -> f r
-
-Here, @HList f [a1,...,an]@ is isomorphic to @(f a1, ..., f an)@.
-
-However, in this representation, we need to be careful for @as@, i.e., the
-types of recursively defined functions. Also, we need to pattern match whole
-@HList f as@ at first or use de Bruijn indices to refer to
-recursively-defined variables. As a result, this representation makes it
-tedious to define recursive definitions step-by-step or add recursively-defined
-variables.
-
-For example of grammar-description DSL, we want to define copies on
-non-terminals for different precedence level to control over where parentheses
-are allowed. So, we want to convert
-
-> letrecWithPrec ::
->    Prec -- maximum precedence
->    -> ((Prec -> f a) -> (Prec -> f a))
->    -> ((Prec -> f a) -> f r)
->    -> f r
-
-into @letrecN@. Notice that this function takes the maximum precedence level in the first
-argument as we do not want to produce recursive definitions for each @Prec@, as @Prec@ is
-typicall a synonym for an integer type such @Int@. However, this dynamic nature makes it
-far from trivial to use @letrecN@ as we need to specify @as@ statically; we might address
-this by using existential types, but it would require nontrivial programming.
-
-= What This Module Provides
-
-This module is designed to address the issue, allowing us to define recursive definitions
-step-by-step. The basic interface is 'letr1' and 'local'.
-
-> letr1 :: (Defs f) => (f a -> DefM f (f a, r)) -> DefM f r
-> local :: (Defs f) => DefM f (f t) -> f t
-
-By this function, one can easily define the above mentioned function as below:
-
-> letrsP :: (Defs f) => Prec -> ((Prec -> f a) -> DefM f (Prec -> f a, r)) -> DefM f r
-> letrsP 0 h = snd <$> h (const $ error "letrsP: out of bounds")
-> letrsP k h = letr $ \fk -> letrs (k - 1) $ \f -> do
->  (f', r) <- h $ \x -> if x == k then fk else f x
-> return (f', (f' k, r))
->
-> letrecWithPrec maxPrec h hr = local $ letrsP maxPrec (\f -> pure (h f, hr f))
-
-All you have to do is to make your expression type an instance of 'Defs'.
-
-= Limitation
-
-Similar to the limitation of (parametric variants of) HOAS compared with the
-de Bruijn representation, this representation is not good at supporting
-semantics that refers to the whole recursive definitions. A remedy is to convert
-the representation to de Bruijn representations or others, e.g., by using Atkey's
-unembedding or similar.
--}
+-- | A type class for mutually recursive definitions in finally-tagless DSLs.
+--
+-- = Motivation
+--
+-- When we implement DSLs, we sometimes do not want to use Haskell level
+-- recursions to represent recursions in a guest language. An example is
+-- context-free grammars, where recursive definitions should result in
+-- observable cycles so that we can use parsing algorithms. Similarly, we want
+-- to construct a graph.
+--
+-- Having a function corresponds to @letrec@ seems not difficult. For example,
+-- given an expression type constructor @f@, we can easily give methods to
+-- define n-recursive definitions for each n.
+--
+-- > letrec1 :: (f a -> f a) -> (f a -> f r) -> f r
+-- > letrec2 :: ((f a, f b) -> (f a, f b)) -> ((f a, f b) -> f r) -> f r
+-- > letrec3 :: ((f a, f b, f c) -> (f a, f b, c)) -> ((f a, f b, f c) -> f r) -> f r
+--
+-- This suggests the following general interface
+--
+-- > letrecN :: HList Proxy as -> (HList f as -> HList f as) -> (HList f as -> f r) -> f r
+--
+-- Here, @HList f [a1,...,an]@ is isomorphic to @(f a1, ..., f an)@.
+--
+-- However, in this representation, we need to be careful for @as@, i.e., the
+-- types of recursively defined functions. Also, we need to pattern match whole
+-- @HList f as@ at first or use de Bruijn indices to refer to
+-- recursively-defined variables. As a result, this representation makes it
+-- tedious to define recursive definitions step-by-step or add recursively-defined
+-- variables.
+--
+-- For example of grammar-description DSL, we want to define copies on
+-- non-terminals for different precedence level to control over where parentheses
+-- are allowed. So, we want to convert
+--
+-- > letrecWithPrec ::
+-- >    Prec -- maximum precedence
+-- >    -> ((Prec -> f a) -> (Prec -> f a))
+-- >    -> ((Prec -> f a) -> f r)
+-- >    -> f r
+--
+-- into @letrecN@. Notice that this function takes the maximum precedence level in the first
+-- argument as we do not want to produce recursive definitions for each @Prec@, as @Prec@ is
+-- typicall a synonym for an integer type such @Int@. However, this dynamic nature makes it
+-- far from trivial to use @letrecN@ as we need to specify @as@ statically; we might address
+-- this by using existential types, but it would require nontrivial programming.
+--
+-- = What This Module Provides
+--
+-- This module is designed to address the issue, allowing us to define recursive definitions
+-- step-by-step. The basic interface is 'letr1' and 'local'.
+--
+-- > letr1 :: (Defs f) => (f a -> DefM f (f a, r)) -> DefM f r
+-- > local :: (Defs f) => DefM f (f t) -> f t
+--
+-- By this function, one can easily define the above mentioned function as below:
+--
+-- > letrsP :: (Defs f) => Prec -> ((Prec -> f a) -> DefM f (Prec -> f a, r)) -> DefM f r
+-- > letrsP 0 h = snd <$> h (const $ error "letrsP: out of bounds")
+-- > letrsP k h = letr $ \fk -> letrs (k - 1) $ \f -> do
+-- >  (f', r) <- h $ \x -> if x == k then fk else f x
+-- > return (f', (f' k, r))
+-- >
+-- > letrecWithPrec maxPrec h hr = local $ letrsP maxPrec (\f -> pure (h f, hr f))
+--
+-- All you have to do is to make your expression type an instance of 'Defs'.
+--
+-- = Limitation
+--
+-- Similar to the limitation of (parametric variants of) HOAS compared with the
+-- de Bruijn representation, this representation is not good at supporting
+-- semantics that refers to the whole recursive definitions. A remedy is to convert
+-- the representation to de Bruijn representations or others, e.g., by using Atkey's
+-- unembedding or similar.
 module Defs (
   -- * High-level I/F
   Defs (..),
@@ -151,18 +150,17 @@ import Prettyprinter as D
 
 import Internal.THUtil
 
-{- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
-
-@let rec x1 = e1 and x2 = e2 in e@ is represented by:
-
-@
-unliftD $ letrD $ \x1 -> letrD $ \x2 ->
-  consD e2 $ consD e1 $ liftD e
-@
-
-prop> unliftD (liftD e) == e
-prop> consD e (letrD $ \x -> consD ex r) == letrD $ \x -> consD ex (consD e r)
--}
+-- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
+--
+-- @let rec x1 = e1 and x2 = e2 in e@ is represented by:
+--
+-- @
+-- unliftD $ letrD $ \x1 -> letrD $ \x2 ->
+--   consD e2 $ consD e1 $ liftD e
+-- @
+--
+-- prop> unliftD (liftD e) == e
+-- prop> consD e (letrD $ \x -> consD ex r) == letrD $ \x -> consD ex (consD e r)
 class Defs (f :: k -> Type) where
   -- By kztk @ 2020-11-26
   -- We will use the following methods for recursive definitions
@@ -194,18 +192,18 @@ class Defs (f :: k -> Type) where
 
 letrec' :: (Defs f) => HList (Compose ((->) (HList f as)) f) as -> (HList f as -> f r) -> f r
 letrec' hs0 hr0 = local (snd <$> go id hs0 hr0)
- where
-  go ::
-    (Defs f) =>
-    (HList f as -> HList f as0) ->
-    HList (Compose ((->) (HList f as0)) f) as ->
-    (HList f as -> f r) ->
-    DefM f (HList f as, f r)
-  go _ HNil hr = pure (HNil, hr HNil)
-  go p (HCons h hs) hr = do
-    letr1 $ \x -> do
-      (xs, r) <- go (p . HCons x) hs (hr . HCons x)
-      pure (getCompose h (p $ HCons x xs), (HCons x xs, r))
+  where
+    go ::
+      (Defs f) =>
+      (HList f as -> HList f as0)
+      -> HList (Compose ((->) (HList f as0)) f) as
+      -> (HList f as -> f r)
+      -> DefM f (HList f as, f r)
+    go _ HNil hr = pure (HNil, hr HNil)
+    go p (HCons h hs) hr = do
+      letr1 $ \x -> do
+        (xs, r) <- go (p . HCons x) hs (hr . HCons x)
+        pure (getCompose h (p $ HCons x xs), (HCons x xs, r))
 
 letrec :: (Defs f) => HList Proxy as -> (HList f as -> (HList f as, f r)) -> f r
 letrec sh h = local $ letrecM sh (pure . h)
@@ -241,9 +239,8 @@ instance (NDefs f) => Defs (Norm f) where
   consD e d = FromND $ \k -> fromND d (k . HCons (unNorm e))
   letrD h = FromND $ \k -> letrN $ \a -> fromND (h $ Norm a) $ \(HCons ex r) -> HCons ex (k r)
 
-{- | A monad to give better programming I/F.
-  We intentionally did not make it an instance of 'MonadFix'.
--}
+-- | A monad to give better programming I/F.
+--   We intentionally did not make it an instance of 'MonadFix'.
 newtype DefM f a = DefM {unDefM :: forall as r. (a -> D f as r) -> D f as r}
 
 instance Functor (DefM exp) where
@@ -264,21 +261,20 @@ instance Monad (DefM exp) where
   m >>= f = DefM $ \k -> unDefM m $ \v -> unDefM (f v) k
   {-# INLINE (>>=) #-}
 
-{- | A basic building block for mutual recursion.
-
- To define a recursion, simply use this function.
-
- > letr $ \f ->
- >   def fdef $
- >   ... f ...
-
- To define mutual recursions, nest this function.
-
-> letr $ \f -> letr $ \g ->
->   def fdef >>>
->   def gdef $
->   ... f ... g ...
--}
+-- | A basic building block for mutual recursion.
+--
+--  To define a recursion, simply use this function.
+--
+--  > letr $ \f ->
+--  >   def fdef $
+--  >   ... f ...
+--
+--  To define mutual recursions, nest this function.
+--
+-- > letr $ \f -> letr $ \g ->
+-- >   def fdef >>>
+-- >   def gdef $
+-- >   ... f ... g ...
 letr1 :: (Defs f) => (f a -> DefM f (f a, r)) -> DefM f r
 letr1 h = DefM $ \k -> letrD $ \a -> unDefM (h a) $ \(b, r) -> consD b (k r)
 
@@ -297,14 +293,13 @@ someD d = local $ letr1 $ \m -> letr1 $ \s ->
 share :: (Defs f) => f a -> DefM f (f a)
 share s = DefM $ \k -> letrD $ \a -> consD s (k a)
 
-{- | Makes definions to be 'local'.
-
-For example, in the follownig code, the scope of shared computation is limited to @foo@; so using @foo@ twice copies @defa@.
-
-> foo = local $ do
->    a <- share defa
->     ...
--}
+-- | Makes definions to be 'local'.
+--
+-- For example, in the follownig code, the scope of shared computation is limited to @foo@; so using @foo@ twice copies @defa@.
+--
+-- > foo = local $ do
+-- >    a <- share defa
+-- >     ...
 local :: (Defs f) => DefM f (f t) -> f t
 local m = unliftD $ unDefM m liftD
 
@@ -346,15 +341,14 @@ def a = fmap (a,)
 --     arr :: (DTypeVal f (a ** b), r) -> (DTypeVal f a, (DTypeVal f b, r))
 --     arr (VCons a b, r) = (a, (b, r))
 
-{- | A class that provides a generalized version of 'letr'.
-Intuitively, @Arg f t@ means @t@ can be recursively defined
-in the EDSL @f@.
-
-Due to the restriction of Haskell type classes, no instance is provided
-for @Arg f (f a)@. Instead, we provide an instance @Arg f (Identity (f a))@.
-Use the instance via @DerivingVia@ to provide @Arg F (Identity (F a)@ for a
-concrete EDSL expression @F@.
--}
+-- | A class that provides a generalized version of 'letr'.
+-- Intuitively, @Arg f t@ means @t@ can be recursively defined
+-- in the EDSL @f@.
+--
+-- Due to the restriction of Haskell type classes, no instance is provided
+-- for @Arg f (f a)@. Instead, we provide an instance @Arg f (Identity (f a))@.
+-- Use the instance via @DerivingVia@ to provide @Arg F (Identity (F a)@ for a
+-- concrete EDSL expression @F@.
 class (Defs f) => Arg f t where
   letr :: (t -> DefM f (t, r)) -> DefM f r
 
@@ -408,7 +402,7 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (
     return ((b1, b2, b3), ((b4, b5, b6), r))
 
 -- Use template haskell to generate instances for n-tuples
-$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 22]])
+$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 15]])
 
 instance (Defs f) => Arg f (HList g '[]) where
   letr f = do
@@ -425,30 +419,28 @@ instance
       HCons (Identity v) vs ->
         pure (vs, (v, r))
 
-{- | @letrs [k1,...,kn] $ \f -> (def fdef r)@ to mean
-
-> letr $ \f1 -> letr $ \f2 -> ... letr $ \fn ->
->   def (fdef k1) >>> ... >>> def (fdef kn) $ do
->   let f k = fromJust $ lookup k [(k1,f1), ..., (kn,fn)]
->   r
--}
+-- | @letrs [k1,...,kn] $ \f -> (def fdef r)@ to mean
+--
+-- > letr $ \f1 -> letr $ \f2 -> ... letr $ \fn ->
+-- >   def (fdef k1) >>> ... >>> def (fdef kn) $ do
+-- >   let f k = fromJust $ lookup k [(k1,f1), ..., (kn,fn)]
+-- >   r
 letrs :: (Eq k, Arg f a) => [k] -> ((k -> a) -> DefM f (k -> a, r)) -> DefM f r
 letrs [] h = snd <$> h (const $ error "Defs.letrs: out of bounds")
 letrs (k : ks) h = letr $ \fk -> letrs ks $ \f -> do
   (f', r) <- h $ \x -> if x == k then fk else f x
   return (f', (f' k, r))
 
-{- | A newtype wrapper for Bounded types. A typical use is an instance declaration such as:
-
-> deriving via (FromBounded YourType -> a) instance (Arg f a) => Arg f (YourType -> a)
--}
+-- | A newtype wrapper for Bounded types. A typical use is an instance declaration such as:
+--
+-- > deriving via (FromBounded YourType -> a) instance (Arg f a) => Arg f (YourType -> a)
 newtype FromBounded b = FromBounded {getBounded :: b}
   deriving newtype (Eq, Ord, Enum, Bounded, Num, Real, Integral, Show)
 
 letrsB ::
   (Eq b, Enum b, Bounded b, Arg f a) =>
-  ((b -> a) -> DefM f (b -> a, r)) ->
-  DefM f r
+  ((b -> a) -> DefM f (b -> a, r))
+  -> DefM f r
 letrsB = letrs [minBound .. maxBound]
 
 instance (Eq b, Enum b, Bounded b, Arg f a) => Arg f (FromBounded b -> a) where
@@ -517,15 +509,15 @@ instance (VarM m) => NDefs (PprExp m ann) where
             [ "let" D.<+> D.align bs
             , "in" D.<+> dr
             ]
-   where
-    parensIf b = if b then D.parens else id
-    go :: [String] -> HList (PprExp m ann) as -> m [D.Doc ann]
-    go _ HNil = pure []
-    go (x : xs) (HCons e es) = do
-      de <- pprExp e 0
-      res <- go xs es
-      pure $ (fromString x D.<+> "=" D.<+> D.align de) : res
-    go _ _ = error "Unreachable"
+    where
+      parensIf b = if b then D.parens else id
+      go :: [String] -> HList (PprExp m ann) as -> m [D.Doc ann]
+      go _ HNil = pure []
+      go (x : xs) (HCons e es) = do
+        de <- pprExp e 0
+        res <- go xs es
+        pure $ (fromString x D.<+> "=" D.<+> D.align de) : res
+      go _ _ = error "Unreachable"
 
   localN d = PprExp $ \k ->
     pdefs d [] k
