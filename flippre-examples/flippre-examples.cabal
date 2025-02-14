@@ -81,9 +81,14 @@ executable simple-lang
     main-is:  SimpleLang.hs 
     build-depends: prettyprinter
 
+executable simple-fl 
+    import: warnings, deps
+    main-is: SimpleFL.hs
+    build-depends: prettyprinter
+
 executable c
     import: warnings, deps
     hs-source-dirs: c
-    main-is: c/C.hs
+    main-is: C.hs
     build-depends: prettyprinter
     other-modules: Helper, Literals, TypeSpecifier, Exp, Types
