@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -33,24 +34,27 @@ import Control.Arrow ((***))
 import Data.Maybe (fromJust, fromMaybe)
 import Debug.Trace (trace)
 import qualified Unembedding as Un
-import Unembedding.Env (Env (..), lookEnv)
+import Unembedding.Env (Env (..), lookEnv, mapEnv)
+import Unsafe.Coerce (unsafeCoerce)
 
 data Op0 = Space | Spaces | Line | LineBreak | Line' | NESpaces' | Text !String deriving stock Show
 data Op1 = Align | Group | Next !Int deriving stock Show
 data Op2 = Cat | BChoice deriving stock Show
 
 -- The laziness of the constructor arguments are intentional.
-data Exp v a where
-  Lam :: (Typeable b) => (v a -> Exp v b) -> Exp v (a ~> b)
-  App :: (Typeable a) => Exp v (a ~> b) -> v a -> Exp v b
-  Case :: v a -> [Branch v (Exp v) a t] -> Exp v t
-  UnPair :: v (a, b) -> (v a -> v b -> Exp v t) -> Exp v t
-  UnUnit :: v () -> Exp v a -> Exp v a
-  CharAs :: v Char -> RS.RSet Char -> Exp v D
-  Abort :: Exp v D
-  Op0 :: !Op0 -> Exp v D
-  Op1 :: !Op1 -> Exp v D -> Exp v D
-  Op2 :: !Op2 -> Exp v D -> Exp v D -> Exp v D
+data ExpH k1 k2 exp v a where
+  Lam :: (k1 b) => (v a -> exp v b) -> ExpH k1 k2 exp v (a ~> b)
+  App :: (k2 a) => exp v (a ~> b) -> v a -> ExpH k1 k2 exp v b
+  Case :: v a -> [Branch v (exp v) a t] -> ExpH k1 k2 exp v t
+  UnPair :: v (a, b) -> (v a -> v b -> exp v t) -> ExpH k1 k2 exp v t
+  UnUnit :: v () -> exp v a -> ExpH k1 k2 exp v a
+  CharAs :: v Char -> RS.RSet Char -> ExpH k1 k2 exp v D
+  Abort :: ExpH k1 k2 exp v D
+  Op0 :: !Op0 -> ExpH k1 k2 exp v D
+  Op1 :: !Op1 -> exp v D -> ExpH k1 k2 exp v D
+  Op2 :: !Op2 -> exp v D -> exp v D -> ExpH k1 k2 exp v D
+
+newtype Exp v a = Exp {unExp :: ExpH Typeable Typeable Exp v a}
 
 type Ix = G.Ix
 
@@ -153,7 +157,7 @@ annotate !e = Un.EnvI $ \sh -> AnnSem $ do
       Reader.lift $ modifyIORef' (memoRef refs) $ insertMemo key 1
       let wrap :: forall as0. ReaderT Refs IO (DExpH AnnDExp as0 a) -> AnnSem as0 a
           wrap = AnnSem . fmap (AnnDExp (StableExpName sn))
-      runAnnSem $ flip Un.runEnvI sh $ case e of
+      runAnnSem $ flip Un.runEnvI sh $ case unExp e of
         Abort ->
           Un.liftFO0 $ wrap (pure DAbort)
         Op0 op ->
@@ -251,7 +255,7 @@ data NExp ename name a where
   NCase :: name a -> [NBranch ename name a t] -> NExp ename name t
   NUnPair :: name (a, b) -> name a -> name b -> NExp ename name t -> NExp ename name t
   NUnUnit :: name () -> NExp ename name t -> NExp ename name t
-  NCharAs :: name Char -> RS.RSet Char -> NExp ename name c
+  NCharAs :: name Char -> RS.RSet Char -> NExp ename name D
   NAbort :: NExp ename name D
   NOp0 :: !Op0 -> NExp ename name D
   NOp1 :: !Op1 -> NExp ename name D -> NExp ename name D
@@ -265,6 +269,14 @@ deriving stock instance
 
 data DefPair ename name where
   NDefPair :: ename a -> NExp ename name a -> DefPair ename name
+
+splitDefs ::
+  [DefPair ename name]
+  -> (forall as. Env ename as -> Env (NExp ename name) as -> r)
+  -> r
+splitDefs [] k = k ENil ENil
+splitDefs (NDefPair x e : defs) k =
+  splitDefs defs $ \xs es -> k (x :. xs) (e :. es)
 
 deriving stock instance
   (forall x. Show (ename x), forall x. Show (name x)) =>
@@ -361,6 +373,117 @@ nameTerm memo (AnnDExp sn@(StableExpName _) e) names lenNames =
       let nn = IxName lenNames
           (ne, bmap, counter) = nameTerm memo ae (nn :. names) (lenNames + 1)
       in  (NBranch pij nn ne, bmap, counter)
+
+type family FName (v :: Type -> Type) :: FType -> Type
+
+class NoConstraint (a :: k)
+instance NoConstraint a
+
+data CoreExp v a
+  = CVar (FName v a)
+  | CLocal (CoreDef v '[] a)
+  | CExp (ExpH NoConstraint NoConstraint CoreExp v a)
+
+data CoreDef v as r where
+  CoreRet :: CoreExp v r -> CoreDef v '[] r
+  CoreCons :: CoreExp v a -> CoreDef v as r -> CoreDef v (a : as) r
+  CoreLetr :: (FName v a -> CoreDef v (a : as) r) -> CoreDef v as r
+
+instance G.Defs (CoreExp v) where
+  newtype D (CoreExp v) as r = DCoreExp {unDCoreExp :: CoreDef v as r}
+  liftD = DCoreExp . CoreRet
+  consD e (DCoreExp ds) = DCoreExp $ CoreCons e ds
+  unliftD (DCoreExp ds) = CLocal ds
+  letrD h = DCoreExp $ CoreLetr (unDCoreExp . h . CVar)
+
+letrec :: (G.Defs f) => Env proxy as -> (Env f as -> (Env f as, f r)) -> f r
+letrec sh h = G.local $ letrecM sh (pure . h)
+
+letrecM :: (G.Defs f) => Env proxy as -> (Env f as -> G.DefM f (Env f as, res)) -> G.DefM f res
+letrecM ENil h = snd <$> h ENil
+letrecM (ECons _ sh) h =
+  G.letr1 $ \x -> letrecM sh $ \xs -> do
+    (vvs, r) <- h (ECons x xs)
+    case vvs of
+      ECons v vs -> pure (vs, (v, r))
+
+data SomeIxName where
+  SomeIxName :: IxName a -> SomeIxName
+
+instance Eq SomeIxName where
+  (SomeIxName (IxName n)) == (SomeIxName (IxName m)) = n == m
+instance Hashable SomeIxName where
+  hashWithSalt salt (SomeIxName (IxName n)) = salt `xor` n
+
+data SomeIVar v where
+  SomeIVar :: v a -> SomeIVar v
+
+type IxMap v = H.HashMap SomeIxName (SomeIVar v)
+
+data SomeCoreExp v where
+  SomeCoreExp :: (Typeable a) => CoreExp v a -> SomeCoreExp v
+
+type SnMap v = H.HashMap Sn (SomeCoreExp v)
+
+lookupSnMap :: StableExpName a -> SnMap v -> Maybe (CoreExp v a)
+lookupSnMap (StableExpName k) oMap =
+  case H.lookup (Sn k) oMap of
+    Just (SomeCoreExp res) -> gcast res
+    Nothing -> Nothing
+
+insertSnMap :: StableExpName a -> CoreExp v a -> SnMap v -> SnMap v
+insertSnMap (StableExpName n) e = H.insert (Sn n) (SomeCoreExp e)
+
+lookupIxMap :: IxName a -> IxMap v -> Maybe (v a)
+lookupIxMap n iMap =
+  case H.lookup (SomeIxName n) iMap of
+    Just (SomeIVar x) -> Just $ unsafeCoerce x
+    Nothing -> Nothing
+
+insertIxMap :: IxName a -> v a -> IxMap v -> IxMap v
+insertIxMap n x = H.insert (SomeIxName n) (SomeIVar x)
+
+unname :: forall a v. NExp StableExpName IxName a -> IxMap v -> SnMap v -> CoreExp v a
+unname e0 iMap oMap = case e0 of
+  NVar f -> lookupSnMap' f
+  NLam x e -> CExp (Lam $ \xx -> unname e (insertIxMap x xx iMap) oMap)
+  NApp e1 e2 -> CExp $ App (unname e1 iMap oMap) (lookupIxMap' e2)
+  NUnPair x x1 x2 e -> CExp $ UnPair (lookupIxMap' x) $ \xx1 xx2 ->
+    unname e (insertIxMap x1 xx1 $ insertIxMap x2 xx2 iMap) oMap
+  NUnUnit x e -> CExp $ UnUnit (lookupIxMap' x) (unname e iMap oMap)
+  NCharAs x s -> CExp $ CharAs (lookupIxMap' x) s
+  NCase x brs -> CExp $
+    Case (lookupIxMap' x) $
+      flip map brs $
+        \(NBranch pij y e) ->
+          Branch pij (\yy -> unname e (insertIxMap y yy iMap) oMap)
+  NAbort -> CExp Abort
+  NOp0 op -> CExp (Op0 op)
+  NOp1 op e -> CExp $ Op1 op (unname e iMap oMap)
+  NOp2 op e1 e2 -> CExp $ Op2 op (unname e1 iMap oMap) (unname e2 iMap oMap)
+  NLetRec ds e -> splitDefs ds $ \xs es ->
+    letrec
+      xs
+      ( \xxs ->
+          let oMap' = extendMap xs xxs oMap
+          in  (Unembedding.Env.mapEnv (\y -> unname y iMap oMap') es, unname e iMap oMap')
+      )
+      -- let go [] im =
+      -- G.local $ go ds iMap
+  where
+    extendMap :: Env StableExpName as -> Env (CoreExp v) as -> SnMap v -> SnMap v
+    extendMap ENil ENil m = m
+    extendMap (x :. xs) (e :. es) m = extendMap xs es (insertSnMap x e m)
+
+    lookupSnMap' :: StableExpName x -> CoreExp v x
+    lookupSnMap' x = case lookupSnMap x oMap of
+      Just r -> r
+      Nothing -> error "unname: IMPOSSIBLE: Unreferenced variable found."
+
+    lookupIxMap' :: IxName x -> v x
+    lookupIxMap' x = case lookupIxMap x iMap of
+      Just r -> r
+      Nothing -> error $ "unname: open expression detected." ++ show e0
 
 class Memoizable a where
   -- | *First-order* (non-function) datatype to store each computation result
