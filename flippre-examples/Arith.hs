@@ -11,7 +11,7 @@
 
 import Control.DeepSeq
 import System.CPUTime
-import Text.FliPpr
+import Text.FliPpr hiding (Exp)
 import Text.FliPpr.Grammar.Driver.Earley as E
 import Prelude
 
@@ -38,7 +38,7 @@ data Exp
 
 $(mkUn ''Exp)
 
-pExp :: FliPpr (Exp ~> D)
+pExp :: FliPpr Explicit (Exp ~> D)
 pExp = flippr $ do
   let addD x y = align $ group (x </>. text "+" <+>. y)
   let mulD x y = x <+>. text "*" <+>. align y
@@ -49,7 +49,7 @@ pExp = flippr $ do
         rec m <- share $ d <? parens m
         return m
 
-  rec pprDigit <- define $ \x ->
+  rec pprDigit <- share $ \x ->
         case_
           x
           [ is 0 $ text "0"
@@ -64,14 +64,14 @@ pExp = flippr $ do
           , is 9 $ text "9"
           ]
 
-  rec pprNum <- define $ \x ->
+  rec pprNum <- share $ \x ->
         case_
           x
           [ lt10 $ \xx -> pprDigit xx
           , dm10 $ \d r -> pprNum d <#> pprDigit r
           ]
 
-  rec ppr <- define $ \k x ->
+  rec ppr <- share $ \k x ->
         manyParens $
           case_
             x
@@ -84,10 +84,8 @@ pExp = flippr $ do
 
   return $ fromFunction (ppr (0 :: Word8))
   where
-    lt10 :: (A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
-    lt10 f = Branch (PartialBij "lt10" (\x -> if x < 10 then Just x else Nothing) Just) f
+    lt10 = Branch (PartialBij "lt10" (\x -> if x < 10 then Just x else Nothing) Just)
 
-    dm10 :: (FliPprE arg exp) => (A arg Int -> A arg Int -> E exp r) -> Branch (A arg) (E exp) Int r
     dm10 f =
       PartialBij "dm10" (\x -> if x < 10 then Nothing else Just (divMod x 10)) (\(d, r) -> Just (10 * d + r))
         `Branch` \z -> unpair z f

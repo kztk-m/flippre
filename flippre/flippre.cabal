@@ -67,6 +67,7 @@ library
   exposed-modules:
     -- Text.FliPpr.Internal.Env,
     -- Text.FliPpr.Internal.PartialEnv
+    -- Text.FliPpr.Internal.Type
     Text.FliPpr
     Text.FliPpr.Automaton
     Text.FliPpr.Doc
@@ -76,9 +77,10 @@ library
     Text.FliPpr.Internal.ParserGeneration
     Text.FliPpr.Internal.PrettyPrinting
     Text.FliPpr.Internal.ReifySharing
-    Text.FliPpr.Internal.Type
+    Text.FliPpr.Internal.THCompat
     Text.FliPpr.Mfix
     Text.FliPpr.Pat
+    Text.FliPpr.Primitive
     Text.FliPpr.QDo
     Text.FliPpr.TH
 

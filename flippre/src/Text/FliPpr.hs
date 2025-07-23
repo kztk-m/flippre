@@ -11,15 +11,14 @@
 
 module Text.FliPpr (
   -- * Types
-  A,
-  E,
-  FliPprE,
-  FliPprD,
   FliPpr,
   FliPprM,
+  Exp,
+  In,
   Branch (..),
   PartialBij (..),
   Err (..),
+  Phase (..),
 
   -- * Syntax
 
@@ -45,13 +44,12 @@ module Text.FliPpr (
   unpair,
   ununit,
 
-  -- ** knot-tying
+  -- ** recursive definition primitives
   share,
   local,
   mfixF,
   letrs,
   def,
-  Arg (..),
 
   -- ** Pretty-Printing Combinators and Datatypes
   spaces,
@@ -69,10 +67,8 @@ module Text.FliPpr (
   foldPprLShared,
 
   -- ** Easy Definition
-  define,
   Repr (..),
-  --    defineR,
-  -- defines,
+  Arg (..),
 
   -- ** Pattern-like expressions
   module Text.FliPpr.Pat,
@@ -93,7 +89,6 @@ module Text.FliPpr (
   unTuple3,
 
   -- * Finite natural numbers (mostly, imported from "fin")
-  FinNE,
   F.Fin (..),
   F.SNat (..),
   F.SNatI (..),
@@ -107,7 +102,6 @@ module Text.FliPpr (
   F.Nat7,
   F.Nat8,
   F.Nat9,
-  reifySNat,
 
   -- * Evaluator
   pprMode,
@@ -134,29 +128,32 @@ where
 import qualified Data.Fin as F
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
+import qualified Data.RangeSet.List as RS
 import qualified Data.Set as S
 import qualified Data.Type.Nat as F
+
+import GHC.Stack (HasCallStack, withFrozenCallStack)
+
 import Text.FliPpr.Doc
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Err
 import Text.FliPpr.Internal.ParserGeneration
 import Text.FliPpr.Internal.PrettyPrinting
-import Text.FliPpr.Internal.Type
 import Text.FliPpr.Pat
+import Text.FliPpr.Primitive
 import Text.FliPpr.TH
 
-import qualified Data.RangeSet.List as RS
-import GHC.Stack (HasCallStack, withFrozenCallStack)
+import qualified Defs
 import Text.FliPpr.Automaton as A
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
 --   it behaves as '<>'.
-(<+>.) :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
+(<+>.) :: Exp s v D -> Exp s v D -> Exp s v D
 x <+>. y = x <#> nespaces' <#> y
 
 -- | In pretty-printing, '</>.' behaves as '</>', but in parser construction,
 --   it behaves as '<>'.
-(</>.) :: (FliPprE arg exp) => E exp D -> E exp D -> E exp D
+(</>.) :: Exp s v D -> Exp s v D -> Exp s v D
 x </>. y = x <#> line' <#> y
 
 infixr 4 <+>.
@@ -212,7 +209,8 @@ infixr 4 </>.
 -- This will be used with 'case_' as:
 --
 -- > case_ x [ is '0' ..., is '1' ... , ... ]
-is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) c r
+-- is :: (FliPprE arg exp, Eq c, Show c) => c -> E exp r -> Branch (A arg) (E exp) c r
+is :: (Show a, Eq a) => a -> Exp s v t -> Branch (In v) (Exp s v) a t
 is c f =
   PartialBij
     ("is " ++ show c)
@@ -221,7 +219,8 @@ is c f =
     `Branch` (`ununit` f)
 
 -- | @isMember cs f@ is a branch for the case where the input belongs to the set @cs@.
-isMember :: (Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
+-- isMember :: (Show c, Ord c) => RS.RSet c -> (A arg c -> E exp r) -> Branch (A arg) (E exp) c r
+isMember :: (Show a, Ord a) => RS.RSet a -> (In v a -> Exp s v t) -> Branch (In v) (Exp s v) a t
 isMember cs f =
   PartialBij
     ("isMember " ++ show cs)
@@ -230,14 +229,9 @@ isMember cs f =
     `Branch` f
 
 -- Converts an input by using a bijection.
-convertInput :: (FliPprE arg exp) => PartialBij a b -> A arg a -> (A arg b -> E exp r) -> E exp r
+--  convertInput :: (FliPprE arg exp) => PartialBij a b -> A arg a -> (A arg b -> E exp r) -> E exp r
+convertInput :: PartialBij a b -> In v a -> (In v b -> Exp s v r) -> Exp s v r
 convertInput pij a r = case_ a [pij `Branch` r]
-
--- |
--- A synonym of 'share' (remains for backward compatibility)
-{-# WARNING define "to be removed" #-}
-define :: (Arg (E f) r) => r -> FliPprM f r
-define = share
 
 -- | Precedence. An operator with a higher precedence binds more tighter.
 type Prec = Int
@@ -286,10 +280,10 @@ $(mkUn ''(,,))
 
 -- | @textAs x r@ serves as @text x@ in pretty-printing, but
 -- in parsing it serves as @r@ of which parsing result is used to update @x$.
-textAs :: (FliPprD arg exp, HasCallStack) => A arg String -> A.DFA Char -> E exp D
+textAs :: (HasCallStack) => In v [Char] -> A.DFA Char -> Exp s v D
 textAs a m = withFrozenCallStack (textAs' m a)
 
-textAs' :: (FliPprD arg exp, HasCallStack) => A.DFA Char -> A arg [Char] -> E exp D
+textAs' :: (HasCallStack) => A.DFA Char -> In v [Char] -> Exp s v D
 textAs' (A.DFAImpl i qs fs tr) = local $
   letrs (S.toList qs) $ \f ->
     def
@@ -309,7 +303,7 @@ textAs' (A.DFAImpl i qs fs tr) = local $
 -- In FliPpr, one can only define recursive printers that can be interpreted as context-free grammars.
 -- By returning lists depending the input AST, we can do anything with lists---in particular, we can
 -- define different printers for different indices. This is beyond context-free.
-foldPpr :: (FliPprD arg exp) => (A arg i -> E exp D -> E exp D) -> E exp D -> A arg [i] -> E exp D
+foldPpr :: (In v a -> Exp s v t -> Exp s v t) -> Exp s v t -> In v [a] -> Exp s v t
 foldPpr c n = local $ foldPprShared c n
 
 -- | If 'foldPpr' is used with the same arguments more than once, the following version
@@ -317,13 +311,9 @@ foldPpr c n = local $ foldPprShared c n
 --
 --  > do p <- foldPprShared (...) (...)
 --  >    ... p xs ... p ys ...
-foldPprShared ::
-  (FliPprD arg exp) =>
-  (A arg i -> E exp D -> E exp D)
-  -> E exp D
-  -> FliPprM exp (A arg [i] -> E exp D)
+foldPprShared :: (In v a -> Exp s v t -> Exp s v t) -> Exp s v t -> FliPprM s v (In v [a] -> Exp s v t)
 foldPprShared c n =
-  letr $ \f ->
+  Defs.letr $ \f ->
     def
       ( arg $ \es0 ->
           case_
@@ -338,20 +328,15 @@ foldPprShared c n =
 --
 -- For example, the following prints lists separated by commas
 -- > foldPprL (\a d -> pprElem a <> text "," <+>. d) pprElem (text "")
-foldPprL :: (FliPprD arg exp) => (A arg i -> E exp D -> E exp D) -> (A arg i -> E exp D) -> E exp D -> A arg [i] -> E exp D
+foldPprL :: (In v a -> Exp s v t -> Exp s v t) -> (In v a -> Exp s v t) -> Exp s v t -> In v [a] -> Exp s v t
 foldPprL c s n = local $ foldPprLShared c s n
 
 -- | If 'foldPprL' is used with the same arguments more than once, the following version
 --   is more efficient.
-foldPprLShared ::
-  (FliPprD arg exp) =>
-  (A arg i -> E exp D -> E exp D)
-  -> (A arg i -> E exp D)
-  -> E exp D
-  -> FliPprM exp (A arg [i] -> E exp D)
+foldPprLShared :: (In v a -> Exp s v t -> Exp s v t) -> (In v a -> Exp s v t) -> Exp s v t -> FliPprM s v (In v [a] -> Exp s v t)
 foldPprLShared c s n =
-  letr $ \f ->
-    letr $ \g ->
+  Defs.letr $ \f ->
+    Defs.letr $ \g ->
       def
         ( arg $ \es0 ->
             case_

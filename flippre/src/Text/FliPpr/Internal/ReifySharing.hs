@@ -2,6 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PolyKinds #-}
@@ -32,6 +33,7 @@ import Control.Monad.Writer (Writer)
 import qualified Control.Monad.Writer as Writer
 import Data.Maybe (fromMaybe)
 import qualified Defs as D
+import GHC.Stack (CallStack)
 import System.IO.Unsafe (unsafePerformIO)
 import Unembedding.Env
 import Unsafe.Coerce (unsafeCoerce)
@@ -52,16 +54,20 @@ fromImplicit e = unsafePerformIO $ do
 
 data StableExpName a where
   StableExpName ::
-    {getStableName :: StableName (Exp Implicit VName a)}
+    {getStableName :: StableName (Exp Implicit Name a)}
     -> StableExpName a
   deriving stock Eq
 
 instance Show (StableExpName a) where
   show (StableExpName x) = "@" ++ show (hashStableName x)
 
+-- Abstract label to specify named interpretation.
+data Name
+
 -- A phantom type for variable names
-newtype VName a = VName Int
-instance Show (VName a) where
+newtype instance In Name a = VName Int
+type VName = In Name
+instance Show (In Name a) where
   show (VName i) = "#" ++ show i
 
 data FName a where
@@ -73,7 +79,7 @@ instance Show (FName a) where
   show (FName i) = "%" ++ show i
   show (SName a) = show a
 
-type instance FVar VName = FName
+type instance FVar Name = FName
 
 data SomeStableExpName where
   SomeStableExpName :: StableExpName a -> SomeStableExpName
@@ -100,8 +106,8 @@ instance (forall x. Show (nexp x)) => Show (NBranch nexp a t) where
 data NExpH nexp (def :: [FType] -> FType -> Type) a where
   NLam :: !(VName a) -> !(nexp b) -> NExpH nexp def (a ~> b)
   NApp :: !(nexp (a ~> b)) -> !(VName a) -> NExpH nexp def b
-  NCase :: !(VName a) -> [NBranch nexp a t] -> NExpH nexp def t
-  NUnPair :: !(VName (a, b)) -> !(VName a) -> !(VName b) -> !(nexp t) -> NExpH nexp def t
+  NCase :: CallStack -> !(VName a) -> [NBranch nexp a t] -> NExpH nexp def t
+  NUnPair :: CallStack -> !(VName (a, b)) -> !(VName a) -> !(VName b) -> !(nexp t) -> NExpH nexp def t
   NUnUnit :: !(VName ()) -> !(nexp t) -> NExpH nexp def t
   NCharAs :: !(VName Char) -> !(RS.RSet Char) -> NExpH nexp def D
   NOp0 :: !NullaryOp -> NExpH nexp def D
@@ -159,7 +165,7 @@ incFNameLevel k conf@Conf{fnameLevel = n} = conf{fnameLevel = n + k}
 
 type AnnM = ReaderT Conf IO
 
-annotate :: forall a. Exp Implicit VName a -> AnnM (AnnNExp a)
+annotate :: forall a. Exp Implicit Name a -> AnnM (AnnNExp a)
 annotate !e0 = do
   ref <- Reader.asks occMapRef
   occMap <- Reader.lift $ readIORef ref
@@ -191,23 +197,23 @@ annotate !e0 = do
           NApp <$> annotate e <*> pure x
         UnUnit x e -> do
           NUnUnit x <$> annotate e
-        UnPair x h -> do
+        UnPair cs x h -> do
           level <- Reader.asks vnameLevel
           let v1 = VName level
           let v2 = VName $ level + 1
           let e = h v1 v2
-          NUnPair x v1 v2 <$> Reader.local (incVNameLevel 1) (annotate e)
+          NUnPair cs x v1 v2 <$> Reader.local (incVNameLevel 1) (annotate e)
         CharAs x rs ->
           pure $ NCharAs x rs
-        Case x brs ->
-          NCase x <$> mapM annotateBranch brs
+        Case cs x brs ->
+          NCase cs x <$> mapM annotateBranch brs
         Local def ->
           NLocal <$> annotateDef def
         Var x -> pure $ NVar x
 
 annotateBranch ::
   forall a t.
-  Branch VName (Exp Implicit VName) a t
+  Branch VName (Exp Implicit Name) a t
   -> AnnM (NBranch AnnNExp a t)
 annotateBranch (Branch pij h) = do
   level <- Reader.asks vnameLevel
@@ -215,7 +221,7 @@ annotateBranch (Branch pij h) = do
   Reader.local (incVNameLevel 1) $ NBranch pij v1 <$> annotate (h v1)
 
 annotateDef ::
-  Def Implicit VName as r
+  Def Implicit Name as r
   -> AnnM (AnnNDef as r)
 annotateDef =
   fmap AnnNDef . \case
@@ -226,7 +232,7 @@ annotateDef =
       let f1 = FName level
       Reader.local (incFNameLevel 1) $ NDefLetr f1 <$> annotateDef (h f1)
 
-runAnnotate :: Exp Implicit VName a -> IO (AnnNExp a, OccMap)
+runAnnotate :: Exp Implicit Name a -> IO (AnnNExp a, OccMap)
 runAnnotate e = do
   let r = annotate e
   ref <- newIORef emptyOccMap
@@ -342,8 +348,8 @@ introLets occMap (AnnNExp sn e0) =
     go :: NExpH AnnNExp AnnNDef a -> Writer LMaps (NExpH RecNExp RecNDef a)
     go (NLam x e) = NLam x <$> introLets occMap e
     go (NApp e x) = NApp <$> introLets occMap e <*> pure x
-    go (NCase x brs) = NCase x <$> mapM goBranch brs
-    go (NUnPair x y1 y2 e) = NUnPair x y1 y2 <$> introLets occMap e
+    go (NCase cs x brs) = NCase cs x <$> mapM goBranch brs
+    go (NUnPair cs x y1 y2 e) = NUnPair cs x y1 y2 <$> introLets occMap e
     go (NUnUnit x e) = NUnUnit x <$> introLets occMap e
     go (NCharAs x rs) = pure $ NCharAs x rs
     go (NOp0 op) = pure $ NOp0 op
@@ -361,7 +367,7 @@ introLets occMap (AnnNExp sn e0) =
     goDef (NDefLetr x (AnnNDef d)) = NDefLetr x . RecNDef <$> goDef d
 
 data SomeVar v where
-  SomeVar :: v a -> SomeVar v
+  SomeVar :: In v a -> SomeVar v
 
 data SomeEExp v where
   SomeEExp :: Exp Explicit v a -> SomeEExp v
@@ -382,10 +388,10 @@ instance Hashable SomeFName where
 type VMap v = H.HashMap Int (SomeVar v)
 type FMap v = H.HashMap SomeFName (SomeEExp v)
 
-insertVMap :: VName a -> v a -> VMap v -> VMap v
+insertVMap :: VName a -> In v a -> VMap v -> VMap v
 insertVMap (VName i) x = H.insert i (SomeVar x)
 
-lookupVMap :: VName a -> VMap v -> Maybe (v a)
+lookupVMap :: VName a -> VMap v -> Maybe (In v a)
 lookupVMap (VName i) vMap = case H.lookup i vMap of
   Just (SomeVar v) -> Just (unsafeCoerce v)
   Nothing -> Nothing
@@ -453,10 +459,10 @@ unnameWork e0 = case e0 of
   NApp e x -> do
     xx <- resolveVar x
     App <$> unname e <*> pure xx
-  NUnPair x y1 y2 e -> do
+  NUnPair cs x y1 y2 e -> do
     xx <- resolveVar x
     (vMap, fMap) <- Reader.ask
-    pure $ UnPair xx $ \yy1 yy2 ->
+    pure $ UnPair cs xx $ \yy1 yy2 ->
       let vMap' = insertVMap y1 yy1 $ insertVMap y2 yy2 vMap
       in  Reader.runReader (unname e) (vMap', fMap)
   NUnUnit x e -> do
@@ -468,17 +474,17 @@ unnameWork e0 = case e0 of
   NOp0 op -> pure $ Op0 op
   NOp1 op e -> Op1 op <$> unname e
   NOp2 op e1 e2 -> Op2 op <$> unname e1 <*> unname e2
-  NCase x brs -> do
+  NCase cs x brs -> do
     xx <- resolveVar x
     let f (NBranch pij y e) = do
           (vMap, fMap) <- Reader.ask
           pure $ Branch pij $ \yy ->
             let vMap' = insertVMap y yy vMap
             in  Reader.runReader (unname e) (vMap', fMap)
-    Case xx <$> mapM f brs
+    Case cs xx <$> mapM f brs
   NLocal d -> Local <$> unnameDef d
   where
-    resolveVar :: forall v x. VName x -> UnnameM v (v x)
+    resolveVar :: forall v x. VName x -> UnnameM v (In v x)
     resolveVar x = do
       (vMap, _) <- Reader.ask
       case lookupVMap x vMap of

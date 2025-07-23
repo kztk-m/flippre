@@ -1,49 +1,29 @@
-{-# LANGUAGE CPP              #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PatternSynonyms  #-}
-{-# LANGUAGE TemplateHaskell  #-}
-{-# LANGUAGE TupleSections    #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-{-# HLINT ignore "Use camelCase" #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ViewPatterns #-}
 
-module Text.FliPpr.TH
-  (
-    un, mkUn, branch, pat,
-  ) where
+module Text.FliPpr.TH (
+  un,
+  mkUn,
+  branch,
+  pat,
+) where
 
-import           Control.Arrow                (second)
-import           Data.Char                    as C
-import           Language.Haskell.TH          as TH
-import           Language.Haskell.TH.Datatype as TH
-import           Prelude                      hiding (exp)
-import           Text.FliPpr.Internal.Type
-import           Text.FliPpr.Pat              as Pat
+import Control.Arrow (second)
+import Data.Char as C
+import Language.Haskell.TH (Q)
+import qualified Language.Haskell.TH as TH
+import qualified Language.Haskell.TH.Datatype as TH
+import qualified Text.FliPpr.Pat as Pat
+import Text.FliPpr.Primitive
+import Prelude hiding (exp)
 
-
-
-pattern ConP_compat :: TH.Name -> [TH.Pat] -> TH.Pat
-#if MIN_VERSION_template_haskell(2,18,0)
-pattern ConP_compat n ps <- TH.ConP n _ ps
-  where
-    ConP_compat n ps = TH.ConP n [] ps
-#else
-pattern ConP_compat n ps = TH.ConP n ps
-#endif
-
-tupE_compat :: [TH.Exp] -> TH.Exp
-unboxedTupE_compat :: [TH.Exp] -> TH.Exp
-#if MIN_VERSION_template_haskell(2,16,0)
-tupE_compat = TH.TupE . map Just
-unboxedTupE_compat = TH.UnboxedTupE . map Just
-#else
-tupE_compat = TH.TupE
-unboxedTupE_compat = TH.UnboxedTupE
-#endif
-
+import Text.FliPpr.Internal.THCompat
 
 -- | Generate "un" functions for datatypes. This does not work well for
 -- non-letter constructor names in general, except for @[]@, @(:)@, and tuples.
-
 mkUn :: TH.Name -> Q [TH.Dec]
 mkUn n = do
   info <- TH.reifyDatatype n
@@ -57,7 +37,7 @@ mkUn n = do
       fn <- makeUnName bn
       (t, e) <- unGen cn
       -- t' <- [t| HasCallStack => $(pure t) |]
-      -- e' <- [| withFrozenCallStack $(pure e) |] 
+      -- e' <- [| withFrozenCallStack $(pure e) |]
       -- let sigd = TH.SigD fn t
       -- (sigd:) <$> [d| $(TH.varP fn) = $(return e) |]
       return [TH.SigD fn t, TH.ValD (TH.VarP fn) (TH.NormalB e) []]
@@ -65,28 +45,21 @@ mkUn n = do
         makeUnName :: String -> Q TH.Name
         makeUnName ":" = return $ TH.mkName "unCons"
         makeUnName "[]" = return $ TH.mkName "unNil"
-        makeUnName s | c:_ <- s, C.isUpper c = return $ TH.mkName $ "un" ++ s
-        makeUnName s | j:_ <-  [i | i <- 0 : [2 .. 5], s == TH.nameBase (TH.tupleDataName i)] = return $ TH.mkName $ "unTuple" ++ show j
-        makeUnName s = error $ "mkUn does not support non-letter constructors in general: " ++ show s 
+        makeUnName s | c : _ <- s, C.isUpper c = return $ TH.mkName $ "un" ++ s
+        makeUnName s | j : _ <- [i | i <- 0 : [2 .. 5], s == TH.nameBase (TH.tupleDataName i)] = return $ TH.mkName $ "unTuple" ++ show j
+        makeUnName s = error $ "mkUn does not support non-letter constructors in general: " ++ show s
 
-{- |
-Make an (injective) deconstructor from a constructor.
+-- |
+-- Make an (injective) deconstructor from a constructor.
+--
+-- For example, we have:
+--
+-- >>> :t $(un '(:))
+-- >>> :t $(un 'Left)
 
-For example, we have:
+-- $(un '(:)) :: (v0 a0 -> v0 [a0] -> Exp s0 v0 r0) -> Branch v0 (Exp s0 v0) [a0] r0
 
->>> :t $(un '(:))
-$(un '(:))
-  :: FliPprE arg0 exp0 =>
-     (A arg0 a0 -> A arg0 [a0] -> E exp0 r0)
-     -> Branch (A arg0) (E exp0) [a0] r0
-
-
->>> :t $(un 'Left)
-$(un 'Left)
-  :: FliPprE arg0 exp0 =>
-     (A arg0 a0 -> E exp0 r0)
-     -> Branch (A arg0) (E exp0) (Either a0 b0) r0
--}
+-- $(un 'Left) :: (v0 a0 -> Exp s0 v0 r0) -> Branch v0 (Exp s0 v0) (Either a0 b0) r0
 un :: TH.Name -> Q TH.Exp
 un n = do
   (t, e) <- unGen n
@@ -120,39 +93,36 @@ unGen cname = do
     makeTy ty = do
       let (_ctxt, body) = splitType ty
       (argsTy, retTy) <- parseType body
-      arg_ <- TH.varT =<< TH.newName "arg"
-      exp_ <- TH.varT =<< TH.newName "exp"
+      -- arg_ <- TH.varT =<< TH.newName "arg"
+      -- exp_ <- TH.varT =<< TH.newName "exp"
+      phase_ <- TH.varT =<< TH.newName "s"
+      var_ <- TH.varT =<< TH.newName "v"
       res_ <- TH.varT =<< TH.newName "r"
-      let ar = return arg_
-      let exp = return exp_
+      -- let ar = return arg_
+      -- let exp = return exp_
+      let phase = pure phase_
+      let var = pure var_
       let res = return res_
-      let contTy = foldr (\a r -> [t|A $ar $(return a) -> $r|]) [t|E $exp $res|] argsTy
-      let resultTy = [t|Branch (A $ar) (E $exp) $(return retTy) $res|]
+      let contTy = foldr (\a r -> [t|In $var $(return a) -> $r|]) [t|Exp $phase $var $res|] argsTy
+      let resultTy = [t|Branch (In $var) (Exp $phase $var) $(return retTy) $res|]
       -- let inCtxt t = do
       --       cs <- mapM (\a -> [t|In $(return a)|]) argsTy
       --       TH.ForallT [] cs <$> t
       -- [t|FliPprE $ar $exp => $(inCtxt [t|$contTy -> $resultTy|])|]
-      [t| FliPprE $ar $exp => $contTy -> $resultTy |]
+      [t|$contTy -> $resultTy|]
       where
         splitType :: TH.Type -> (TH.Type -> TH.Type, TH.Type)
         splitType (TH.ForallT tvs ctxt t) =
           let (k, t') = splitType t
-           in (TH.ForallT tvs ctxt . k, t')
+          in  (TH.ForallT tvs ctxt . k, t')
         splitType t = (id, t)
 
     -- FIXME: Generate Error Messages
     parseType :: TH.Type -> Q ([TH.Type], TH.Type)
-    parseType (TH.AppT (TH.AppT ArrowT t1) t2) = do
+    parseType (viewFuncType -> Just (t1, t2)) = do
       (args, ret) <- parseType t2
       return (t1 : args, ret)
     parseType (TH.SigT _ _) = fail "Kind signatures are not supported yet."
-
-#if MIN_VERSION_template_haskell(2,17,0)
-    parseType (TH.AppT (TH.AppT (TH.AppT TH.MulArrowT _) t1) t2) = do
-      (args, ret) <- parseType t2
-      return (t1 : args, ret)
-#endif
-
     parseType t = return ([], t)
 
     -- numberOfArgs :: TH.Type -> Int
@@ -210,7 +180,7 @@ branch patQ expQ = do
   let vs = gatherVarNames p
   let f = makeForward' p vs
   let fi = makeBackward' p vs
-  let nf = "<" ++ pprint p ++ ">"
+  let nf = "<" ++ TH.pprint p ++ ">"
   [|
     Branch
       (PartialBij $(TH.litE $ TH.stringL nf) $f $fi)
@@ -234,7 +204,7 @@ branch patQ expQ = do
         go (TH.RecP _ fs) r = foldr (go . snd) r fs
         go (TH.ListP ps) r = foldr go r ps
         go (TH.SigP p _) r = go p r
-        go p _ = error $ "branch: Not supported: " ++ pprint p
+        go p _ = error $ "branch: Not supported: " ++ TH.pprint p
 
     patToExp :: TH.Pat -> TH.Exp
     patToExp (TH.LitP l) = TH.LitE l
@@ -251,7 +221,7 @@ branch patQ expQ = do
     patToExp (TH.RecP n fs) = TH.RecConE n $ map (second patToExp) fs
     patToExp (TH.ListP ps) = TH.ListE (map patToExp ps)
     patToExp (TH.SigP p t) = TH.SigE (patToExp p) t
-    patToExp p = error $ "branch: Not supported: " ++ pprint p
+    patToExp p = error $ "branch: Not supported: " ++ TH.pprint p
 
     makeForward' :: TH.Pat -> [TH.Name] -> Q TH.Exp
     makeForward' pat0 vs = do
@@ -276,36 +246,33 @@ branch patQ expQ = do
               \ $(TH.varP u) $(if null vs then TH.wildP else TH.varP x') -> $(go us x')
             |]
 
-{- |
-
-This provide the most general way for pattern matching in this module.
-The generated pattern-like expressions are supposed to be used together with 'br' in 'Text.FliPpr.Pat'.
-
->>> :t $(pat '(:))
-$(pat '(:))
-  :: forall env'1 env'2 a env.
-     PatT env'1 env'2 a -> PatT env env'1 [a] -> PatT env env'2 [a]
-
-
->>> :t $(pat 'True)
-$(pat 'True) :: forall env'. PatT env' env' Bool
-
-
->>> :t $(pat 'Left)
-$(pat 'Left) :: forall env env' a b. PatT env env' a -> PatT env env' (Either a b)
-
-
->>> :t $(pat '(,,,))
-$(pat '(,,,))
-  :: forall env'1 env'2 a env'3 b env'4 c env d.
-     PatT env'1 env'2 a
-     -> PatT env'3 env'1 b
-     -> PatT env'4 env'3 c
-     -> PatT env env'4 d
-     -> PatT env env'2 (a, b, c, d)
-
--}
-
+-- |
+--
+-- This provide the most general way for pattern matching in this module.
+-- The generated pattern-like expressions are supposed to be used together with 'br' in 'Text.FliPpr.Pat'.
+--
+-- >>> :t $(pat '(:))
+-- \$(pat '(:))
+--   :: forall env'1 env'2 a env.
+--      PatT env'1 env'2 a -> PatT env env'1 [a] -> PatT env env'2 [a]
+--
+--
+-- >>> :t $(pat 'True)
+-- \$(pat 'True) :: forall env'. PatT env' env' Bool
+--
+--
+-- >>> :t $(pat 'Left)
+-- \$(pat 'Left) :: forall env env' a b. PatT env env' a -> PatT env env' (Either a b)
+--
+--
+-- >>> :t $(pat '(,,,))
+-- \$(pat '(,,,))
+--   :: forall env'1 env'2 a env'3 b env'4 c env d.
+--      PatT env'1 env'2 a
+--      -> PatT env'3 env'1 b
+--      -> PatT env'4 env'3 c
+--      -> PatT env env'4 d
+--      -> PatT env env'2 (a, b, c, d)
 pat :: TH.Name -> Q TH.Exp
 pat cname = do
   cinfo <- TH.reify cname
@@ -315,34 +282,27 @@ pat cname = do
       isSing <- isSingleton tyname
       let f = makeForward cname n isSing
       let fi = makeBackward cname n
-      let pBij = [| PartialBij $(TH.litE $ TH.stringL $ TH.nameBase cname) $f $fi |]
-      mkLift n [| Pat.lift $pBij |]
+      let pBij = [|PartialBij $(TH.litE $ TH.stringL $ TH.nameBase cname) $f $fi|]
+      mkLift n [|Pat.lift $pBij|]
     _ ->
       fail $ "pat: " ++ show cname ++ " is not a constructor or unsupported name."
-
-    where
-      -- mkLift 0 f = [| $f unit |]
-      -- mkLift 1 f = [| \x -> $f (x &. unit) |]
-      -- mkLift 2 f = [| \x1 x2 -> $f (x1 &. x2 &. unit) |]
-      -- ...
-      mkLift :: Int -> Q TH.Exp -> Q TH.Exp
-      mkLift n f = do
-        vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1..n]
-        let body = foldr (\x r -> [| $(TH.varE x) Pat.&. $r |] ) [| Pat.unit |] vs
-        foldr (\x r -> [| \ $(TH.varP x) -> $r |] ) [| $f $body |] vs
-
+  where
+    -- mkLift 0 f = [| $f unit |]
+    -- mkLift 1 f = [| \x -> $f (x &. unit) |]
+    -- mkLift 2 f = [| \x1 x2 -> $f (x1 &. x2 &. unit) |]
+    -- ...
+    mkLift :: Int -> Q TH.Exp -> Q TH.Exp
+    mkLift n f = do
+      vs <- mapM (\i -> TH.newName ("x" ++ show i)) [1 .. n]
+      let body = foldr (\x r -> [|$(TH.varE x) Pat.&. $r|]) [|Pat.unit|] vs
+      foldr (\x r -> [|\ $(TH.varP x) -> $r|]) [|$f $body|] vs
 
 numberOfArgs :: TH.Type -> Int
-numberOfArgs (TH.AppT (TH.AppT ArrowT _) t2) = numberOfArgs t2 + 1
-numberOfArgs (TH.ForallT _ _ t)              = numberOfArgs t
-numberOfArgs (TH.SigT t _)                   = numberOfArgs t
-numberOfArgs (TH.ParensT t)                  = numberOfArgs t
-
-#if MIN_VERSION_template_haskell(2,17,0)
-numberOfArgs (TH.AppT (TH.AppT (TH.AppT TH.MulArrowT _) _) t2) = numberOfArgs t2 + 1
-#endif
-
-numberOfArgs _                               = 0
+numberOfArgs (viewFuncType -> Just (_, t2)) = numberOfArgs t2 + 1
+numberOfArgs (TH.ForallT _ _ t) = numberOfArgs t
+numberOfArgs (TH.SigT t _) = numberOfArgs t
+numberOfArgs (TH.ParensT t) = numberOfArgs t
+numberOfArgs _ = 0
 
 makeForward :: TH.Name -> Int -> Bool -> Q TH.Exp
 makeForward cn n isSing = do
@@ -368,11 +328,11 @@ isSingleton tyname = do
       case dec of
         TH.DataD _ _ _ _ cs _ ->
           return $ length cs <= 1
-        TH.NewtypeD {} ->
+        TH.NewtypeD{} ->
           return True
         TH.DataInstD _ _ _ _ cs _ ->
           return $ length cs <= 1
-        TH.NewtypeInstD {} ->
+        TH.NewtypeInstD{} ->
           return True
         _ ->
           return False

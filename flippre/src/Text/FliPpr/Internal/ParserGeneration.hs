@@ -23,14 +23,12 @@
 -- |
 -- This module implements parser-generation interpretation of FliPpr.
 module Text.FliPpr.Internal.ParserGeneration (
+  ParsingMode,
   parsingMode,
-  parsingModeMono,
   parsingModeSP,
   parsingModeWith,
   BlockCommentSpec (..),
   CommentSpec (..),
-  -- PArg (..),
-  -- PExp (..),
   Result (..),
 ) where
 
@@ -54,9 +52,11 @@ import qualified Prettyprinter as PP
 import qualified Defs
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Err (Err (..), err)
-import Text.FliPpr.Internal.Type
+import Text.FliPpr.Internal.Core
 
+import Debug.Trace (trace)
 import GHC.Stack (HasCallStack, callStack, prettyCallStack)
+import Text.FliPpr.Internal.ReifySharing (ReifySharing (..))
 import qualified Unembedding as U
 import Unembedding.Env (Env (..))
 
@@ -194,85 +194,207 @@ branchesHOAS =
     )
     (U.liftFO0 (WithExtendedEnv A.empty))
 
-instance (ValEnvRepr r, U.Variables (Index r), G.Grammar G.ExChar g) => FliPprE (U.EnvI (ArgSem r)) (U.EnvI (ExpSem r ann g)) where
-  fapp = U.liftFO2' appSem
+data ParsingMode' r ann g
 
-  farg = U.liftSOn' @(ArgSem r) @(ExpSem r ann g) (U.ol1 :. ENil) Proxy lamSem
-    where
-      lamSem :: ExpSem r ann g (a : env) t -> ExpSem r ann g env (a :~> t)
-      lamSem (ExpSem e) = ExpSem $ fmap (fmap RF) e
+newtype instance In (ParsingMode' r ann g) a
+  = InArgSem {getArgSem :: U.EnvI (ArgSem r) a}
+type instance FVar (ParsingMode' r ann g) = U.EnvI (ExpSem r ann g)
 
-  fcase a bs = U.liftFO2' scrutineeSem a (branchesHOAS bs)
-    where
-      scrutineeSem :: forall env a t. ArgSem r env a -> WithExtendedEnv a r ann g env t -> ExpSem r ann g env t
-      scrutineeSem (ArgSem ix) (WithExtendedEnv g) = ExpSem $ (fmap . (=<<)) (mapToEnvA f) g
-        where
-          f :: ValEnv r (a : env) -> Err ann (ValEnv r env)
-          f venv = case popEnv venv of
-            (Nothing, _) -> err "Cannot happen."
-            (Just v, venv') -> updateEnv ix v venv'
-  funpair = U.liftSOn' @(ArgSem r) @(ExpSem r ann g) (U.ol0 :. U.ol2 :. ENil) Proxy unpairSem
-    where
-      unpairSem ::
-        ArgSem r env (a, b)
-        -> ExpSem r ann g (a : b : env) t
-        -> ExpSem r ann g env t
-      unpairSem (ArgSem ix) (ExpSem e) = ExpSem $ e <&> \m -> m >>= mapToEnvA (upd ix)
+parser ::
+  forall r ann g res.
+  (ValEnvRepr r, U.Variables (Index r), G.GrammarD G.ExChar g) =>
+  Exp Explicit (ParsingMode' r ann g) res
+  -> U.EnvI (ExpSem r ann g) res
+parser _ | trace "parser called." False = undefined
+parser (App (parser -> r1) (InArgSem r2)) =
+  U.liftFO2' appSem r1 r2
+parser (Lam h) = U.liftSOn' @(ArgSem r) @(ExpSem r ann g) (U.ol1 :. ENil) Proxy lamSem (parser . h . InArgSem)
+  where
+    lamSem :: ExpSem r ann g (a : env) t -> ExpSem r ann g env (a :~> t)
+    lamSem (ExpSem e) = ExpSem $ fmap (fmap RF) e
+parser (Case cstack (InArgSem a) brs) =
+  U.liftFO2' scrutineeSem a (branchesHOAS $ map pbr brs)
+  where
+    pbr (Branch pij h) = Branch pij (parser . h . InArgSem)
+    scrutineeSem :: forall env a t. ArgSem r env a -> WithExtendedEnv a r ann g env t -> ExpSem r ann g env t
+    scrutineeSem (ArgSem ix) (WithExtendedEnv g) = ExpSem $ (fmap . (=<<)) (mapToEnvA f) g
+      where
+        f :: ValEnv r (a : env) -> Err ann (ValEnv r env)
+        f venv = case popEnv venv of
+          (Nothing, _) -> err "Cannot happen."
+          (Just v, venv') -> updateEnv ix v venv'
+parser (UnPair cstack (InArgSem x) h) =
+  U.liftSOn' @(ArgSem r) @(ExpSem r ann g) (U.ol0 :. U.ol2 :. ENil) Proxy unpairSem x (\i j -> parser (h (InArgSem i) (InArgSem j)))
+  where
+    unpairSem ::
+      ArgSem r env (a, b)
+      -> ExpSem r ann g (a : b : env) t
+      -> ExpSem r ann g env t
+    unpairSem (ArgSem ix) (ExpSem e) = ExpSem $ e <&> \m -> m >>= mapToEnvA (upd ix)
 
-      upd :: Index r env (a1, b1) -> ValEnv r (a1 : b1 : env) -> Err ann (ValEnv r env)
-      upd ix venv = do
-        let (a, rest1) = popEnv venv
-            (b, rest2) = popEnv rest1
-        case (a, b) of
-          (Just va, Just vb) -> updateEnv ix (va, vb) rest2
-          (Nothing, Nothing) -> pure rest2 -- defer error
-          (Just _, Nothing) -> err $ PP.vcat [fromString "funpair: the second element of a pair is not used", fromString $ prettyCallStack callStack]
-          (Nothing, Just _) -> err $ PP.vcat [fromString "funpair: the first element of a pair is not used", fromString $ prettyCallStack callStack]
+    upd :: Index r env (a1, b1) -> ValEnv r (a1 : b1 : env) -> Err ann (ValEnv r env)
+    upd ix venv = do
+      let (a, rest1) = popEnv venv
+          (b, rest2) = popEnv rest1
+      case (a, b) of
+        (Just va, Just vb) -> updateEnv ix (va, vb) rest2
+        (Nothing, Nothing) -> pure rest2 -- defer error
+        (Just _, Nothing) -> err $ PP.vcat [fromString "funpair: the second element of a pair is not used", fromString $ prettyCallStack cstack]
+        (Nothing, Just _) -> err $ PP.vcat [fromString "funpair: the first element of a pair is not used", fromString $ prettyCallStack cstack]
+parser (UnUnit (InArgSem x) (parser -> s)) = U.liftFO2' ununitSem x s
+  where
+    ununitSem :: ArgSem r env () -> ExpSem r ann g env t -> ExpSem r ann g env t
+    ununitSem (ArgSem ix) (ExpSem e) = ExpSem $ fmap (>>= mapToEnvA (updateEnv ix ())) e
+parser (CharAs (InArgSem x) cs) = U.liftFO1' charAsSem x
+  where
+    charAsSem :: ArgSem r env Char -> ExpSem r ann g env D
+    charAsSem (ArgSem ix) =
+      ExpSem $
+        symbI' cs' <&> \c ->
+          RD <$> updateEnv ix (unNormalChar c) undeterminedEnv
 
-  fununit = U.liftFO2' ununitSem
-    where
-      ununitSem :: ArgSem r env () -> ExpSem r ann g env t -> ExpSem r ann g env t
-      ununitSem (ArgSem ix) (ExpSem e) = ExpSem $ fmap (>>= mapToEnvA (updateEnv ix ())) e
+    cs' = RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs
 
-  fbchoice = U.liftFO2 bchoiceSem
-    where
-      bchoiceSem (ExpSem e1) (ExpSem e2) = ExpSem $ e1 <|> e2
-  fcharAs e cs = U.liftFO1' charAsSem e
-    where
-      charAsSem :: ArgSem r env Char -> ExpSem r ann g env D
-      charAsSem (ArgSem ix) =
-        ExpSem $
-          symbI' cs' <&> \c ->
-            RD <$> updateEnv ix (unNormalChar c) undeterminedEnv
+    symbI' :: (G.FromSymb G.ExChar s) => RS.RSet G.ExChar -> s G.ExChar
+    symbI' cs_
+      | RS.size cs_ == 1 = G.symb $ RS.findMin cs_
+      | otherwise = G.symbI cs_
 
-      cs' = RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs
+    unNormalChar :: G.ExChar -> Char
+    unNormalChar (G.NormalChar c) = c
+    unNormalChar _ = error "Cannot happen."
+parser (Op0 op) =
+  let sps = U.liftFO0 $ ExpSem $ noresult G.spaces
+  in  case op of
+        Abort _ -> U.liftFO0 $ ExpSem A.empty
+        Line -> U.liftFO0 $ ExpSem $ noresult $ G.space <* G.spaces
+        Space -> U.liftFO0 $ ExpSem $ noresult G.space
+        Spaces -> sps
+        LineBreak -> sps
+        Line' -> sps
+        NESpaces' -> sps -- TODO: is it really correct?
+        Text s -> U.liftFO0 $ ExpSem $ noresult $ G.text s
+parser (Op1 op e) = case op of
+  Group -> parser e
+  Align -> parser e
+  Nest _ -> parser e
+parser (Op2 Cat (parser -> s1) (parser -> s2)) = U.liftFO2 catSem s1 s2
+  where
+    catSem :: ExpSem r ann g env D -> ExpSem r ann g env D -> ExpSem r ann g env D
+    catSem (ExpSem e1) (ExpSem e2) =
+      ExpSem $ (\x y -> join (liftA2 merge x y)) <$> e1 <*> e2
+    merge :: Result r env D -> Result r env D -> Err ann (Result r env D)
+    merge (RD venv1) (RD venv2) = RD <$> mergeEnv venv1 venv2
+parser (Op2 BChoice (parser -> s1) (parser -> s2)) = U.liftFO2 bchoiceSem s1 s2
+  where
+    bchoiceSem (ExpSem e1) (ExpSem e2) = ExpSem $ e1 <|> e2
+parser (Var s) = s
+parser (Local (parserD -> d)) = U.liftFO1' unliftSem d
+  where
+    unliftSem :: WrapD rep ann g env '( '[], a) -> ExpSem rep ann g env a
+    unliftSem (WrapD gd) = ExpSem $ G.unliftD gd
 
-      symbI' :: (G.FromSymb G.ExChar s) => RS.RSet G.ExChar -> s G.ExChar
-      symbI' cs_
-        | RS.size cs_ == 1 = G.symb $ RS.findMin cs_
-        | otherwise = G.symbI cs_
+parserD ::
+  forall r ann g as t.
+  (ValEnvRepr r, U.Variables (Index r), G.GrammarD G.ExChar g) =>
+  Def Explicit (ParsingMode' r ann g) as t
+  -> U.EnvI (WrapD r ann g) '(as, t)
+parserD _ | trace "parserD called." False = undefined
+parserD (DefRet (parser -> s)) = U.liftFO1' liftSem s
+  where
+    liftSem :: ExpSem rep ann g env a -> WrapD rep ann g env '( '[], a)
+    liftSem (ExpSem ge) = WrapD $ G.liftD ge
+parserD (DefCons (parser -> s) (parserD -> sd)) =
+  U.liftFO2' consSem s sd
+  where
+    consSem :: ExpSem rep ann g env b -> WrapD rep ann g env '(bs, t) -> WrapD rep ann g env '(b : bs, t)
+    consSem (ExpSem ge) (WrapD gd) = WrapD $ G.consD (Compose <$> ge) gd
+parserD (DefLetr h) = U.liftSOnGen @(ArgSem r) @(WrapD r ann g) (U.DimNested (U.K U.E) :. ENil) Proxy letrDSem (parserD . h)
+  where
+    letrDSem ::
+      (ExpSem rep ann g env a -> WrapD rep ann g env '(a : as, t))
+      -> WrapD rep ann g env '(as, t)
+    letrDSem hh = WrapD $ Defs.letrD $ \a -> unwrapD $ hh (ExpSem $ fmap getCompose a)
 
-      unNormalChar :: G.ExChar -> Char
-      unNormalChar (G.NormalChar c) = c
-      unNormalChar _ = error "Cannot happen."
+-- instance (ValEnvRepr r, U.Variables (Index r), G.Grammar G.ExChar g) => FliPprE (U.EnvI (ArgSem r)) (U.EnvI (ExpSem r ann g)) where
+--   fapp = U.liftFO2' appSem
 
-  ftext str = U.liftFO0 $ ExpSem $ noresult $ G.text str
-  fabort = U.liftFO0 $ ExpSem A.empty
-  fempty = U.liftFO0 $ ExpSem $ noresult $ G.text ""
-  fcat = U.liftFO2 $ \(ExpSem e1) (ExpSem e2) -> ExpSem $ (\x y -> join (liftA2 merge x y)) <$> e1 <*> e2
-    where
-      merge :: Result r env D -> Result r env D -> Err ann (Result r env D)
-      merge (RD venv1) (RD venv2) = RD <$> mergeEnv venv1 venv2
+--   farg = U.liftSOn' @(ArgSem r) @(ExpSem r ann g) (U.ol1 :. ENil) Proxy lamSem
+--     where
+--       lamSem :: ExpSem r ann g (a : env) t -> ExpSem r ann g env (a :~> t)
+--       lamSem (ExpSem e) = ExpSem $ fmap (fmap RF) e
 
-  fspace = U.liftFO0 $ ExpSem $ noresult G.space
-  fspaces = U.liftFO0 $ ExpSem $ noresult G.spaces
-  fline = U.liftFO0 $ ExpSem $ noresult $ G.space <* G.spaces
-  flinebreak = fspaces
-  fline' = fspaces
-  fnespaces' = fspaces
-  falign = id
-  fgroup = id
-  fnest = const id
+--   fcase a bs = U.liftFO2' scrutineeSem a (branchesHOAS bs)
+--     where
+--       scrutineeSem :: forall env a t. ArgSem r env a -> WithExtendedEnv a r ann g env t -> ExpSem r ann g env t
+--       scrutineeSem (ArgSem ix) (WithExtendedEnv g) = ExpSem $ (fmap . (=<<)) (mapToEnvA f) g
+--         where
+--           f :: ValEnv r (a : env) -> Err ann (ValEnv r env)
+--           f venv = case popEnv venv of
+--             (Nothing, _) -> err "Cannot happen."
+--             (Just v, venv') -> updateEnv ix v venv'
+--   funpair = U.liftSOn' @(ArgSem r) @(ExpSem r ann g) (U.ol0 :. U.ol2 :. ENil) Proxy unpairSem
+--     where
+--       unpairSem ::
+--         ArgSem r env (a, b)
+--         -> ExpSem r ann g (a : b : env) t
+--         -> ExpSem r ann g env t
+--       unpairSem (ArgSem ix) (ExpSem e) = ExpSem $ e <&> \m -> m >>= mapToEnvA (upd ix)
+
+--       upd :: Index r env (a1, b1) -> ValEnv r (a1 : b1 : env) -> Err ann (ValEnv r env)
+--       upd ix venv = do
+--         let (a, rest1) = popEnv venv
+--             (b, rest2) = popEnv rest1
+--         case (a, b) of
+--           (Just va, Just vb) -> updateEnv ix (va, vb) rest2
+--           (Nothing, Nothing) -> pure rest2 -- defer error
+--           (Just _, Nothing) -> err $ PP.vcat [fromString "funpair: the second element of a pair is not used", fromString $ prettyCallStack callStack]
+--           (Nothing, Just _) -> err $ PP.vcat [fromString "funpair: the first element of a pair is not used", fromString $ prettyCallStack callStack]
+
+--   fununit = U.liftFO2' ununitSem
+--     where
+--       ununitSem :: ArgSem r env () -> ExpSem r ann g env t -> ExpSem r ann g env t
+--       ununitSem (ArgSem ix) (ExpSem e) = ExpSem $ fmap (>>= mapToEnvA (updateEnv ix ())) e
+
+--   fbchoice = U.liftFO2 bchoiceSem
+--     where
+--       bchoiceSem (ExpSem e1) (ExpSem e2) = ExpSem $ e1 <|> e2
+--   fcharAs e cs = U.liftFO1' charAsSem e
+--     where
+--       charAsSem :: ArgSem r env Char -> ExpSem r ann g env D
+--       charAsSem (ArgSem ix) =
+--         ExpSem $
+--           symbI' cs' <&> \c ->
+--             RD <$> updateEnv ix (unNormalChar c) undeterminedEnv
+
+--       cs' = RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs
+
+--       symbI' :: (G.FromSymb G.ExChar s) => RS.RSet G.ExChar -> s G.ExChar
+--       symbI' cs_
+--         | RS.size cs_ == 1 = G.symb $ RS.findMin cs_
+--         | otherwise = G.symbI cs_
+
+--       unNormalChar :: G.ExChar -> Char
+--       unNormalChar (G.NormalChar c) = c
+--       unNormalChar _ = error "Cannot happen."
+
+--   ftext str = U.liftFO0 $ ExpSem $ noresult $ G.text str
+--   fabort = U.liftFO0 $ ExpSem A.empty
+--   fempty = U.liftFO0 $ ExpSem $ noresult $ G.text ""
+--   fcat = U.liftFO2 $ \(ExpSem e1) (ExpSem e2) -> ExpSem $ (\x y -> join (liftA2 merge x y)) <$> e1 <*> e2
+--     where
+--       merge :: Result r env D -> Result r env D -> Err ann (Result r env D)
+--       merge (RD venv1) (RD venv2) = RD <$> mergeEnv venv1 venv2
+
+--   fspace = U.liftFO0 $ ExpSem $ noresult G.space
+--   fspaces = U.liftFO0 $ ExpSem $ noresult G.spaces
+--   fline = U.liftFO0 $ ExpSem $ noresult $ G.space <* G.spaces
+--   flinebreak = fspaces
+--   fline' = fspaces
+--   fnespaces' = fspaces
+--   falign = id
+--   fgroup = id
+--   fnest = const id
 
 type family Fst (p :: (k1, k2)) :: k1 where
   Fst '(a, b) = a
@@ -295,279 +417,26 @@ instance (Functor g, ValEnvRepr rep) => U.Weakenable (ExpSem rep ann g) where
 
 -- TODO: Define weakenMany as well for performance
 
-instance (Defs g, U.Variables (Index rep), ValEnvRepr rep, Applicative g) => Defs (U.EnvI (ExpSem rep ann g)) where
-  newtype D (U.EnvI (ExpSem rep ann g)) as r = DE {runDE :: U.EnvI (WrapD rep ann g) '(as, r)}
-  liftD = DE . U.liftFO1' liftSem
-    where
-      liftSem :: ExpSem rep ann g env a -> WrapD rep ann g env '( '[], a)
-      liftSem (ExpSem ge) = WrapD $ G.liftD ge
-  unliftD (DE d) = U.liftFO1' unliftSem d
-    where
-      unliftSem :: WrapD rep ann g env '( '[], a) -> ExpSem rep ann g env a
-      unliftSem (WrapD gd) = ExpSem $ G.unliftD gd
-  consD e (DE d) = DE $ U.liftFO2' consSem e d
-    where
-      consSem :: ExpSem rep ann g env a -> WrapD rep ann g env '(as, r) -> WrapD rep ann g env '(a : as, r)
-      consSem (ExpSem ge) (WrapD gd) = WrapD $ G.consD (Compose <$> ge) gd
-  letrD h = DE $ U.liftSOnGen @(ArgSem rep) @(WrapD rep ann g) (U.DimNested (U.K U.E) :. ENil) Proxy letrDSem (runDE . h)
-    where
-      letrDSem ::
-        (ExpSem rep ann g env a -> WrapD rep ann g env '(a : as, r))
-        -> WrapD rep ann g env '(as, r)
-      letrDSem hh = WrapD $ Defs.letrD $ \a -> unwrapD $ hh (ExpSem $ fmap getCompose a)
-
--- DE $ U.liftFO0' $ WrapD $ Defs.letrD $ \a -> U.runEnvI (runDE (h _)) _
-
--- DE $ U.EnvI $ \tenv -> WrapD $ Defs.letrD $ \a ->
--- let x = U.EnvI $ \tenv' -> ExpSem $ fmap (mapToEnv (embedEnv tenv tenv')) . getCompose <$> a
--- in  unwrapD $ U.runEnvI (runDE $ h x) tenv
-
--- ifThenElse :: Bool -> p -> p -> p
--- ifThenElse True x _ = x
--- ifThenElse False _ y = y
-
--- -- import Debug.Trace
-
--- type PEImpl = PE.UB
-
--- type Rep = PE.Rep PEImpl
-
--- type Env = PE.Env PEImpl EqI
-
--- type Var = PE.Var PEImpl
-
--- data EqI a where
---   EqI :: (Eq a) => a -> EqI a
-
--- mergeEqI :: EqI a -> EqI a -> Maybe (EqI a)
--- mergeEqI (EqI a) (EqI b)
---   | a == b = Just (EqI a)
---   | otherwise = Nothing
-
--- newtype PArg a = PArg {unPArg :: forall r. Rep r -> Var r a}
-
--- newtype PExp ann e t = PExp {unPExp :: forall r. (G.Grammar G.ExChar e) => Rep r -> e (Err ann (Result r t))}
-
--- type GU e a = (G.Grammar G.ExChar e) => e a
-
--- data Result env t where
---   RD :: Env env -> Result env D
---   RF :: Result (a ': env) t -> Result env (a ~> t)
-
--- {-# ANN applySem ("HLint: ignore Avoid lambda using `infix`" :: String) #-}
--- applySem ::
---   GU s (Err ann (Result r (a ~> t)))
---   -> Var r a
---   -> GU s (Err ann (Result r t))
--- applySem g v = (>>= \res -> appSem res v) <$> g
-
--- appSem :: Result r (a ~> t) -> Var r a -> Err ann (Result r t)
--- appSem (RF res) v =
---   mapToEnvA
---     ( \env ->
---         let (a, e) = PE.popEnv env
---         in  tryUpdateEnv v a e
---     )
---     res
-
--- mapToEnvA ::
---   (Applicative f) =>
---   (Env env -> f (Env env'))
---   -> Result env t
---   -> f (Result env' t)
--- mapToEnvA f (RD e) = RD <$> f e
--- mapToEnvA f (RF e0) =
---   RF
---     <$> mapToEnvA
---       ( \env ->
---           let (a, e) = PE.popEnv env
---           in  extEnv a <$> f e
---       )
---       e0
---   where
---     extEnv a e = case PE.extendEnv e a of
---       (e', _, _) -> e'
-
--- mapToEnv :: (Env env -> Env env') -> Result env t -> Result env' t
--- mapToEnv f = runIdentity . mapToEnvA (Identity . f)
-
--- tryUpdateEnv :: Var env a -> Maybe (EqI a) -> Env env -> Err ann (Env env)
--- tryUpdateEnv _ Nothing env = return env
--- tryUpdateEnv k (Just v0) env =
---   case PE.updateEnv mergeEqI k v0 env of
---     Just env' ->
---       -- trace (show $ pprEnv env D.<+> D.text "->" D.<+> D.align (pprEnv env')) $
---       return env'
---     Nothing ->
---       err
---         ( PP.vcat
---             [ "The same variable is updated twice:"
---             , "updating position" PP.<+> pprVar k PP.<+> "in" PP.<+> PE.pprEnv env
---             ]
---         )
---   where
---     pprVar v = PP.pretty (PE.toIndex v)
-
--- choice :: PExp ann s D -> PExp ann s D -> PExp ann s D
--- choice p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
-
--- choiceGen :: PExp ann s r -> PExp ann s r -> PExp ann s r
--- choiceGen p q = PExp $ \tenv -> unPExp p tenv <|> unPExp q tenv
-
--- fromP :: GU s a -> PExp ann s D
--- fromP x = PExp $ \tenv -> return (RD (PE.undeterminedEnv tenv)) <$ x
-
--- -- return (RD PE.undeterminedEnv) <$ x
-
--- -- refineValue :: forall b. Typeable b => Maybe (EqI b) -> Maybe (EqI b)
--- -- refineValue x =
--- --   case eqT :: Maybe (b :~: ()) of
--- --     Just Refl -> Just (EqI ())
--- --     _         -> x
-
--- instance FliPprE PArg (PExp ann s) where
---   fapp :: forall a t. PExp ann s (a ~> t) -> PArg a -> PExp ann s t
---   fapp (PExp f) (PArg n) =
---     PExp $ \tenv -> applySem (f tenv) (n tenv)
-
---   farg :: forall a t. (PArg a -> PExp ann s t) -> PExp ann s (a ~> t)
---   farg f = PExp $ \tenv ->
---     case PE.extendRep tenv Proxy of
---       (tenva, va, _vt) ->
---         let a = PArg $ \tenv' -> PE.embedVar tenva tenv' va
---         in  fmap RF <$> unPExp (f a) tenva
-
---   funpair ::
---     forall a b r ann.
---     (In a, In b) =>
---     PArg (a, b)
---     -> (PArg a -> PArg b -> PExp ann s r)
---     -> PExp ann s r
---   funpair inp f = PExp $ \tenv ->
---     let (tenva, va, _) = PE.extendRep tenv Proxy
---         (tenvb, vb, _) = PE.extendRep tenva Proxy
---         argA = PArg $ \tenv' -> PE.embedVar tenva tenv' va
---         argB = PArg $ \tenv' -> PE.embedVar tenvb tenv' vb
---     in  (>>= updateP (unPArg inp tenv)) <$> unPExp (f argA argB) tenvb
+-- instance (Defs g, U.Variables (Index rep), ValEnvRepr rep, Applicative g) => Defs (U.EnvI (ExpSem rep ann g)) where
+--   newtype D (U.EnvI (ExpSem rep ann g)) as r = DE {runDE :: U.EnvI (WrapD rep ann g) '(as, r)}
+--   liftD = DE . U.liftFO1' liftSem
 --     where
---       updateP :: Var env (a, b) -> Result (b : a : env) r -> Err ann (Result env r)
---       updateP v = mapToEnvA $
---         \eab ->
---           let (b, ea) = PE.popEnv eab
---               (a, e) = PE.popEnv ea
---           in  tryUpdateEnv v (liftA2 pair a b) e
-
---       pair :: EqI a -> EqI b -> EqI (a, b)
---       pair (EqI a) (EqI b) = EqI (a, b)
-
---   fununit (PArg a) e = PExp $ \tenv ->
---     let pos = a tenv
---     in  (>>= mapToEnvA (tryUpdateEnv pos (Just (EqI ())))) <$> unPExp e tenv
-
---   fabort = PExp $ const A.empty
-
---   fcase _ [] = PExp $ const A.empty
---   fcase ex0 (Branch p pk : bs) = branch ex0 p pk `choiceGen` fcase ex0 bs
+--       liftSem :: ExpSem rep ann g env a -> WrapD rep ann g env '( '[], a)
+--       liftSem (ExpSem ge) = WrapD $ G.liftD ge
+--   unliftD (DE d) = U.liftFO1' unliftSem d
 --     where
---       branch :: (In a) => PArg a -> PartialBij a b -> (PArg b -> PExp ann s r) -> PExp ann s r
---       branch inp (PartialBij _ _ finv) k =
---         PExp $ \tenv ->
---           let (tenvb, vb, _) = PE.extendRep tenv Proxy
---               argB = PArg $ \tenv' -> PE.embedVar tenvb tenv' vb
---           in  (>>= updateB finv (unPArg inp tenv)) <$> unPExp (k argB) tenvb
-
---       updateB ::
---         (In a) =>
---         (b -> Maybe a)
---         -> Var env a
---         -> Result (b : env) r
---         -> Err ann (Result env r)
---       updateB finv v = mapToEnvA $ \eb ->
---         let (b, e) = PE.popEnv eb
---             a = fmap EqI $ b >>= \(EqI bb) -> finv bb
---         in  tryUpdateEnv v a e
-
---   fcharAs a cs = PExp $ \tenv ->
---     let x = unPArg a tenv
---     in  (\c -> do env <- tryUpdateEnv x (Just $ EqI $ unNormalChar c) (PE.undeterminedEnv tenv); return $ RD env)
---           <$> symbI' (RS.fromRangeList $ map (bimap G.NormalChar G.NormalChar) $ RS.toRangeList cs)
+--       unliftSem :: WrapD rep ann g env '( '[], a) -> ExpSem rep ann g env a
+--       unliftSem (WrapD gd) = ExpSem $ G.unliftD gd
+--   consD e (DE d) = DE $ U.liftFO2' consSem e d
 --     where
---       symbI' :: (G.FromSymb G.ExChar s) => RS.RSet G.ExChar -> s G.ExChar
---       symbI' cs_
---         | RS.size cs_ == 1 = G.symb $ RS.findMin cs_
---         | otherwise = G.symbI cs_
-
---       unNormalChar :: G.ExChar -> Char
---       unNormalChar (G.NormalChar c) = c
---       unNormalChar _ = error "Cannot happen."
-
---   ftext s = fromP $ G.text s
-
---   fcat f g = PExp $ \tenv ->
---     let p = unPExp f tenv
---         q = unPExp g tenv
---     in  (\x y -> join (liftA2 k x y)) <$> p <*> q
+--       consSem :: ExpSem rep ann g env a -> WrapD rep ann g env '(as, r) -> WrapD rep ann g env '(a : as, r)
+--       consSem (ExpSem ge) (WrapD gd) = WrapD $ G.consD (Compose <$> ge) gd
+--   letrD h = DE $ U.liftSOnGen @(ArgSem rep) @(WrapD rep ann g) (U.DimNested (U.K U.E) :. ENil) Proxy letrDSem (runDE . h)
 --     where
---       k :: Result env D -> Result env D -> Err ann (Result env D)
---       k (RD env) (RD env') = RD <$> merge env env'
-
---       merge :: Env env -> Env env -> Err ann (Env env)
---       merge e e' =
---         case PE.mergeEnv mergeEqI e e' of
---           Nothing -> err "Merge failed: update is consistent."
---           Just env ->
---             -- trace (show $ D.text "merging" D.<+> pprEnv e D.<+> pprEnv e' D.<+> D.nest 2 (D.text "->" D.</> pprEnv env)) $
---             return env
-
---   fbchoice = choice
-
---   fempty = fromP $ G.text ""
-
---   fspace = fromP G.space
---   fspaces = fromP G.spaces
-
---   fnespaces' = fromP G.spaces
-
---   fline = fromP $ G.space <* G.spaces
---   fline' = fspaces
---   flinebreak = fspaces
-
---   falign = id
---   fgroup = id
---   fnest _ = id
-
--- -- type family ResT (r :: [Type]) (a :: DType FType) = t | t -> a where
--- --   ResT r (T t) = T (Err (Result r t))
--- --   ResT r (a :*: b) = ResT r a :*: ResT r b
-
--- type family Map (f :: FType -> Type) as where
---   Map f '[] = '[]
---   Map f (a ': as) = f a ': Map f as
--- instance (G.Grammar G.ExChar g, Defs.Defs g) => Defs.Defs (PExp ann g) where
---   -- newtype Fs (PExp g) a = RulesG {unRulesG :: forall r. Rep r -> Defs.Fs g (Defs.TransD (Compose Err (Result r)) a)}
---   newtype D (PExp ann g) as a = RulesG {unRulesG :: forall r. Rep r -> Defs.D g (Map (Compose (Err ann) (Result r)) as) (Err ann (Result r a))}
-
---   liftD x = RulesG $ \tenv -> Defs.liftD (unPExp x tenv)
---   unliftD (RulesG x) = PExp $ \tenv -> Defs.unliftD (x tenv)
-
---   consD x y = RulesG $ \tenv ->
---     Defs.consD (Compose <$> unPExp x tenv) (unRulesG y tenv)
-
---   -- unpairRules (x :: Rules (PExp g) (a :*: b)) k = RulesG $ \(tenv :: Rep r) ->
---   --   case propTransDPreservesDefType @a @(Compose Err (Result r)) of
---   --     Wit -> case propTransDPreservesDefType @b @(Compose Err (Result r)) of
---   --       Wit -> unpairRules (unRulesG x tenv) $ \a b ->
---   --         let a' = RulesG $ \tenv' -> rmap (fmap $ h tenv tenv') a
---   --             b' = RulesG $ \tenv' -> rmap (fmap $ h tenv tenv') b
---   --          in unRulesG (k a' b') tenv
---   --   where
---   --     h :: Rep r -> Rep r' -> Compose Err (Result r) t -> Compose Err (Result r') t
---   --     h tenv tenv' = Compose . fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose
-
---   letrD h = RulesG $ \tenv ->
---     Defs.letrD $ \a ->
---       let harg = PExp $ \tenv' -> fmap (mapToEnv (PE.embedEnv tenv tenv')) . getCompose <$> a
---       in  unRulesG (h harg) tenv
+--       letrDSem ::
+--         (ExpSem rep ann g env a -> WrapD rep ann g env '(a : as, r))
+--         -> WrapD rep ann g env '(as, r)
+--       letrDSem hh = WrapD $ Defs.letrD $ \a -> unwrapD $ hh (ExpSem $ fmap getCompose a)
 
 parsingModeMono :: (G.GrammarD G.ExChar g) => (forall f. (G.GrammarD G.ExChar f) => PExp ann f (a ~> D)) -> g (Err ann a)
 parsingModeMono e =
@@ -581,6 +450,8 @@ parsingModeMono e =
         in  case v of
               Just u -> return u
               Nothing -> err "Input is unused in evaluation."
+
+type ParsingMode = ParsingMode' UsingIx
 
 data BlockCommentSpec = BlockCommentSpec
   { bcOpen :: String
@@ -632,34 +503,47 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
           G.symbI (RS.complement firsts)
             <|> if any null rests
               then A.empty
-              else asum [G.symb f *> go [tail s | s <- ss, head s == f] | f <- RS.toList firsts]
+              else asum [G.symb f *> go [cs | (c : cs) <- ss, c == f] | f <- RS.toList firsts]
           where
-            firsts = RS.fromList $ map head ss
-            rests = map tail ss
+            (RS.fromList -> firsts, rests) = unzip [(c, cs) | (c : cs) <- ss]
+    -- firsts = RS.fromList $ map head ss
+    -- rests = map tail ss
 
     sp = RS.fromList " \r\n\t\v\f" -- spaces
     br = RS.fromList "\r\n" -- breaks
     nb = RS.complement br -- non-breaks
 
-parsingMode :: (G.GrammarD Char g) => FliPpr (a ~> D) -> g (Err ann a)
+parsingMode :: (G.GrammarD Char g) => FliPpr Explicit (a ~> D) -> g (Err ann a)
 parsingMode = parsingModeWith spec
   where
     spec = CommentSpec{lcSpec = Nothing, bcSpec = Nothing}
 
-parsingModeWith :: forall g a ann. (G.GrammarD Char g) => CommentSpec -> FliPpr (a ~> D) -> g (Err ann a)
-parsingModeWith spec (FliPpr e) =
-  let g0 :: forall g'. (G.GrammarD G.ExChar g') => g' (Err ann a)
-      g0 = parsingModeMono e
+parser' ::
+  (ValEnvRepr r, U.Variables (Index r), G.Defs g, Alternative g, G.FromSymb G.ExChar g, ReifySharing s) =>
+  FliPpr s res
+  -> U.EnvI (ExpSem r ann g) res
+parser' (FliPpr e) = parser (reifySharing e)
+
+parsingModeWith ::
+  forall s g a ann.
+  (G.GrammarD Char g, ReifySharing s) =>
+  CommentSpec
+  -> FliPpr s (a ~> D)
+  -> g (Err ann a)
+parsingModeWith spec fe =
+  let _g0 :: forall g'. (G.GrammarD G.ExChar g') => g' (Err ann a)
+      _g0 = parsingModeMono (parser' fe)
       g1 :: forall g'. (G.GrammarD Char g') => g' (Err ann a)
-      g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono e)
-  in  -- trace (show $ PP.fillSep [G.pprAsFlat g0, fromString "---------", G.pprAsFlat g1])
-      g1
+      g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono (parser' fe))
+  in  trace
+        (show $ PP.fillSep [G.pprAsFlat _g0, fromString "---------", G.pprAsFlat g1])
+        g1
 
-parsingModeSP :: forall g a ann. (G.GrammarD Char g) => (forall g'. (G.GrammarD Char g') => g' ()) -> FliPpr (a ~> D) -> g (Err ann a)
-parsingModeSP gsp (FliPpr e) =
-  G.withSpace gsp (parsingModeMono e)
-
--- parsingModeSP :: In a => G.Grammar Char () -> FliPpr (a ~> D) -> G.Grammar Char (Err a)
--- parsingModeSP gsp (FliPpr m) =
---   let g = parsingModeMono m
---    in G.thawSpace gsp $ G.inline $ G.removeNonProductive $ G.optSpaces g
+parsingModeSP ::
+  forall s g a ann.
+  (G.GrammarD Char g, ReifySharing s) =>
+  (forall g'. (G.GrammarD Char g') => g' ())
+  -> FliPpr s (a ~> D)
+  -> g (Err ann a)
+parsingModeSP gsp fe =
+  G.withSpace gsp (parsingModeMono (parser' fe))
