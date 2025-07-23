@@ -71,9 +71,11 @@ library
     Text.FliPpr.Automaton
     Text.FliPpr.Doc
     Text.FliPpr.Implicit
+    Text.FliPpr.Internal.Core
     Text.FliPpr.Internal.HList
     Text.FliPpr.Internal.ParserGeneration
     Text.FliPpr.Internal.PrettyPrinting
+    Text.FliPpr.Internal.ReifySharing
     Text.FliPpr.Internal.Type
     Text.FliPpr.Mfix
     Text.FliPpr.Pat
