@@ -11,7 +11,7 @@
 
 module Text.FliPpr (
   -- * Types
-  FliPpr,
+  FliPpr (..),
   FliPprM,
   Exp,
   In,

@@ -183,6 +183,11 @@ incVNameLevel k conf@Conf{vnameLevel = n} = conf{vnameLevel = n + k}
 
 type AnnM = ReaderT Conf IO
 
+isSmallExp :: Exp Implicit Name a -> Bool
+isSmallExp (Op0 (Text _)) = False
+isSmallExp (Op0 _) = True
+isSmallExp _ = False
+
 annotate :: forall a. Exp Implicit Name a -> AnnM (AnnNExp a)
 annotate !e0 = do
   ref <- Reader.asks occMapRef
@@ -190,6 +195,7 @@ annotate !e0 = do
   n <- Reader.lift $ makeStableName e0
   let sn = StableExpName n
   let key = SomeStableExpName sn
+  Reader.lift $ putStrLn $ "Encoutered: " <> show key
   case lookupOccMap key occMap of
     Just _ -> do
       -- Case: we already have encountered the expression

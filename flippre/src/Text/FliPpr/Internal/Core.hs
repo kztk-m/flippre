@@ -187,18 +187,22 @@ instance (Phased s) => D.Defs (Exp s v) where
 -- |
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction', which
 -- perform interconversion between FliPpr functions and Haskell functions.
-class Repr s v (t :: FType) r | r -> s v t where
-  toFunction :: Exp s v t -> r
+class Repr s v r | r -> s v where
+  type ReprT r :: FType
+
+  toFunction :: Exp s v (ReprT r) -> r
   -- ^ @toFunction :: Exp s v (a1 ~> ... ~> an ~> D) -> v a1 -> ... -> v an -> Exp s v D@
 
-  fromFunction :: r -> Exp s v t
+  fromFunction :: r -> Exp s v (ReprT r)
   -- ^ @fromFunction :: (v a1 -> ... -> v an -> Exp s v D) -> Exp s v (a1 ~> ... ~> an ~> D)@
 
-instance Repr s v t (Exp s v t) where
+instance (s' ~ s) => Repr s' v (Exp s v t) where
+  type ReprT (Exp s v t) = t
   toFunction = id
   fromFunction = id
 
-instance (Repr s v t r) => Repr s v (a ~> t) (In v a -> r) where
+instance (Repr s v r) => Repr s v (In v a -> r) where
+  type ReprT (In v a -> r) = a ~> ReprT r
   toFunction f a = toFunction (f `App` a)
   fromFunction k = Lam (fromFunction . k)
 
@@ -206,7 +210,7 @@ instance (Phased s) => D.Arg (Exp s v) (Exp s v a) where
   letr f = D.letr $ fmap (first D.Tip) . f . D.unTip
 
 -- One-level unfolding to avoid overlapping instances.
-instance (v ~ v', Phased s, Repr s v t r) => D.Arg (Exp s v') (In v a -> r) where
+instance (v ~ v', Phased s, Repr s v r) => D.Arg (Exp s v') (In v a -> r) where
   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
 
 data ToPrint
@@ -260,8 +264,9 @@ ppr dlevel flevel k e0 = case e0 of
                     , PP.parens (pprIn dlevel <> fromString "," <> pprIn (dlevel + 1))
                     , fromString "="
                     , PP.align dx
+                    , fromString "in"
                     ]
-                , fromString "in" PP.<+> PP.align dh
+                , PP.align dh
                 ]
   UnUnit (DLevel x) e ->
     let dx = pprIn x
@@ -270,8 +275,8 @@ ppr dlevel flevel k e0 = case e0 of
           PP.align $
             PP.group $
               PP.sep
-                [ PP.hsep [fromString "let () =", PP.align dx]
-                , PP.hsep [fromString "in", PP.align de]
+                [ PP.hsep [fromString "let () =", PP.align dx, fromString "in"]
+                , PP.hsep [PP.align de]
                 ]
   CharAs (DLevel x) rs ->
     applyWhen (k > 9) PP.parens $
@@ -331,10 +336,9 @@ pprDef dlevel flevel k d0 = case d0 of
             PP.align $
               PP.angles $
                 PP.hsep
-                  [ fromString "let"
+                  [ fromString "letr"
                   , pprFVar flevel
-                  , fromString "# ___"
-                  , fromString "="
+                  , fromString "."
                   , d
                   ]
 

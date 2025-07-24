@@ -220,5 +220,5 @@ share e = Defs.letr $ \x -> return (e, x)
 -- > local (do {x <- share e; pure x}) <> local (do {x <- share e; pure x})
 --
 -- involves the productions involved in @e@ twice.
-local :: (Repr s v ft rep, Phased s) => FliPprM s v rep -> rep
+local :: (Repr s v rep, Phased s) => FliPprM s v rep -> rep
 local = toFunction . Defs.local . fmap fromFunction
