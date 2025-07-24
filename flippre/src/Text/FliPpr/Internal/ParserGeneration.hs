@@ -513,7 +513,7 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
     br = RS.fromList "\r\n" -- breaks
     nb = RS.complement br -- non-breaks
 
-parsingMode :: (G.GrammarD Char g) => FliPpr Explicit (a ~> D) -> g (Err ann a)
+parsingMode :: (G.GrammarD Char g, ReifySharing s) => FliPpr s (a ~> D) -> g (Err ann a)
 parsingMode = parsingModeWith spec
   where
     spec = CommentSpec{lcSpec = Nothing, bcSpec = Nothing}

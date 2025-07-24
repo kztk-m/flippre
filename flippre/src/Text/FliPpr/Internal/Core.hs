@@ -144,7 +144,7 @@ instance D.Defs (Exp s v) where
 -- |
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction', which
 -- perform interconversion between FliPpr functions and Haskell functions.
-class Repr s v (t :: FType) r | r -> t s v where
+class Repr s v (t :: FType) r | r -> s v t where
   toFunction :: Exp s v t -> r
   -- ^ @toFunction :: Exp s v (a1 ~> ... ~> an ~> D) -> v a1 -> ... -> v an -> Exp s v D@
 
@@ -163,7 +163,7 @@ instance D.Arg (Exp s v) (Exp s v a) where
   letr f = D.letr $ fmap (first D.Tip) . f . D.unTip
 
 -- One-level unfolding to avoid overlapping instances.
-instance (Repr s v t r) => D.Arg (Exp s v) (In v a -> r) where
+instance (v ~ v', Repr s v t r) => D.Arg (Exp s v') (In v a -> r) where
   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
 
 data ToPrint

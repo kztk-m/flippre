@@ -8,6 +8,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -32,6 +33,7 @@ import Text.FliPpr.Internal.Core
 import Control.Monad.Writer (Writer)
 import qualified Control.Monad.Writer as Writer
 import Data.Maybe (fromMaybe)
+import Debug.Trace (traceM, traceShow, traceShowM)
 import qualified Defs as D
 import GHC.Stack (CallStack)
 import System.IO.Unsafe (unsafePerformIO)
@@ -46,11 +48,29 @@ instance ReifySharing Implicit where
 instance ReifySharing Explicit where
   reifySharing = id
 
-fromImplicit :: (forall v. Exp Implicit v a) -> Exp Explicit vv a
+fromImplicit :: forall vv a. (forall v. Exp Implicit v a) -> Exp Explicit vv a
 fromImplicit e = unsafePerformIO $ do
   res <- runAnnotate e
+  traceM "-- After pruning ---------------"
+  traceShowM res
   let ne = introduceLets res
-  pure $ Reader.runReader (unname ne) (H.empty, H.empty)
+  traceM "-- After let-introduction ------"
+  traceShowM ne
+  let result :: forall v. Exp Explicit v a
+      result = Reader.runReader (unname ne) (H.empty, H.empty)
+  traceM "-- After unnaming ---------------"
+  traceShowM result
+  pure result
+
+-- _ = AnnNExp @1
+--   (
+--     NLocal (
+--       AnnNDef (
+--         NDefLetr %0 (AnnNDef (NDefCons (AnnNExp @2 (NOp2 BChoice (AnnNExp @3 (NOp0 (Text ""))) (AnnNExp @4 (NOp2 Cat (AnnNExp @5 (NOp0 Space)) (AnnNExp @6 (NVar %0))))))
+--                                        (AnnNDef (NDefRet (AnnNRef @6)))))
+--         )
+--     )
+--   )
 
 data StableExpName a where
   StableExpName ::

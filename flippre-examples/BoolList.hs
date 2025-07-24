@@ -9,8 +9,10 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
-import Text.FliPpr
+import Text.FliPpr hiding (Exp)
+import qualified Text.FliPpr as F
 import qualified Text.FliPpr.Grammar as G
+
 import Text.FliPpr.Grammar.Driver.Earley as Earley
 import Prelude
 
@@ -18,13 +20,13 @@ import Prelude
 import Control.Applicative ((<|>))
 import Text.FliPpr.Mfix (mfix)
 
-manyParens :: (FliPprD arg exp) => E exp D -> E exp D
+manyParens :: F.Exp s v D -> F.Exp s v D
 manyParens d = local $ do
   rec m <- share $ d <? parens m
   return m
 
-defPprTF :: (FliPprD arg exp) => FliPprM exp (A arg Bool -> E exp D)
-defPprTF = define $ \i ->
+defPprTF :: FliPprM s v (In v Bool -> F.Exp s v D)
+defPprTF = share $ \i ->
   manyParens $
     case_
       i
@@ -32,18 +34,18 @@ defPprTF = define $ \i ->
       , $(un 'False) $ text "False"
       ]
 
-example1 :: FliPpr ([Bool] ~> D)
+example1 :: FliPpr s ([Bool] ~> D)
 example1 = flippr $ do
   pprTF <- defPprTF
 
-  rec ppr <- define $ \x ->
+  rec ppr <- share $ \x ->
         manyParens $
           case_
             x
             [ unNil $ text "[" <> text "]"
             , unCons $ \a x' -> brackets (ppr' a x')
             ]
-      ppr' <- define $ \a x ->
+      ppr' <- share $ \a x ->
         case_
           x
           [ $(un '[]) $ pprTF a
@@ -51,7 +53,7 @@ example1 = flippr $ do
           ]
   return (fromFunction ppr)
 
-example2 :: FliPpr ([Bool] ~> D)
+example2 :: FliPpr s ([Bool] ~> D)
 example2 = flippr $ do
   pprTF <- defPprTF
   pure $ arg $ brackets . foldPprL (\a d -> pprTF a <> text "," <+>. d) pprTF (text "")
@@ -63,7 +65,7 @@ main :: IO ()
 main = do
   let s = "[True,   False, True, (False ), ( (True))  ]"
   let g :: (G.GrammarD Char g) => g (Err ann [Bool])
-      g = parsingModeSP gsp example1
+      g = parsingModeSP gsp (example1 @Explicit)
   print $ G.pprGrammar @Char g
   print $ G.pprAsFlat g
   putStrLn $ replicate 80 '-'
@@ -71,7 +73,7 @@ main = do
   putStrLn "Parse result:"
   print $ Earley.parse g s
   putStrLn $ replicate 80 '='
-  let g' = parsingModeSP gsp example2
+  let g' = parsingModeSP gsp (example2 @Explicit)
   print $ G.pprGrammar g'
   print $ G.pprAsFlat g'
   putStrLn $ "String to be parsed: " ++ show s

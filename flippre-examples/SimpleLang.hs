@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
@@ -12,10 +13,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
-import Text.FliPpr
+import Text.FliPpr hiding (Exp)
+import qualified Text.FliPpr as F
 import qualified Text.FliPpr.Automaton as AM
 
 import qualified Text.FliPpr.Grammar as G
@@ -74,7 +77,6 @@ ident = (small <> AM.star alphaNum) `AM.difference` AM.unions (map fromString ke
 keywords :: [String]
 keywords = ["true", "false", "let", "in", "if", "then", "else"]
 
-flipprExp :: (FliPprD arg exp) => FliPprM exp (A arg Exp -> E exp D)
 flipprExp = F.do
   pprName <- share $ \x -> case_ x [unName $ \s -> textAs s ident]
   pprInt <- share $ \n -> convertInput itoaBij n $ \s -> textAs s numbers
@@ -110,7 +112,7 @@ flipprExp = F.do
 
   -- Technique mentioned in http://www.haskellforall.com/2020/11/pretty-print-syntax-trees-with-this-one.html.
   -- A trick is that patterns are intentionally overlapping, so that it can parse ugly string, wihtout <?
-  rec pExp <- share $ \(prec :: FinNE Nat4) x ->
+  rec pExp <- share $ \(prec :: Fin Nat5) x ->
         if
           | prec == 0 ->
               case_
@@ -143,7 +145,7 @@ flipprExp = F.do
   pure (pExp 0)
 
 gExp :: (G.GrammarD Char g) => g (Err ann Exp)
-gExp = parsingModeWith (CommentSpec (Just "--") (Just $ BlockCommentSpec "{-" "-}" True)) (flippr $ fromFunction <$> flipprExp)
+gExp = parsingModeWith (CommentSpec (Just "--") (Just $ BlockCommentSpec "{-" "-}" True)) (flippr $ fromFunction <$> flipprExp :: FliPpr Explicit (Exp ~> D))
 
 parseExp :: [Char] -> Exp
 parseExp = \s -> case p s of

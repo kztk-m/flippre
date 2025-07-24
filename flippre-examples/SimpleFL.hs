@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -10,8 +11,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeOperators #-}
 
-import Text.FliPpr
+import Text.FliPpr hiding (Exp)
+import qualified Text.FliPpr as F
 import qualified Text.FliPpr.Automaton as AM
 
 import qualified Text.FliPpr.Grammar as G
@@ -81,7 +84,7 @@ ident = (small <> AM.star alphaNum) `AM.difference` AM.unions (map fromString ke
 keywords :: [String]
 keywords = ["true", "false", "let", "in", "if", "then", "else"]
 
-pprExp :: (FliPprD arg exp) => FliPprM exp (A arg Exp -> E exp D)
+pprExp :: FliPprM s v (In v Exp -> F.Exp s v D)
 pprExp = F.do
   pprName <- share $ \x -> case_ x [unName $ \s -> textAs s ident]
   pprInt <- share $ \n -> convertInput itoaBij n $ \s -> textAs s numbers
@@ -182,7 +185,7 @@ parser s = case p s of
   Fail e -> error (show e)
   where
     g :: (G.GrammarD Char g) => g (Err ann Exp)
-    g = parsingMode (flippr $ arg <$> pprExp)
+    g = parsingMode (flippr $ arg <$> pprExp :: FliPpr Explicit (Exp ~> D))
     p = trace (show $ G.pprAsFlat g) $ E.parse g
 
 checkRoundTrip :: String -> IO ()

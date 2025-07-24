@@ -11,7 +11,8 @@
 
 import Control.DeepSeq
 import System.CPUTime
-import Text.FliPpr
+import Text.FliPpr hiding (Exp)
+import qualified Text.FliPpr as F
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Driver.Earley as Earley
 import Prelude
@@ -44,7 +45,7 @@ data Exp
 
 $(mkUn ''Exp)
 
-mkPprInt :: (FliPprD a e) => FliPprM e (A a Int -> E e D)
+mkPprInt :: FliPprM s v (In v Int -> F.Exp s v D)
 mkPprInt =
   share $ \x -> case_ x [atoi $ \s -> textAs s numbers]
   where
@@ -60,7 +61,7 @@ mkPprInt =
 keywords :: [String]
 keywords = ["let", "in"]
 
-mkPprVar :: (FliPprD a e) => FliPprM e (A a String -> E e D)
+mkPprVar :: FliPprM s v (In v String -> F.Exp s v D)
 mkPprVar =
   share $ \x -> textAs x ident
   where
@@ -72,19 +73,19 @@ mkPprVar =
 opP :: (DocLike d, Num n, Ord n) => Fixity -> (d -> d -> d) -> (n -> a -> d) -> (n -> b -> d) -> n -> a -> b -> d
 opP fixity f p1 p2 k x y = opPrinter fixity f (\k' -> p1 k' x) (\k' -> p2 k' y) k
 
-manyParens :: (FliPprD a e) => E e D -> E e D
+manyParens :: F.Exp s v D -> F.Exp s v D
 manyParens d = local $ do
-  rec x <- define $ d <? parens x
+  rec x <- share $ d <? parens x
   return x
 
-pExp :: (FliPprD arg exp) => FliPprM exp (A arg Exp -> E exp D)
+pExp :: FliPprM s v (In v Exp -> F.Exp s v D)
 pExp = do
   pprInt <- mkPprInt
   pprVar <- mkPprVar
   let op s d1 d2 =
         group $
           d1 <> nest 2 (line' <> text s <+>. d2)
-  rec pprE <- define $ \k e ->
+  rec pprE <- share $ \k e ->
         manyParens $
           case_
             e
@@ -103,10 +104,10 @@ pExp = do
                       <> line
                       <> text "in" <+> pprE 0 e2
             ]
-  return (\x -> spaces <> pprE (0 :: FinNE Nat4) x <> spaces)
+  return (\x -> spaces <> pprE (0 :: Fin Nat5) x <> spaces)
 
 grammar :: (G.GrammarD Char g) => g (Err ann Exp)
-grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pExp)
+grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pExp :: FliPpr Explicit (Exp ~> D))
 
 -- makeParser :: In t => (forall a e. FliPprD a e => FliPprM e (A a t -> E e D)) -> String -> Err [t]
 -- makeParser p =
