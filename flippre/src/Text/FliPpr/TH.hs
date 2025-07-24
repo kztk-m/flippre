@@ -17,7 +17,7 @@ import Language.Haskell.TH (Q)
 import qualified Language.Haskell.TH as TH
 import qualified Language.Haskell.TH.Datatype as TH
 import qualified Text.FliPpr.Pat as Pat
-import Text.FliPpr.Primitive
+import Text.FliPpr.Primitives
 import Prelude hiding (exp)
 
 import Text.FliPpr.Internal.THCompat

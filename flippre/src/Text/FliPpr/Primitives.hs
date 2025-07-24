@@ -1,9 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Text.FliPpr.Primitive (
+module Text.FliPpr.Primitives (
   -- * Datatypes for Syntax
   FType (..),
   type D,
@@ -13,6 +14,7 @@ module Text.FliPpr.Primitive (
   Branch (..),
   PartialBij (..),
   Phase (..),
+  Phased,
 
   -- * Constructs
 
@@ -65,18 +67,10 @@ import qualified Data.RangeSet.List as RS
 
 import qualified Defs
 
-import qualified Text.FliPpr.Doc -- for export
+-- for export
+
+import qualified Text.FliPpr.Doc
 import Text.FliPpr.Internal.Core
-
-type FliPprM s v = Defs.DefM (Exp s v)
-
--- | Make a closed FliPpr definition. A typical use is:
---
---   > flippr $ do
---   >   rec ppr <- share $ arg $ \i -> ...
---   >   return ppr
-flippr :: (forall v. FliPprM s v (Exp s v a)) -> FliPpr s a
-flippr x = FliPpr (Defs.local x)
 
 -- | Indicating that there can be zero-or-more spaces in parsing.
 --   In pretty-printing, it is equivalent to @text ""@.
@@ -226,5 +220,5 @@ share e = Defs.letr $ \x -> return (e, x)
 -- > local (do {x <- share e; pure x}) <> local (do {x <- share e; pure x})
 --
 -- involves the productions involved in @e@ twice.
-local :: (Repr s v ft rep) => FliPprM s v rep -> rep
+local :: (Repr s v ft rep, Phased s) => FliPprM s v rep -> rep
 local = toFunction . Defs.local . fmap fromFunction

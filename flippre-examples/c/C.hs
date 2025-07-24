@@ -1,10 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MonoLocalBinds #-}
-{-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# OPTIONS_GHC -Wno-missing-deriving-strategies #-}
 
 -- ANSI C Grammar example
 --
@@ -20,8 +22,10 @@
 import Exp
 import Helper
 import Prettyprinter (Doc)
-import Text.FliPpr
+import Text.FliPpr hiding (Exp)
+import qualified Text.FliPpr as F
 import Text.FliPpr.Grammar.Driver.Earley as E
+import qualified Text.FliPpr.QDo as F
 import TypeSpecifier
 import Types
 import Prelude
@@ -93,12 +97,12 @@ $(mkUn ''JumpStatement)
 $(mkUn ''Maybe)
 
 pprDeclaration ::
-  (FliPprD a e) =>
-  (A a [DeclarationSpecifier] -> E e D) ->
-  (A a Declarator -> E e D) ->
-  (A a Exp -> E e D) ->
-  FliPprM e (A a Declaration -> E e D)
-pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp = do
+  (Phased s) =>
+  (In v [DeclarationSpecifier] -> F.Exp s v D)
+  -> (In v Declarator -> F.Exp s v D)
+  -> (In v Exp -> F.Exp s v D)
+  -> FliPprM s v (In v Declaration -> F.Exp s v D)
+pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp = F.do
   rec pDeclaration <- share $ \x ->
         case_ x [unDeclaration $ \d i -> pDeclarationSpecifierList d <> pInitDeclList i <> text ";"]
       pInitDecl <- share $ \x ->
@@ -122,12 +126,12 @@ pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp = do
   return pDeclaration
 
 pprFunDef ::
-  (FliPprD a e) =>
-  (A a CompoundStatement -> E e D) ->
-  (A a Declarator -> E e D) ->
-  (A a (NonEmpty DeclarationSpecifier) -> E e D) ->
-  (A a (NonEmpty Declaration) -> E e D) ->
-  FliPprM e (A a FunctionDefinition -> E e D)
+  (Phased s) =>
+  (In v CompoundStatement -> F.Exp s v D)
+  -> (In v Declarator -> F.Exp s v D)
+  -> (In v (NonEmpty DeclarationSpecifier) -> F.Exp s v D)
+  -> (In v (NonEmpty Declaration) -> F.Exp s v D)
+  -> FliPprM s v (In v FunctionDefinition -> F.Exp s v D)
 pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDeclarationList = do
   -- seperated into 3 different functions to get spacing right
   pFunDef2 <- share $ \c ->
@@ -155,10 +159,10 @@ pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDecl
       ]
 
 pprLabeledStatement ::
-  (FliPprD a e) =>
-  (A a Exp -> E e D) ->
-  (A a Statement -> E e D) ->
-  FliPprM e (A a LabeledStatement -> E e D)
+  (Phased s) =>
+  (In v Exp -> F.Exp s v D)
+  -> (In v Statement -> F.Exp s v D)
+  -> FliPprM s v (In v LabeledStatement -> F.Exp s v D)
 pprLabeledStatement pCondExp pStatement = share $ \x ->
   case_
     x
@@ -174,10 +178,10 @@ pprLabeledStatement pCondExp pStatement = share $ \x ->
     ]
 
 pprCompoundStatement ::
-  (FliPprD a e) =>
-  (A a (NonEmpty Declaration) -> E e D) ->
-  (A a [Statement] -> E e D) ->
-  FliPprM e (Bool -> A a CompoundStatement -> E e D)
+  (Monad m) =>
+  (In v (NonEmpty Declaration) -> F.Exp s v D)
+  -> (In v [Statement] -> F.Exp s v D)
+  -> m (Bool -> In v CompoundStatement -> F.Exp s v D)
 pprCompoundStatement pDeclarationList pStatementList = do
   return $ \withinSwitch x ->
     case_
@@ -192,10 +196,10 @@ pprCompoundStatement pDeclarationList pStatementList = do
       ]
 
 pprSelectionStatement ::
-  (FliPprD a e) =>
-  (A a Exp -> E e D) ->
-  (Bool -> Bool -> A a Statement -> E e D) ->
-  FliPprM e (A a SelectionStatement -> E e D)
+  (Phased s) =>
+  (In v Exp -> F.Exp s v D)
+  -> (Bool -> Bool -> In v Statement -> F.Exp s v D)
+  -> FliPprM s v (In v SelectionStatement -> F.Exp s v D)
 pprSelectionStatement pExp pStatement = share $ \x ->
   case_
     x
@@ -216,11 +220,7 @@ pprSelectionStatement pExp pStatement = share $ \x ->
     , unSelStmtSwitch $ \e s -> text "switch" <+>. parens (pExp e) <+> pStatement True False s
     ]
 
-pprIterationStatement ::
-  (FliPprD a e) =>
-  (A a Statement -> E e D) ->
-  (A a Exp -> E e D) ->
-  FliPprM e (A a IterationStatement -> E e D)
+pprIterationStatement :: (Phased s) => (In v Statement -> F.Exp s v D) -> (In v Exp -> F.Exp s v D) -> FliPprM s v (In v IterationStatement -> F.Exp s v D)
 pprIterationStatement pStatement pExp = share $ \x ->
   case_
     x
@@ -248,10 +248,7 @@ pprIterationStatement pStatement pExp = share $ \x ->
           <+>. pStatement s
     ]
 
-pprJumpStatement ::
-  (FliPprD a e) =>
-  (A a Exp -> E e D) ->
-  FliPprM e (A a JumpStatement -> E e D)
+pprJumpStatement :: (Phased s) => (In v Exp -> F.Exp s v D) -> FliPprM s v (In v JumpStatement -> F.Exp s v D)
 pprJumpStatement pExp = share $ \x ->
   case_
     x
@@ -266,8 +263,8 @@ pprJumpStatement pExp = share $ \x ->
           ]
     ]
 
-pprProgram :: (FliPprD a e) => FliPprM e (A a Program -> E e D)
-pprProgram = do
+pprProgram :: (Phased s) => FliPprM s v (In v Program -> F.Exp s v D)
+pprProgram = F.do
   rec (pExp, pCondExp, pAssignmentExp) <- pprExp pTypeName
       (pTypeName, pDeclarator, pDeclarationSpecifierList, pDeclarationSpecifierListNonEmpty) <- pprTypes pCondExp
   rec pDeclaration <- pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp
@@ -321,10 +318,10 @@ test :: String
 test = "int main ( ) { callSomeFunction(); label: if (true) goto label; return 0; }"
 
 printProgram :: Program -> Doc ann
-printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
+printProgram = pprMode (flippr @Explicit $ fromFunction <$> pprProgram)
 
 parseProgram :: [Char] -> Err ann [Program]
-parseProgram = E.parse $ parsingModeWith (CommentSpec (Just "//") (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pprProgram)
+parseProgram = E.parse $ parsingModeWith (CommentSpec (Just "//") (Just (BlockCommentSpec "/*" "*/" False))) (flippr @Explicit $ fromFunction <$> pprProgram)
 
 testPrint :: IO ()
 testPrint = do
@@ -332,3 +329,6 @@ testPrint = do
   putStrLn $ "Parsed: " ++ show parsed
   mapM_ (print . printProgram) parsed
   putStrLn $ "Done, parsed " ++ show (length parsed) ++ " programs"
+
+main :: IO ()
+main = testPrint

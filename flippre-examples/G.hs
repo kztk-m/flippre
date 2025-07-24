@@ -8,7 +8,6 @@
 import Control.Applicative (Alternative (..))
 import Data.Foldable (asum)
 import Text.FliPpr.Grammar as G
-import qualified Text.FliPpr.Grammar.UnFlatten as G
 import Prelude
 
 _example1 :: (GrammarD ExChar g) => g ()

@@ -6,6 +6,9 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -17,6 +20,10 @@ module Text.FliPpr.Internal.Core (
   type (~>),
   D,
   FliPpr (..),
+  flippr,
+  FliPprM,
+  Phased (..),
+  SPhase (..),
 
   -- * FliPpr Expressions and Definitions
   NullaryOp (..),
@@ -25,6 +32,7 @@ module Text.FliPpr.Internal.Core (
   PartialBij (..),
   Branch (..),
   Exp (..),
+  ExpsI (..),
   Def (..),
   Phase (..),
   FVar,
@@ -34,15 +42,16 @@ module Text.FliPpr.Internal.Core (
   Repr (..),
 ) where
 
-import Data.Kind (Constraint, Type)
+import Data.Kind (Type)
 import qualified Data.RangeSet.List as RS
-import Data.Typeable (Typeable)
+
+-- import Data.Typeable (Typeable)
 
 import Control.Arrow (first)
+import Data.Coerce (coerce)
 import Data.Function.Compat (applyWhen)
 import Data.String (IsString)
 import Data.String.Compat (IsString (..))
-import Debug.Trace (trace)
 import qualified Defs as D
 import GHC.Stack (CallStack)
 import qualified Prettyprinter as PP
@@ -81,13 +90,26 @@ data Branch arg exp a (t :: FType)
 
 data Phase = Implicit | Explicit
 
-type family ConstraintFType (t :: Phase) (a :: FType) :: Constraint where
-  ConstraintFType Implicit a = Typeable a
-  ConstraintFType Explicit a = ()
+data SPhase s where
+  SImplicit :: SPhase Implicit
+  SExplicit :: SPhase Explicit
 
-type family ConstraintType (t :: Phase) (a :: Type) :: Constraint where
-  ConstraintType Implicit a = Typeable a
-  ConstraintType Explicit a = ()
+class Phased s where
+  phase :: SPhase s
+
+instance Phased Implicit where
+  phase = SImplicit
+
+instance Phased Explicit where
+  phase = SExplicit
+
+-- type family ConstraintFType (t :: Phase) (a :: FType) :: Constraint where
+--   ConstraintFType Implicit a = Typeable a
+--   ConstraintFType Explicit a = ()
+
+-- type family ConstraintType (t :: Phase) (a :: Type) :: Constraint where
+--   ConstraintType Implicit a = Typeable a
+--   ConstraintType Explicit a = ()
 
 type family FVar v :: FType -> Type
 data family In v :: Type -> Type
@@ -106,6 +128,20 @@ data Exp (s :: Phase) v a where
 
 -- | A newtype wrapper for the FliPpr expression type: @forall v. Exp s v a@.
 newtype FliPpr s a = FliPpr (forall v. Exp s v a)
+
+-- | Make a closed FliPpr definition. A typical use is:
+--
+--   > flippr $ do
+--   >   rec ppr <- share $ arg $ \i -> ...
+--   >   return ppr
+flippr :: (forall v. FliPprM s v (Exp s v a)) -> FliPpr s a
+flippr x = FliPpr (localSp x)
+  where
+    localSp :: D.DefM (Exp s v) (Exp s v a) -> Exp s v a
+    localSp (D.DefM r) =
+      Local (coerce r DefRet)
+
+type FliPprM s v = D.DefM (Exp s v)
 
 instance (D ~ t) => Semigroup (Exp s v t) where
   (<>) x y = Op2 Cat x (Op2 Cat (Op0 Spaces) y)
@@ -132,14 +168,21 @@ instance (D ~ t) => DD.DocLike (Exp s v t) where
 data Def s v as a where
   DefRet :: Exp s v r -> Def s v '[] r
   DefCons :: Exp s v a -> Def s v as r -> Def s v (a : as) r
-  DefLetr :: (FVar v a -> Def s v (a : as) r) -> Def s v as r
+  DefLetr :: (FVar v a -> Def Explicit v (a : as) r) -> Def Explicit v as r
 
-instance D.Defs (Exp s v) where
+data ExpsI v as where
+  ExpNil :: ExpsI v '[]
+  ExpCons :: Exp Implicit v a -> ExpsI v as -> ExpsI v (a : as)
+instance (Phased s) => D.Defs (Exp s v) where
   newtype D (Exp s v) as r = DExp {unDCoreExp :: Def s v as r}
-  liftD = DExp . DefRet
+  liftD e = DExp $ DefRet e
   consD e (DExp ds) = DExp $ DefCons e ds
   unliftD (DExp ds) = Local ds
-  letrD h = DExp $ DefLetr (unDCoreExp . h . Var)
+  letrD h = DExp $ case phase @s of
+    SExplicit -> DefLetr (\x -> unDCoreExp (h $ Var x))
+    SImplicit ->
+      let DefCons e ds = unDCoreExp (h e)
+      in  ds
 
 -- |
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction', which
@@ -159,11 +202,11 @@ instance (Repr s v t r) => Repr s v (a ~> t) (In v a -> r) where
   toFunction f a = toFunction (f `App` a)
   fromFunction k = Lam (fromFunction . k)
 
-instance D.Arg (Exp s v) (Exp s v a) where
+instance (Phased s) => D.Arg (Exp s v) (Exp s v a) where
   letr f = D.letr $ fmap (first D.Tip) . f . D.unTip
 
 -- One-level unfolding to avoid overlapping instances.
-instance (v ~ v', Repr s v t r) => D.Arg (Exp s v') (In v a -> r) where
+instance (v ~ v', Phased s, Repr s v t r) => D.Arg (Exp s v') (In v a -> r) where
   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
 
 data ToPrint
@@ -178,7 +221,7 @@ pprIn i = fromString "x_" <> PP.viaShow i
 pprFVar :: Int -> PP.Doc ann
 pprFVar i = fromString "f_" <> PP.viaShow i
 
-ppr :: Int -> Int -> Int -> Exp s ToPrint a -> PP.Doc ann
+ppr :: (Phased s) => Int -> Int -> Int -> Exp s ToPrint a -> PP.Doc ann
 ppr dlevel flevel k e0 = case e0 of
   Lam h ->
     let vn = DLevel dlevel
@@ -189,7 +232,7 @@ ppr dlevel flevel k e0 = case e0 of
     applyWhen (k > 9) PP.parens $
       ppr dlevel flevel 9 e PP.<+> pprIn n
   Case _ (DLevel x) brs ->
-    let sep x y = PP.fillSep [x <> fromString ",", y]
+    let sep d1 d2 = PP.fillSep [d1 <> fromString ",", d2]
         pprBr (Branch (PartialBij s _ _) h) =
           let vn = DLevel dlevel
           in  PP.group $
@@ -226,7 +269,7 @@ ppr dlevel flevel k e0 = case e0 of
     in  applyWhen (k > 0) PP.parens $
           PP.align $
             PP.group $
-              PP.fillSep
+              PP.sep
                 [ PP.hsep [fromString "let () =", PP.align dx]
                 , PP.hsep [fromString "in", PP.align de]
                 ]
@@ -242,7 +285,7 @@ ppr dlevel flevel k e0 = case e0 of
     LineBreak -> fromString "lineBreak"
     Line' -> fromString "line'"
     NESpaces' -> fromString "nespaces'"
-    Text s -> applyWhen (k > 9) PP.parens $ PP.hsep [fromString "text", PP.viaShow s]
+    Text s -> applyWhen (k > 9) PP.parens $ PP.sep [fromString "text", PP.viaShow s]
   Op1 op e ->
     let d = ppr dlevel flevel 10 e
         fn = case op of
@@ -253,11 +296,11 @@ ppr dlevel flevel k e0 = case e0 of
   Op2 Cat e1 e2 ->
     let d1 = ppr dlevel flevel 5 e1
         d2 = ppr dlevel flevel 5 e2
-    in  applyWhen (k > 5) PP.parens $ PP.group $ PP.fillSep [d1, fromString "<#>" PP.<+> PP.align d2]
+    in  applyWhen (k > 5) PP.parens $ PP.group $ PP.sep [d1, fromString "<#>" PP.<+> PP.align d2]
   Op2 BChoice e1 e2 ->
     let d1 = ppr dlevel flevel 4 e1
         d2 = ppr dlevel flevel 4 e2
-    in  applyWhen (k > 4) PP.parens $ PP.group $ PP.fillSep [d1, fromString "<?" PP.<+> PP.align d2]
+    in  applyWhen (k > 4) PP.parens $ PP.group $ PP.sep [d1, fromString "<?" PP.<+> PP.align d2]
   Local d ->
     applyWhen (k > 9) PP.parens $
       PP.group $
@@ -265,7 +308,7 @@ ppr dlevel flevel k e0 = case e0 of
           PP.nest 2 $
             PP.sep [fromString "local", pprDef dlevel flevel 10 d]
 
-pprDef :: Int -> Int -> Int -> Def s ToPrint as a -> PP.Doc ann
+pprDef :: (Phased s) => Int -> Int -> Int -> Def s ToPrint as a -> PP.Doc ann
 pprDef dlevel flevel k d0 = case d0 of
   DefRet e ->
     applyWhen (k > 9) PP.parens $
@@ -294,6 +337,8 @@ pprDef dlevel flevel k d0 = case d0 of
                   , fromString "="
                   , d
                   ]
+
+--  DefI (_, _) -> error "We cannot print implicit expressions as they may have cycles."
 
 instance (ToPrint ~ v) => PP.Pretty (Exp Explicit v a) where
   pretty = ppr 0 0 0

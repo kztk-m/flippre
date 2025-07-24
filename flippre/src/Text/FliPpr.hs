@@ -19,6 +19,7 @@ module Text.FliPpr (
   PartialBij (..),
   Err (..),
   Phase (..),
+  Phased,
 
   -- * Syntax
 
@@ -140,7 +141,7 @@ import Text.FliPpr.Grammar.Err
 import Text.FliPpr.Internal.ParserGeneration
 import Text.FliPpr.Internal.PrettyPrinting
 import Text.FliPpr.Pat
-import Text.FliPpr.Primitive
+import Text.FliPpr.Primitives
 import Text.FliPpr.TH
 
 import qualified Defs
@@ -280,10 +281,10 @@ $(mkUn ''(,,))
 
 -- | @textAs x r@ serves as @text x@ in pretty-printing, but
 -- in parsing it serves as @r@ of which parsing result is used to update @x$.
-textAs :: (HasCallStack) => In v [Char] -> A.DFA Char -> Exp s v D
+textAs :: (HasCallStack, Phased s) => In v [Char] -> A.DFA Char -> Exp s v D
 textAs a m = withFrozenCallStack (textAs' m a)
 
-textAs' :: (HasCallStack) => A.DFA Char -> In v [Char] -> Exp s v D
+textAs' :: (HasCallStack, Phased s) => A.DFA Char -> In v [Char] -> Exp s v D
 textAs' (A.DFAImpl i qs fs tr) = local $
   letrs (S.toList qs) $ \f ->
     def
@@ -303,7 +304,7 @@ textAs' (A.DFAImpl i qs fs tr) = local $
 -- In FliPpr, one can only define recursive printers that can be interpreted as context-free grammars.
 -- By returning lists depending the input AST, we can do anything with lists---in particular, we can
 -- define different printers for different indices. This is beyond context-free.
-foldPpr :: (In v a -> Exp s v t -> Exp s v t) -> Exp s v t -> In v [a] -> Exp s v t
+foldPpr :: (Phased s) => (In v a -> Exp s v t -> Exp s v t) -> Exp s v t -> In v [a] -> Exp s v t
 foldPpr c n = local $ foldPprShared c n
 
 -- | If 'foldPpr' is used with the same arguments more than once, the following version
@@ -311,7 +312,7 @@ foldPpr c n = local $ foldPprShared c n
 --
 --  > do p <- foldPprShared (...) (...)
 --  >    ... p xs ... p ys ...
-foldPprShared :: (In v a -> Exp s v t -> Exp s v t) -> Exp s v t -> FliPprM s v (In v [a] -> Exp s v t)
+foldPprShared :: (Phased s) => (In v a -> Exp s v t -> Exp s v t) -> Exp s v t -> FliPprM s v (In v [a] -> Exp s v t)
 foldPprShared c n =
   Defs.letr $ \f ->
     def
@@ -328,12 +329,12 @@ foldPprShared c n =
 --
 -- For example, the following prints lists separated by commas
 -- > foldPprL (\a d -> pprElem a <> text "," <+>. d) pprElem (text "")
-foldPprL :: (In v a -> Exp s v t -> Exp s v t) -> (In v a -> Exp s v t) -> Exp s v t -> In v [a] -> Exp s v t
+foldPprL :: (Phased s) => (In v a -> Exp s v t -> Exp s v t) -> (In v a -> Exp s v t) -> Exp s v t -> In v [a] -> Exp s v t
 foldPprL c s n = local $ foldPprLShared c s n
 
 -- | If 'foldPprL' is used with the same arguments more than once, the following version
 --   is more efficient.
-foldPprLShared :: (In v a -> Exp s v t -> Exp s v t) -> (In v a -> Exp s v t) -> Exp s v t -> FliPprM s v (In v [a] -> Exp s v t)
+foldPprLShared :: (Phased s) => (In v a -> Exp s v t -> Exp s v t) -> (In v a -> Exp s v t) -> Exp s v t -> FliPprM s v (In v [a] -> Exp s v t)
 foldPprLShared c s n =
   Defs.letr $ \f ->
     Defs.letr $ \g ->

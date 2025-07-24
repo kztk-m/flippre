@@ -6,8 +6,10 @@
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# OPTIONS_GHC -Wno-missing-deriving-strategies #-}
 
 import Control.DeepSeq
 import System.CPUTime
@@ -45,7 +47,7 @@ data Exp
 
 $(mkUn ''Exp)
 
-mkPprInt :: FliPprM s v (In v Int -> F.Exp s v D)
+mkPprInt :: (Phased s) => FliPprM s v (In v Int -> F.Exp s v D)
 mkPprInt =
   share $ \x -> case_ x [atoi $ \s -> textAs s numbers]
   where
@@ -61,7 +63,7 @@ mkPprInt =
 keywords :: [String]
 keywords = ["let", "in"]
 
-mkPprVar :: FliPprM s v (In v String -> F.Exp s v D)
+mkPprVar :: (Phased s) => FliPprM s v (In v String -> F.Exp s v D)
 mkPprVar =
   share $ \x -> textAs x ident
   where
@@ -73,12 +75,12 @@ mkPprVar =
 opP :: (DocLike d, Num n, Ord n) => Fixity -> (d -> d -> d) -> (n -> a -> d) -> (n -> b -> d) -> n -> a -> b -> d
 opP fixity f p1 p2 k x y = opPrinter fixity f (\k' -> p1 k' x) (\k' -> p2 k' y) k
 
-manyParens :: F.Exp s v D -> F.Exp s v D
+manyParens :: (Phased s) => F.Exp s v D -> F.Exp s v D
 manyParens d = local $ do
   rec x <- share $ d <? parens x
   return x
 
-pExp :: FliPprM s v (In v Exp -> F.Exp s v D)
+pExp :: (Phased s) => FliPprM s v (In v Exp -> F.Exp s v D)
 pExp = do
   pprInt <- mkPprInt
   pprVar <- mkPprVar
@@ -114,7 +116,7 @@ grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/"
 --   Earley.parse $ parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> p)
 
 pprExp :: Exp -> Doc ann
-pprExp = pprMode (flippr $ fromFunction <$> pExp)
+pprExp = pprMode (flippr @Explicit $ fromFunction <$> pExp)
 
 parseExp :: [Char] -> Err ann [Exp]
 parseExp =

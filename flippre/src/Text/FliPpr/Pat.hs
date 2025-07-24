@@ -37,7 +37,7 @@ module Text.FliPpr.Pat (
   br,
 ) where
 
-import Text.FliPpr.Primitive
+import Text.FliPpr.Primitives
 
 -- Patterns as
 

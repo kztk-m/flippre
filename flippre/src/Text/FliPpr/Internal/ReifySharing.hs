@@ -15,7 +15,7 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Text.FliPpr.Internal.ReifySharing (
-  ReifySharing (..),
+  reifySharing,
 ) where
 
 import Control.Monad.Reader (Reader, ReaderT)
@@ -33,20 +33,17 @@ import Text.FliPpr.Internal.Core
 import Control.Monad.Writer (Writer)
 import qualified Control.Monad.Writer as Writer
 import Data.Maybe (fromMaybe)
-import Debug.Trace (traceM, traceShow, traceShowM)
+import Debug.Trace (traceM, traceShowM)
 import qualified Defs as D
 import GHC.Stack (CallStack)
 import System.IO.Unsafe (unsafePerformIO)
 import Unembedding.Env
 import Unsafe.Coerce (unsafeCoerce)
 
-class ReifySharing s where
-  reifySharing :: (forall v. Exp s v a) -> Exp Explicit vv a
-
-instance ReifySharing Implicit where
-  reifySharing = fromImplicit
-instance ReifySharing Explicit where
-  reifySharing = id
+reifySharing :: forall s a vv. (Phased s) => (forall v. Exp s v a) -> Exp Explicit vv a
+reifySharing e = case phase @s of
+  SImplicit -> fromImplicit e
+  SExplicit -> e
 
 fromImplicit :: forall vv a. (forall v. Exp Implicit v a) -> Exp Explicit vv a
 fromImplicit e = unsafePerformIO $ do
@@ -134,7 +131,8 @@ data NExpH nexp (def :: [FType] -> FType -> Type) a where
   NOp1 :: !UnaryOp -> !(nexp D) -> NExpH nexp def D
   NOp2 :: !BinaryOp -> !(nexp D) -> !(nexp D) -> NExpH nexp def D
   NVar :: !(FName a) -> NExpH nexp def a
-  NLocal :: !(def '[] a) -> NExpH nexp def a
+
+-- NLocal :: !(def '[] a) -> NExpH nexp def a
 
 deriving stock instance
   (forall t. Show (nexp t), forall as r. Show (def as r)) =>
@@ -180,8 +178,8 @@ data Conf = Conf
 incVNameLevel :: Int -> Conf -> Conf
 incVNameLevel k conf@Conf{vnameLevel = n} = conf{vnameLevel = n + k}
 
-incFNameLevel :: Int -> Conf -> Conf
-incFNameLevel k conf@Conf{fnameLevel = n} = conf{fnameLevel = n + k}
+-- incFNameLevel :: Int -> Conf -> Conf
+-- incFNameLevel k conf@Conf{fnameLevel = n} = conf{fnameLevel = n + k}
 
 type AnnM = ReaderT Conf IO
 
@@ -201,35 +199,36 @@ annotate !e0 = do
       -- Case: the first time we see exp
       Reader.lift $ modifyIORef' ref $ insertOccMap key 1
       let wrap = AnnNExp sn
-      fmap wrap $ case e0 of
-        Op0 op ->
-          pure (NOp0 op)
-        Op1 op e ->
-          NOp1 op <$> annotate e
-        Op2 op e1 e2 ->
-          NOp2 op <$> annotate e1 <*> annotate e2
-        Lam h -> do
-          level <- Reader.asks vnameLevel
-          let vn = VName level
-          let e = h vn
-          NLam vn <$> Reader.local (incVNameLevel 1) (annotate e)
-        App e x -> do
-          NApp <$> annotate e <*> pure x
-        UnUnit x e -> do
-          NUnUnit x <$> annotate e
-        UnPair cs x h -> do
-          level <- Reader.asks vnameLevel
-          let v1 = VName level
-          let v2 = VName $ level + 1
-          let e = h v1 v2
-          NUnPair cs x v1 v2 <$> Reader.local (incVNameLevel 1) (annotate e)
-        CharAs x rs ->
-          pure $ NCharAs x rs
-        Case cs x brs ->
-          NCase cs x <$> mapM annotateBranch brs
-        Local def ->
-          NLocal <$> annotateDef def
-        Var x -> pure $ NVar x
+      fmap wrap (go e0)
+  where
+    go = \case
+      Op0 op ->
+        pure (NOp0 op)
+      Op1 op e ->
+        NOp1 op <$> annotate e
+      Op2 op e1 e2 ->
+        NOp2 op <$> annotate e1 <*> annotate e2
+      Lam h -> do
+        level <- Reader.asks vnameLevel
+        let vn = VName level
+        let e = h vn
+        NLam vn <$> Reader.local (incVNameLevel 1) (annotate e)
+      App e x -> do
+        NApp <$> annotate e <*> pure x
+      UnUnit x e -> do
+        NUnUnit x <$> annotate e
+      UnPair cs x h -> do
+        level <- Reader.asks vnameLevel
+        let v1 = VName level
+        let v2 = VName $ level + 1
+        let e = h v1 v2
+        NUnPair cs x v1 v2 <$> Reader.local (incVNameLevel 1) (annotate e)
+      CharAs x rs ->
+        pure $ NCharAs x rs
+      Case cs x brs ->
+        NCase cs x <$> mapM annotateBranch brs
+      Local (DefRet e) -> go e
+      Var x -> pure $ NVar x
 
 annotateBranch ::
   forall a t.
@@ -240,17 +239,17 @@ annotateBranch (Branch pij h) = do
   let v1 = VName level
   Reader.local (incVNameLevel 1) $ NBranch pij v1 <$> annotate (h v1)
 
-annotateDef ::
-  Def Implicit Name as r
-  -> AnnM (AnnNDef as r)
-annotateDef =
-  fmap AnnNDef . \case
-    DefRet e -> NDefRet <$> annotate e
-    DefCons e d -> NDefCons <$> annotate e <*> annotateDef d
-    DefLetr h -> do
-      level <- Reader.asks fnameLevel
-      let f1 = FName level
-      Reader.local (incFNameLevel 1) $ NDefLetr f1 <$> annotateDef (h f1)
+-- annotateDef ::
+--   Def Implicit Name as r
+--   -> AnnM (AnnNDef as r)
+-- annotateDef =
+--   fmap AnnNDef . \case
+--     DefRet e -> NDefRet <$> annotate e
+--     DefCons e d -> NDefCons <$> annotate e <*> annotateDef d
+--     DefLetr h -> do
+--       level <- Reader.asks fnameLevel
+--       let f1 = FName level
+--       Reader.local (incFNameLevel 1) $ NDefLetr f1 <$> annotateDef (h f1)
 
 runAnnotate :: Exp Implicit Name a -> IO (AnnNExp a, OccMap)
 runAnnotate e = do
@@ -280,7 +279,8 @@ data RecNExp a
   | NLetRec [NDefPair] (NExpH RecNExp RecNDef a)
   deriving stock Show
 
-newtype RecNDef as r = RecNDef (NDefH RecNExp RecNDef as r)
+newtype RecNDef as r
+  = RecNDef (NDefH RecNExp RecNDef as r)
   deriving stock Show
 
 data NDefPair where
@@ -376,15 +376,14 @@ introLets occMap (AnnNExp sn e0) =
     go (NOp1 op e) = NOp1 op <$> introLets occMap e
     go (NOp2 op e1 e2) = NOp2 op <$> introLets occMap e1 <*> introLets occMap e2
     go (NVar x) = pure $ NVar x -- x should be FName i
-    go (NLocal (AnnNDef d)) = NLocal . RecNDef <$> goDef d
-
+    -- go (NLocal (AnnNDef d)) = NLocal . RecNDef <$> goDef d
     goBranch :: NBranch AnnNExp b a -> Writer LMaps (NBranch RecNExp b a)
     goBranch (NBranch pij b e) = NBranch pij b <$> introLets occMap e
 
-    goDef :: NDefH AnnNExp AnnNDef as r -> Writer LMaps (NDefH RecNExp RecNDef as r)
-    goDef (NDefRet e) = NDefRet <$> introLets occMap e
-    goDef (NDefCons e (AnnNDef d)) = NDefCons <$> introLets occMap e <*> (RecNDef <$> goDef d)
-    goDef (NDefLetr x (AnnNDef d)) = NDefLetr x . RecNDef <$> goDef d
+-- goDef :: NDefH AnnNExp AnnNDef as r -> Writer LMaps (NDefH RecNExp RecNDef as r)
+-- goDef (NDefRet e) = NDefRet <$> introLets occMap e
+-- goDef (NDefCons e (AnnNDef d)) = NDefCons <$> introLets occMap e <*> (RecNDef <$> goDef d)
+-- goDef (NDefLetr x (AnnNDef d)) = NDefLetr x . RecNDef <$> goDef d
 
 data SomeVar v where
   SomeVar :: In v a -> SomeVar v
@@ -454,15 +453,15 @@ extendMap :: Env FName as -> Env (Exp Explicit v) as -> FMap v -> FMap v
 extendMap ENil ENil fMap = fMap
 extendMap (x :. xs) (e :. es) fMap = extendMap xs es (insertFMap x e fMap)
 
-unnameDef :: RecNDef as r -> UnnameM v (Def Explicit v as r)
-unnameDef (RecNDef d0) = case d0 of
-  NDefRet e -> DefRet <$> unname e
-  NDefCons e d -> DefCons <$> unname e <*> unnameDef d
-  NDefLetr f d -> do
-    (vMap, fMap) <- Reader.ask
-    pure $ DefLetr $ \ff ->
-      let fMap' = insertFMap f (Var ff) fMap
-      in  Reader.runReader (unnameDef d) (vMap, fMap')
+-- unnameDef :: RecNDef as r -> UnnameM v (Def Explicit v as r)
+-- unnameDef (RecNDef d0) = case d0 of
+--   NDefRet e -> DefRet <$> unname e
+--   NDefCons e d -> DefCons <$> unname e <*> unnameDef d
+--   NDefLetr f d -> do
+--     (vMap, fMap) <- Reader.ask
+--     pure $ DefLetr $ \ff ->
+--       let fMap' = insertFMap f (Var ff) fMap
+--       in  Reader.runReader (unnameDef d) (vMap, fMap')
 
 unnameWork :: NExpH RecNExp RecNDef a -> UnnameM v (Exp Explicit v a)
 unnameWork e0 = case e0 of
@@ -502,7 +501,7 @@ unnameWork e0 = case e0 of
             let vMap' = insertVMap y yy vMap
             in  Reader.runReader (unname e) (vMap', fMap)
     Case cs xx <$> mapM f brs
-  NLocal d -> Local <$> unnameDef d
+    -- NLocal d -> Local <$> unnameDef d
   where
     resolveVar :: forall v x. VName x -> UnnameM v (In v x)
     resolveVar x = do

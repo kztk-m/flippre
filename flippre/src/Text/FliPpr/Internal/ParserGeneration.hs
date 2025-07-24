@@ -56,7 +56,7 @@ import Text.FliPpr.Internal.Core
 
 import Debug.Trace (trace)
 import GHC.Stack (HasCallStack, callStack, prettyCallStack)
-import Text.FliPpr.Internal.ReifySharing (ReifySharing (..))
+import Text.FliPpr.Internal.ReifySharing (reifySharing)
 import qualified Unembedding as U
 import Unembedding.Env (Env (..))
 
@@ -197,7 +197,7 @@ branchesHOAS =
 data ParsingMode' r ann g
 
 newtype instance In (ParsingMode' r ann g) a
-  = InArgSem {getArgSem :: U.EnvI (ArgSem r) a}
+  = InArgSem (U.EnvI (ArgSem r) a)
 type instance FVar (ParsingMode' r ann g) = U.EnvI (ExpSem r ann g)
 
 parser ::
@@ -212,7 +212,7 @@ parser (Lam h) = U.liftSOn' @(ArgSem r) @(ExpSem r ann g) (U.ol1 :. ENil) Proxy 
   where
     lamSem :: ExpSem r ann g (a : env) t -> ExpSem r ann g env (a :~> t)
     lamSem (ExpSem e) = ExpSem $ fmap (fmap RF) e
-parser (Case cstack (InArgSem a) brs) =
+parser (Case _cstack (InArgSem a) brs) =
   U.liftFO2' scrutineeSem a (branchesHOAS $ map pbr brs)
   where
     pbr (Branch pij h) = Branch pij (parser . h . InArgSem)
@@ -513,20 +513,20 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
     br = RS.fromList "\r\n" -- breaks
     nb = RS.complement br -- non-breaks
 
-parsingMode :: (G.GrammarD Char g, ReifySharing s) => FliPpr s (a ~> D) -> g (Err ann a)
+parsingMode :: (G.GrammarD Char g, Phased s) => FliPpr s (a ~> D) -> g (Err ann a)
 parsingMode = parsingModeWith spec
   where
     spec = CommentSpec{lcSpec = Nothing, bcSpec = Nothing}
 
 parser' ::
-  (ValEnvRepr r, U.Variables (Index r), G.Defs g, Alternative g, G.FromSymb G.ExChar g, ReifySharing s) =>
+  (ValEnvRepr r, U.Variables (Index r), G.Defs g, Alternative g, G.FromSymb G.ExChar g, Phased s) =>
   FliPpr s res
   -> U.EnvI (ExpSem r ann g) res
 parser' (FliPpr e) = parser (reifySharing e)
 
 parsingModeWith ::
   forall s g a ann.
-  (G.GrammarD Char g, ReifySharing s) =>
+  (G.GrammarD Char g, Phased s) =>
   CommentSpec
   -> FliPpr s (a ~> D)
   -> g (Err ann a)
@@ -541,7 +541,7 @@ parsingModeWith spec fe =
 
 parsingModeSP ::
   forall s g a ann.
-  (G.GrammarD Char g, ReifySharing s) =>
+  (G.GrammarD Char g, Phased s) =>
   (forall g'. (G.GrammarD Char g') => g' ())
   -> FliPpr s (a ~> D)
   -> g (Err ann a)

@@ -402,7 +402,7 @@ instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (
     return ((b1, b2, b3), ((b4, b5, b6), r))
 
 -- Use template haskell to generate instances for n-tuples
-$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 15]])
+$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 32]])
 
 instance (Defs f) => Arg f (HList g '[]) where
   letr f = do

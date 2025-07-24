@@ -11,7 +11,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 import Text.FliPpr hiding (Exp)
 import qualified Text.FliPpr as F
@@ -84,7 +86,7 @@ ident = (small <> AM.star alphaNum) `AM.difference` AM.unions (map fromString ke
 keywords :: [String]
 keywords = ["true", "false", "let", "in", "if", "then", "else"]
 
-pprExp :: FliPprM s v (In v Exp -> F.Exp s v D)
+pprExp :: (Phased s) => FliPprM s v (In v Exp -> F.Exp s v D)
 pprExp = F.do
   pprName <- share $ \x -> case_ x [unName $ \s -> textAs s ident]
   pprInt <- share $ \n -> convertInput itoaBij n $ \s -> textAs s numbers
@@ -177,7 +179,7 @@ pprExp = F.do
   pure $ pExp 0 (IsRightMost True)
 
 pretty :: Exp -> PP.Doc ann
-pretty = pprMode (flippr $ arg <$> pprExp)
+pretty = pprMode (flippr @Explicit $ arg <$> pprExp)
 
 parser :: String -> [Exp]
 parser s = case p s of

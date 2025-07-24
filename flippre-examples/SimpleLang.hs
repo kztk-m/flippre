@@ -13,9 +13,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# OPTIONS_GHC -Wno-missing-deriving-strategies #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 import Text.FliPpr hiding (Exp)
 import qualified Text.FliPpr as F
@@ -77,6 +80,7 @@ ident = (small <> AM.star alphaNum) `AM.difference` AM.unions (map fromString ke
 keywords :: [String]
 keywords = ["true", "false", "let", "in", "if", "then", "else"]
 
+flipprExp :: (Phased s) => FliPprM s v (In v Exp -> F.Exp s v D)
 flipprExp = F.do
   pprName <- share $ \x -> case_ x [unName $ \s -> textAs s ident]
   pprInt <- share $ \n -> convertInput itoaBij n $ \s -> textAs s numbers
@@ -156,7 +160,7 @@ parseExp = \s -> case p s of
     p = E.parse gExp
 
 pprExp :: Exp -> Doc ann
-pprExp = pprMode (flippr $ fromFunction <$> flipprExp)
+pprExp = pprMode (flippr @Implicit $ fromFunction <$> flipprExp)
 
 exp1 :: Exp
 exp1 =

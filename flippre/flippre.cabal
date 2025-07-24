@@ -80,7 +80,7 @@ library
     Text.FliPpr.Internal.THCompat
     Text.FliPpr.Mfix
     Text.FliPpr.Pat
-    Text.FliPpr.Primitive
+    Text.FliPpr.Primitives
     Text.FliPpr.QDo
     Text.FliPpr.TH
 

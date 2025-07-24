@@ -20,12 +20,12 @@ import Prelude
 import Control.Applicative ((<|>))
 import Text.FliPpr.Mfix (mfix)
 
-manyParens :: F.Exp s v D -> F.Exp s v D
+manyParens :: (Phased s) => F.Exp s v D -> F.Exp s v D
 manyParens d = local $ do
   rec m <- share $ d <? parens m
   return m
 
-defPprTF :: FliPprM s v (In v Bool -> F.Exp s v D)
+defPprTF :: (Phased s) => FliPprM s v (In v Bool -> F.Exp s v D)
 defPprTF = share $ \i ->
   manyParens $
     case_
@@ -34,7 +34,7 @@ defPprTF = share $ \i ->
       , $(un 'False) $ text "False"
       ]
 
-example1 :: FliPpr s ([Bool] ~> D)
+example1 :: (Phased s) => FliPpr s ([Bool] ~> D)
 example1 = flippr $ do
   pprTF <- defPprTF
 
@@ -53,7 +53,7 @@ example1 = flippr $ do
           ]
   return (fromFunction ppr)
 
-example2 :: FliPpr s ([Bool] ~> D)
+example2 :: (Phased s) => FliPpr s ([Bool] ~> D)
 example2 = flippr $ do
   pprTF <- defPprTF
   pure $ arg $ brackets . foldPprL (\a d -> pprTF a <> text "," <+>. d) pprTF (text "")

@@ -8,7 +8,6 @@
 
 import Text.FliPpr
 
-import qualified Text.FliPpr.Grammar as G
 import qualified Text.FliPpr.Grammar.Driver.Earley as E
 
 import qualified Text.FliPpr.Automaton as AM
@@ -24,8 +23,7 @@ ident = small <> AM.star alphaNum
     small = AM.unions [AM.range 'a' 'z', AM.singleton '_']
     alphaNum = AM.unions [number, small, AM.range 'A' 'Z']
 
--- repeats :: (FliPprD a e) => (E e D -> E e D -> E e D) -> (E e D -> E e D -> E e D) -> FliPprM e (E e ([String] ~> D))
-repeats :: (Exp s v D -> Exp s v D -> Exp s v D) -> (Exp s v D -> Exp s v D -> Exp s v D) -> FliPprM s v (Exp s v ([String] ~> D))
+repeats :: (Phased s) => (Exp s v D -> Exp s v D -> Exp s v D) -> (Exp s v D -> Exp s v D -> Exp s v D) -> FliPprM s v (Exp s v ([String] ~> D))
 repeats op1 op2 = do
   ptext <- share $ \i -> textAs i ident
   rec p <- share $ \i -> case_ i [unNil $ text "", unCons $ \x xs -> p' x xs]
