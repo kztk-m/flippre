@@ -146,6 +146,7 @@ import Text.FliPpr.TH
 
 import qualified Defs
 import Text.FliPpr.Automaton as A
+import Text.Printf (printf)
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
 --   it behaves as '<>'.
@@ -293,10 +294,23 @@ textAs' (A.DFAImpl i qs fs tr) = local $
             s
             [ unNil $ if q `S.member` fs then text "" else abort
             , unCons $ \c r ->
-                case_ c [isMember cs $ \c' -> charAs c' cs <#> f q' r | (cs, q') <- fromMaybe [] $ M.lookup q tr]
+                case_ c [isMember' cs $ \c' -> charAs c' cs <#> f q' r | (cs, q') <- fromMaybe [] $ M.lookup q tr]
             ]
       )
       $ return (f i)
+  where
+    isMember' cs k =
+      case isMember cs k of
+        Branch (PartialBij p f fi) h ->
+          let p'
+                | RS.isFull cs = "_"
+                | [(c, c')] <- rlist, c' == c = "is " ++ show c
+                | [(c, c')] <- rlistc, c' == c = printf "isMember complement(singleton %c)" 'c'
+                | otherwise = p
+                where
+                  rlist = RS.toRangeList cs
+                  rlistc = RS.toRangeList (RS.complement cs)
+          in  Branch (PartialBij p' f fi) h
 
 -- | A list printer.
 --
