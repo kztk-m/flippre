@@ -41,25 +41,23 @@ mkUn n = do
       -- let sigd = TH.SigD fn t
       -- (sigd:) <$> [d| $(TH.varP fn) = $(return e) |]
       return [TH.SigD fn t, TH.ValD (TH.VarP fn) (TH.NormalB e) []]
-      where
-        makeUnName :: String -> Q TH.Name
-        makeUnName ":" = return $ TH.mkName "unCons"
-        makeUnName "[]" = return $ TH.mkName "unNil"
-        makeUnName s | c : _ <- s, C.isUpper c = return $ TH.mkName $ "un" ++ s
-        makeUnName s | j : _ <- [i | i <- 0 : [2 .. 5], s == TH.nameBase (TH.tupleDataName i)] = return $ TH.mkName $ "unTuple" ++ show j
-        makeUnName s = error $ "mkUn does not support non-letter constructors in general: " ++ show s
+
+makeUnName :: String -> Q TH.Name
+makeUnName ":" = return $ TH.mkName "unCons"
+makeUnName "[]" = return $ TH.mkName "unNil"
+makeUnName s | c : _ <- s, C.isUpper c = return $ TH.mkName $ "un" ++ s
+makeUnName s | j : _ <- [i | i <- 0 : [2 .. 5], s == TH.nameBase (TH.tupleDataName i)] = return $ TH.mkName $ "unTuple" ++ show j
+makeUnName s = error $ "mkUn does not support non-letter constructors in general: " ++ show s
 
 -- |
 -- Make an (injective) deconstructor from a constructor.
 --
 -- For example, we have:
 --
--- >>> :t $(un '(:))
--- >>> :t $(un 'Left)
-
--- $(un '(:)) :: (v0 a0 -> v0 [a0] -> Exp s0 v0 r0) -> Branch v0 (Exp s0 v0) [a0] r0
-
--- $(un 'Left) :: (v0 a0 -> Exp s0 v0 r0) -> Branch v0 (Exp s0 v0) (Either a0 b0) r0
+-- >>> :t let x = $(un '(:)) in x
+-- >>> :t let y = $(un 'Left) in y
+-- let x = $(un '(:)) in x :: (In v a -> In v [a] -> Exp s v r) -> Branch (In v) (Exp s v) [a] r
+-- let y = $(un 'Left) in y :: (In v a -> Exp s v r) -> Branch (In v) (Exp s v) (Either a b) r
 un :: TH.Name -> Q TH.Exp
 un n = do
   (t, e) <- unGen n
@@ -78,10 +76,11 @@ unGen cname = do
       let fi = makeBackward cname n
       let exp = makeBody n
       t <- makeTy ty
+      pname <- TH.nameBase <$> makeUnName (TH.nameBase cname)
       r <-
         [|
           \e ->
-            PartialBij $(TH.litE $ TH.stringL $ TH.nameBase cname) $f $fi
+            PartialBij $(TH.litE $ TH.stringL pname) $f $fi
               `Branch` $(exp) e
           |]
       return (t, r)

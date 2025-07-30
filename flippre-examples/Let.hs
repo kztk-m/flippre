@@ -100,13 +100,12 @@ pExp = do
             , unLet $ \x e1 e2 ->
                 parensIf (k > 0) $
                   group $
-                    text "let" <+> pprVar x
-                      <> text "="
-                      <> nest 2 (line' <> pprE 0 e1)
-                      <> line
-                      <> text "in" <+> pprE 0 e2
+                    sep
+                      [ hsep [text "let", pprVar x, text "=", nest 2 (line' <> pprE 0 e1)]
+                      , hsep [text "in", align $ pprE 0 e2]
+                      ]
             ]
-  return (\x -> spaces <> pprE (0 :: Fin Nat5) x <> spaces)
+  return (\x -> spaces <> pprE (0 :: Fin Nat4) x <> spaces)
 
 grammar :: (G.GrammarD Char g) => g (Err ann Exp)
 grammar = parsingModeWith (CommentSpec Nothing (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pExp :: FliPpr Explicit (Exp ~> D))
@@ -157,7 +156,8 @@ countTime str comp = do
 
 main :: IO ()
 main = do
-  -- print $ G.pprAsFlat $ parsingMode $ flippr $ fmap fromFunction $ fromDFA dfaVar
+  print (parseExp' "1 + 1")
+  print $ G.pprAsFlat grammar
   rnf s1 `seq` countTime "Exp1" $ do
     print (parseExp' s1)
   where

@@ -93,11 +93,10 @@ pprExp = define $ \k e ->
             k
       , unLet $ \x e1 e2 ->
           parensIf (k > 0) $
-            group $
-              sep
-                [ hsep [text "let", pprVar x, text "=", nest 2 (line' <> pprExp 0 e1)]
-                , hsep [text "in", align $ pprExp 0 e2]
-                ]
+            sep
+              [ hsep [text "let", pprVar x, text "=", nest 2 (line' <> pprExp 0 e1)]
+              , hsep [text "in", align $ pprExp 0 e2]
+              ]
       ]
   where
     op s d1 d2 = group $ d1 <> nest 2 (line' <> text s <+>. d2)
@@ -146,6 +145,8 @@ countTime str comp = do
 
 main :: IO ()
 main = do
+  print (parseExp' "1 + 1")
+  print $ G.pprAsFlat grammar
   -- print $ G.pprAsFlat $ parsingMode $ flippr $ fmap fromFunction $ fromDFA dfaVar
   rnf s1 `seq` countTime "Exp1" $ do
     print (parseExp' s1)

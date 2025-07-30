@@ -35,7 +35,7 @@ import Data.IORef
 import qualified Data.IntMap as IM
 import Data.Maybe (fromMaybe)
 import qualified Data.RangeSet.List as RS
-import Debug.Trace (trace, traceM, traceShowM)
+import Debug.Trace (traceM, traceShowM)
 import qualified Defs as D
 import GHC.Stack (CallStack)
 import System.IO.Unsafe (unsafePerformIO)
@@ -365,71 +365,9 @@ annotateBranch (Branch pij h) = do
   let v1 = VName level
   Reader.local (incVNameLevel 1) $ NBranch pij v1 <$> annotate (h v1)
 
--- annotateDef ::
---   Def Implicit Name as r
---   -> AnnM (AnnNDef as r)
--- annotateDef =
---   fmap AnnNDef . \case
---     DefRet e -> NDefRet <$> annotate e
---     DefCons e d -> NDefCons <$> annotate e <*> annotateDef d
---     DefLetr h -> do
---       level <- Reader.asks fnameLevel
---       let f1 = FName level
---       Reader.local (incFNameLevel 1) $ NDefLetr f1 <$> annotateDef (h f1)
-
--- [NOTE]
+-- [NOTE] Treatment of depths.
 --
--- Treatment of depths. As we allow mutually recursive definitions like
---
---    let x = 1 : y y = 2 : x in ...
---
--- The rule for let introduction is simple. We cannot introduce "let x = ..."
--- before any y that depends on x directly or indirectly ("such as let y = ... z
--- ..., z = ... x ...") has been introduced. That is, y ->+ x.
---
--- An observation is that let definitions for the variables in a SCC must be
--- introduced at the same time. Another observation is that a reverse
--- topologically sorted SCCs gives us a sound ordering, but it is too coarse.
---
--- What is need is a condensation graph, but 'containers' does not provide any
--- API that compute it directly. Fortunately, 'fgl' does.
---
--- Given that we obtained a condensation graph, we use worklist for let
--- introduction. The idea is that if a set of variables (an SCC) have been
--- processed in the list, we will add new sets of variables (SCCs) to the graph
--- that connects to the SCC in the condensation graph.
---
--- But, how we manage the worklist in the let introduction, which performs a
--- bottom-up traversal of an expression tree? We may merge two by using the fact
--- that they can only "go forward" in the transposed condensation graph, but
--- this also suggests that we use represent it as a state.
---
--- ---------------------
---
--- (2025-07-28) I realized that this simple assumption does not work. A concrete
--- counter example is:
---
--- > let f = Lam $ \x -> let p = UnUnit x (App f x) <? Text "B" <#> p in p
---
--- After annotating, we obtain:
---
--- > @0{\ #0 -> @1{@2{let () = #0 in @3{@0 #0}} <? @4{@5{text "B"} <#> @1}}}
---
--- If we ignore names that occur only once, this can be written:
---
--- > @0{\ #0 -> @1{let () = #0 in @0 #0 <? text "B" <#> @1}
---
--- Since, @0 and @1 contain the references to @1 and @0, respectively, the above
--- approach mistakenly yields:
---
--- > let @0 = \ #0 -> @1 @1 = (let () = #0 in @0 #0) <? text "B" <#> @1 in @0
---
--- resulting in unbound reference to #0.
---
-
--- ---------------
---
--- For
+-- For an expression with the nesting structure
 --
 --               |
 --         +-----+-----+
@@ -441,14 +379,12 @@ annotateBranch (Branch pij h) = do
 --  |     | |  2  |
 --  +---- + +-----+
 --
---       (@2{...} <#> @1{...@2...}) <#> @1
+-- We introduce the dependency that 1 > 2 to mean that the `let` introduction
+-- for 1 is deferred after the introduction of `let` for 2.
 --
--- We need to to introduce the dependency that 1 > 2 to mean that let
--- introduction for 1 is deferred after the introduction of `let` for
--- 2.
---
--- An exception is that the references to @2 are saturated in the definition
--- of @1.
+-- An exception is that all occurrences of 2 appear in the body of 1. Then,
+-- there is no dependency between 1 and 2: even when 2 is floated out due to
+-- other references in its body, there is no problem with scopes.
 
 makeGraph :: (FGL.DynGraph gr) => Int -> [(Int, Int)] -> (Int -> Bool) -> gr [SomeExpName] ()
 makeGraph maxID edges isRelev =
@@ -580,12 +516,18 @@ runAnnotate e = do
 -- >>> let { t = Op2 Cat t1 t' ; t' = Op2 Cat t2 t ; t1 = Op0 (Text "A"); t2 = Op2 Cat t1 (Op0 (Text "B")) }
 -- >>> res <- runAnnotate t
 -- >>> res
--- >>> introduceLets res
+-- >>> ne <- introduceLets res
+-- >>> ne
+-- >>> Reader.runReader (unname ne) (H.empty, H.empty)
 -- (@0{@1{text "A"} <#> (@1 <#> text "B") <#> @0},fromList [(@0,2),(@1,2)],mkGraph [(1,[@1]),(2,[@0])] [])
 -- let
 --   @1 = text "A"
 --   @0 = @1 <#> (@1 <#> text "B") <#> @0
 -- in @0
+-- let
+--   f_0 = text "A"
+--   f_1 = hcat [f_0 <#> text "B", f_1]
+-- in f_1
 
 -- >>> let { t = Lam $ \x -> let pp = Op2 BChoice (UnUnit x (fromString "A")) (Op2 Cat (fromString "B") pp) in pp }
 -- >>> res <- runAnnotate t
@@ -627,14 +569,21 @@ _example5 =
     text = Op0 . Text
 
 -- >>> res <- runAnnotate _example5
+-- >>> ne <- introduceLets res
 -- >>> res
--- >>> introduceLets res
+-- >>> ne
+-- >>> Reader.runReader (unname ne) (H.empty, H.empty)
 -- ((@2{text "A" <#> text "B"} <#> @5{(text "D" <#> @8{@2 <#> text "C"}) <#> @8})
 -- <#> @5,fromList [(@2,2),(@5,2),(@8,2)],mkGraph [(1,[@8]),(2,[@5]),(3,[@2])] [(1,3,()),(2,3,())])
 -- let @2 = text "A" <#> text "B" in
 -- let @5 = let @8 = @2 <#> text "C" in
 --            (text "D" <#> @8) <#> @8 in
 -- (@2 <#> @5) <#> @5
+-- let
+--   f_0 = text "A" <#> text "B"
+-- in let
+--      f_1 = let f_2 = f_0 <#> text "C" in text "D" <#> f_2 <#> f_2
+--    in f_0 <#> f_1 <#> f_1
 
 data RecNExp a
   = RecNExp (NExpH RecNExp a)
@@ -724,7 +673,7 @@ introduceLets (e, occMap, depGr) = do
   let fr = makeFrontier depGr
   putStrLn ("Graph: " <> show depGr)
   putStrLn ("Frontier: " <> show fr)
-  let (res, _, m) = RWS.runRWS (introLets occMap depGr e) () (depGr, fr)
+  let (res, _, m) = RWS.runRWS (introLets occMap e) () (depGr, fr)
   let _occRest = H.filter (> 1) $ loccMap m
   print _occRest
   assert (H.null _occRest) (pure res)
@@ -753,14 +702,13 @@ makeDefNames depGr cond fr
 
 introLets ::
   OccMap
-  -> DepGraph
   -> AnnNExp a
   -> LetIntroM (RecNExp a)
-introLets _occMap _depGr (AnnNRef sn) = do
+introLets _occMap (AnnNRef sn) = do
   let key = SomeExpName sn
   Writer.tell LMaps{loccMap = insertOccMap key 1 emptyOccMap, ldefMap = emptyDefMap}
   pure $ RecNExp $ NVar (SName sn)
-introLets occMap depGr (AnnNExp msn e0) = Writer.pass $ do
+introLets occMap (AnnNExp msn e0) = Writer.pass $ do
   (ebody, LMaps{loccMap = count, ldefMap = dMap}) <- Writer.listen $ go e0
   -- Update `count'` first to include this occurrence of `sn`
   let count' = case msn of
@@ -805,58 +753,20 @@ introLets occMap depGr (AnnNExp msn e0) = Writer.pass $ do
     nletrecs [] = RecNExp
     nletrecs (ds : dss) = nletrec ds . nletrecs dss
 
-    -- let (ebody, LMaps{loccMap = counter, ldefMap = dMap}) = Writer.runWriter (go e0)
-    --     key = SomeExpName sn
-    --     keyOcc = lookupOccMap key occMap
-    --     -- Update `counter` first to include this occurrence of `sn`
-    --     counter' = case lookupOccMap key counter of
-    --       Just n -> insertOccMap key (succ n) counter
-    --       _ -> insertOccMap key 1 counter
-    --     -- `checkCnt k` tells if there is no occurrences of `k` upwards.
-    --     checkCnt k =
-    --       let cnt1 = fromMaybe 0 $ lookupOccMap k occMap
-    --           cnt2 = fromMaybe 0 $ lookupOccMap k counter'
-    --       in  cnt1 == cnt2
-    --     -- When k is contained as a subterm referred by k' that will be floated afterwards,
-    --     -- we need to defer the definition of k.
-    --     floatedAfterwards = concat [f k | k <- H.keys counter', not (checkCnt k), H.member k occMap]
-    --       where
-    --         f (SomeExpName x) = case lookupDefMap x dMap of
-    --           Just (_, m) -> H.keys m
-    --           _ -> []
-    --     -- Names to be defined here.
-    --     defNames = [k | k <- H.keys counter', checkCnt k, k `notElem` floatedAfterwards]
-    --     defs = flip map defNames $ \(SomeExpName x) -> case lookupDefMap x dMap of
-    --       Just e -> NDefPair (SName x) e
-    --       _ | SomeExpName x == key -> NDefPair (SName sn) (RecNExp ebody)
-    --       _ | otherwise -> error "introLets: cannot happen"
-    --     e''
-    --       | null defs = RecNExp ebody
-    --       | trace ("Defs introduced: " ++ show defNames) False = undefined
-    --       | otherwise = NLetRec defs ebody
-    --     -- Similarly, update `dMap` to include `sn` -> `e`
-    --     counter'' = foldr H.delete counter' defNames
-    --     dMap' = foldr H.delete (insertDefMap sn e'' dMap) defNames
-    --     resExp
-    --       | key `elem` defNames = NLetRec defs $ NVar (SName sn)
-    --       | Just _ <- keyOcc = RecNExp $ NVar (SName sn)
-    --       | otherwise = e''
-    -- in  Writer.writer (resExp, LMaps{loccMap = counter'', ldefMap = dMap'})
-
     go :: NExpH AnnNExp a -> LetIntroM (NExpH RecNExp a)
-    go (NLam x e) = NLam x <$> introLets occMap depGr e
-    go (NApp e x) = NApp <$> introLets occMap depGr e <*> pure x
+    go (NLam x e) = NLam x <$> introLets occMap e
+    go (NApp e x) = NApp <$> introLets occMap e <*> pure x
     go (NCase cs x brs) = NCase cs x <$> mapM goBranch brs
-    go (NUnPair cs x y1 y2 e) = NUnPair cs x y1 y2 <$> introLets occMap depGr e
-    go (NUnUnit x e) = NUnUnit x <$> introLets occMap depGr e
+    go (NUnPair cs x y1 y2 e) = NUnPair cs x y1 y2 <$> introLets occMap e
+    go (NUnUnit x e) = NUnUnit x <$> introLets occMap e
     go (NCharAs x rs) = pure $ NCharAs x rs
     go (NOp0 op) = pure $ NOp0 op
-    go (NOp1 op e) = NOp1 op <$> introLets occMap depGr e
-    go (NOp2 op e1 e2) = NOp2 op <$> introLets occMap depGr e1 <*> introLets occMap depGr e2
+    go (NOp1 op e) = NOp1 op <$> introLets occMap e
+    go (NOp2 op e1 e2) = NOp2 op <$> introLets occMap e1 <*> introLets occMap e2
     go (NVar x) = pure $ NVar x -- x should be FName i
     -- go (NLocal (AnnNDef d)) = NLocal . RecNDef <$> goDef d
     goBranch :: NBranch AnnNExp b a -> LetIntroM (NBranch RecNExp b a)
-    goBranch (NBranch pij b e) = NBranch pij b <$> introLets occMap depGr e
+    goBranch (NBranch pij b e) = NBranch pij b <$> introLets occMap e
 
 -- goDef :: NDefH AnnNExp AnnNDef as r -> Writer LMaps (NDefH RecNExp RecNDef as r)
 -- goDef (NDefRet e) = NDefRet <$> introLets occMap e
@@ -967,7 +877,10 @@ unnameWork e0 = case e0 of
       in  Reader.runReader (unname e) (vMap', fMap)
   NApp e x -> do
     xx <- resolveVar x
-    App <$> unname e <*> pure xx
+    e' <- unname e
+    case e' of
+      Lam h -> pure $ h xx
+      _ -> pure $ App e' xx
   NUnPair cs x y1 y2 e -> do
     xx <- resolveVar x
     (vMap, fMap) <- Reader.ask

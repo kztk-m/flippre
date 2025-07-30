@@ -12,6 +12,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- | Core Syntax
 module Text.FliPpr.Internal.Core (
@@ -225,19 +226,22 @@ pprIn i = fromString "x_" <> PP.viaShow i
 pprFVar :: Int -> PP.Doc ann
 pprFVar i = fromString "f_" <> PP.viaShow i
 
-ppr :: (Phased s) => Int -> Int -> Int -> Exp s ToPrint a -> PP.Doc ann
+ppr :: Int -> Int -> Int -> Exp s ToPrint a -> PP.Doc ann
 ppr dlevel flevel k e0 = case e0 of
   Lam h ->
     let vn = DLevel dlevel
         d = ppr (dlevel + 1) flevel 0 (h vn)
     in  applyWhen (k > 0) PP.parens $
-          PP.fillSep [fromString "\\" <> pprIn dlevel PP.<+> fromString "->", d]
+          PP.nest 2 $
+            PP.sep
+              [ PP.hcat [fromString "\\", pprIn dlevel] PP.<+> fromString "->"
+              , d
+              ]
   App e (DLevel n) ->
     applyWhen (k > 9) PP.parens $
       ppr dlevel flevel 9 e PP.<+> pprIn n
   Case _ (DLevel x) brs ->
-    let sep d1 d2 = PP.fillSep [d1 <> fromString ",", d2]
-        pprBr (Branch (PartialBij s _ _) h) =
+    let pprBr (Branch (PartialBij s _ _) h) =
           let vn = DLevel dlevel
           in  PP.group $
                 PP.nest 2 $
@@ -245,11 +249,11 @@ ppr dlevel flevel k e0 = case e0 of
                     [ PP.hsep [fromString s, fromString "$", fromString "\\" <> pprIn dlevel, fromString "->"]
                     , ppr (dlevel + 1) flevel 0 (h vn)
                     ]
-        ds = map pprBr brs
+        ds = map (PP.align . pprBr) brs
     in  applyWhen (k > 9) PP.parens $
           fromString "case_"
             PP.<+> pprIn x
-            PP.<+> PP.brackets (PP.align $ PP.concatWith sep ds)
+            PP.<+> PP.align (PP.list ds)
   UnPair _ (DLevel x) h ->
     let vn1 = DLevel dlevel
         vn2 = DLevel (dlevel + 1)
@@ -258,7 +262,7 @@ ppr dlevel flevel k e0 = case e0 of
     in  applyWhen (k > 0) PP.parens $
           PP.align $
             PP.group $
-              PP.fillSep
+              PP.sep
                 [ PP.hsep
                     [ fromString "let"
                     , PP.parens (pprIn dlevel <> fromString "," <> pprIn (dlevel + 1))
@@ -280,7 +284,7 @@ ppr dlevel flevel k e0 = case e0 of
                 ]
   CharAs (DLevel x) rs ->
     applyWhen (k > 9) PP.parens $
-      PP.hsep [pprIn x, fromString "`charAs`", PP.viaShow rs]
+      PP.hsep [pprIn x, fromString "`charAs`", pprRangeSet rs]
   Var (FLevel x) -> pprFVar x
   Op0 op -> case op of
     Line -> fromString "line"
@@ -298,22 +302,77 @@ ppr dlevel flevel k e0 = case e0 of
           Group -> fromString "group"
           Align -> fromString "align"
     in  applyWhen (k > 9) PP.parens $ PP.nest 2 $ PP.sep [fn, PP.align d]
-  Op2 Cat e1 e2 ->
-    let d1 = ppr dlevel flevel 5 e1
-        d2 = ppr dlevel flevel 5 e2
-    in  applyWhen (k > 5) PP.parens $ PP.group $ PP.sep [d1, fromString "<#>" PP.<+> PP.align d2]
+  Op2 Cat e1 (gatherCats -> es) ->
+    case es of
+      [e2] ->
+        let d1 = ppr dlevel flevel 6 e1
+            d2 = ppr dlevel flevel 5 e2
+        in  applyWhen (k > 5) PP.parens $ PP.group $ PP.sep [d1, fromString "<#>" PP.<+> PP.align d2]
+      _ ->
+        let ds = map (PP.align . ppr dlevel flevel 0) (e1 : es)
+        in  applyWhen (k > 9) PP.parens $
+              PP.group $
+                PP.nest 2 $
+                  PP.sep [fromString "hcat", PP.align $ PP.list ds]
   Op2 BChoice e1 e2 ->
     let d1 = ppr dlevel flevel 4 e1
         d2 = ppr dlevel flevel 4 e2
     in  applyWhen (k > 4) PP.parens $ PP.group $ PP.sep [d1, fromString "<?" PP.<+> PP.align d2]
-  Local d ->
-    applyWhen (k > 9) PP.parens $
-      PP.group $
-        PP.align $
-          PP.nest 2 $
-            PP.sep [fromString "local", pprDef dlevel flevel 10 d]
+  Local (gatherLetRec flevel -> (xs, ds0, dr)) ->
+    let ds = reverse ds0
+        dbody
+          | [x] <- xs
+          , [d] <- ds0 =
+              PP.vsep
+                [ PP.hsep
+                    [ fromString "let"
+                    , pprFVar x
+                    , fromString "="
+                    , PP.align d
+                    , fromString "in"
+                    ]
+                , PP.align dr
+                ]
+          | otherwise =
+              PP.vsep
+                [ PP.nest 2 $
+                    PP.vsep
+                      [ fromString "let"
+                      , PP.concatWith (\x y -> x <> PP.hardline <> y) [PP.hsep [pprFVar x, fromString "=", PP.align d] | (x, d) <- zip xs ds]
+                      ]
+                , PP.hsep [fromString "in", PP.align dr]
+                ]
+    in  applyWhen (k > 0) PP.parens $ PP.align $ PP.group dbody
+    -- Local d ->
+    --   applyWhen (k > 9) PP.parens $
+    --     PP.group $
+    --       PP.align $
+    --         PP.nest 2 $
+    --           PP.sep [fromString "local", pprDef dlevel flevel 10 d]
+  where
+    pprRangeSet :: (Show a, Enum a, Bounded a, Eq a) => RS.RSet a -> PP.Doc ann
+    pprRangeSet rs
+      | RS.null rs = fromString "empty"
+      | RS.isFull rs = fromString "full"
+      | [c] <- RS.toList rs = PP.hsep [fromString "singleton", PP.viaShow c]
+      | otherwise = PP.viaShow rs
 
-pprDef :: (Phased s) => Int -> Int -> Int -> Def s ToPrint as a -> PP.Doc ann
+    gatherCats :: Exp s ToPrint D -> [Exp s ToPrint D]
+    gatherCats (Op2 Cat e1 e2) = e1 : gatherCats e2
+    gatherCats e = [e]
+
+    gatherLetRec :: Int -> Def s ToPrint as a -> ([Int], [PP.Doc ann], PP.Doc ann)
+    gatherLetRec fl (DefRet e) = ([], [], ppr dlevel fl 0 e)
+    gatherLetRec fl (DefCons e def) =
+      let d = ppr dlevel fl 0 e
+          (xs, ds, dr) = gatherLetRec fl def
+      in  (xs, d : ds, dr)
+    gatherLetRec fl (DefLetr h) =
+      let fn = FLevel fl
+          (xs, ds, dr) = gatherLetRec (fl + 1) (h fn)
+      in  (fl : xs, ds, dr)
+
+pprDef :: Int -> Int -> Int -> Def s ToPrint as a -> PP.Doc ann
 pprDef dlevel flevel k d0 = case d0 of
   DefRet e ->
     applyWhen (k > 9) PP.parens $
