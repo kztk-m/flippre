@@ -1,10 +1,10 @@
 {-# LANGUAGE DataKinds #-}
-{-# HLINT ignore "Use section" #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Use section" #-}
 
 import Control.DeepSeq
 import Data.String (fromString)
@@ -19,7 +19,6 @@ import qualified Text.FliPpr.Automaton as A
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Driver.Earley as Earley
 import Text.FliPpr.Implicit (define)
-import qualified Text.FliPpr.QDo as F
 
 type Name = String
 
@@ -57,7 +56,7 @@ manyParens d =
   let x = define $ d <? parens x
   in  x
 
-pprExp :: Fin Nat5 -> In v Exp -> F.Exp Implicit v D
+pprExp :: Fin Nat4 -> In v Exp -> F.Exp Implicit v D
 pprExp = define $ \k e ->
   manyParens $
     case_
