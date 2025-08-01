@@ -49,6 +49,7 @@ import qualified Data.RangeSet.List as RS
 -- import Data.Typeable (Typeable)
 
 import Control.Arrow (first)
+import Control.Monad.Writer (Writer, runWriter, tell)
 import Data.Coerce (coerce)
 import Data.Function.Compat (applyWhen)
 import Data.String (IsString)
@@ -318,11 +319,9 @@ ppr dlevel flevel k e0 = case e0 of
     let d1 = ppr dlevel flevel 4 e1
         d2 = ppr dlevel flevel 4 e2
     in  applyWhen (k > 4) PP.parens $ PP.group $ PP.sep [d1, fromString "<?" PP.<+> PP.align d2]
-  Local (gatherLetRec flevel -> (xs, ds0, dr)) ->
-    let ds = reverse ds0
-        dbody
-          | [x] <- xs
-          , [d] <- ds0 =
+  Local (runWriter . gatherLetRec flevel -> ((_, dr), xds)) ->
+    let dbody
+          | [(x, d)] <- xds =
               PP.vsep
                 [ PP.hsep
                     [ fromString "let"
@@ -338,7 +337,7 @@ ppr dlevel flevel k e0 = case e0 of
                 [ PP.nest 2 $
                     PP.vsep
                       [ fromString "let"
-                      , PP.concatWith (\x y -> x <> PP.hardline <> y) [PP.hsep [pprFVar x, fromString "=", PP.align d] | (x, d) <- zip xs ds]
+                      , PP.concatWith (\x y -> x <> PP.hardline <> y) [PP.hsep [pprFVar x, fromString "=", PP.align d] | (x, d) <- reverse xds]
                       ]
                 , PP.hsep [fromString "in", PP.align dr]
                 ]
@@ -361,53 +360,57 @@ ppr dlevel flevel k e0 = case e0 of
     gatherCats (Op2 Cat e1 e2) = e1 : gatherCats e2
     gatherCats e = [e]
 
-    gatherLetRec :: Int -> Def s ToPrint as a -> ([Int], [PP.Doc ann], PP.Doc ann)
-    gatherLetRec fl (DefRet e) = ([], [], ppr dlevel fl 0 e)
-    gatherLetRec fl (DefCons e def) =
+    gatherLetRec :: Int -> Def s ToPrint as a -> Writer [(Int, PP.Doc ann)] ([PP.Doc ann], PP.Doc ann)
+    gatherLetRec fl (DefRet e) = pure ([], ppr dlevel fl 0 e)
+    gatherLetRec fl (DefCons e def) = do
       let d = ppr dlevel fl 0 e
-          (xs, ds, dr) = gatherLetRec fl def
-      in  (xs, d : ds, dr)
-    gatherLetRec fl (DefLetr h) =
+      (ds, dr) <- gatherLetRec fl def
+      pure (d : ds, dr)
+    gatherLetRec fl (DefLetr h) = do
       let fn = FLevel fl
-          (xs, ds, dr) = gatherLetRec (fl + 1) (h fn)
-      in  (fl : xs, ds, dr)
+      (dds, dr) <- gatherLetRec (fl + 1) (h fn)
+      case dds of
+        d : ds -> do
+          tell [(fl, d)]
+          pure (ds, dr)
+        _ -> error "Cannot happen."
 
-pprDef :: Int -> Int -> Int -> Def s ToPrint as a -> PP.Doc ann
-pprDef dlevel flevel k d0 = case d0 of
-  DefRet e ->
-    applyWhen (k > 9) PP.parens $
-      PP.group $
-        PP.align $
-          PP.sep [fromString "ret", ppr dlevel flevel 10 e]
-  DefCons e d ->
-    applyWhen (k > 1) PP.parens $
-      PP.group $
-        PP.align $
-          PP.sep
-            [ ppr dlevel flevel 3 e
-            , fromString "#" PP.<+> pprDef dlevel flevel 2 d
-            ]
-  DefLetr h ->
-    let fn = FLevel flevel
-        d = pprDef dlevel (flevel + 1) 0 (h fn)
-    in  applyWhen (k > 0) PP.parens $
-          PP.group $
-            PP.align $
-              PP.angles $
-                PP.hsep
-                  [ fromString "letr"
-                  , pprFVar flevel
-                  , fromString "."
-                  , d
-                  ]
+-- pprDef :: Int -> Int -> Int -> Def s ToPrint as a -> PP.Doc ann
+-- pprDef dlevel flevel k d0 = case d0 of
+--   DefRet e ->
+--     applyWhen (k > 9) PP.parens $
+--       PP.group $
+--         PP.align $
+--           PP.sep [fromString "ret", ppr dlevel flevel 10 e]
+--   DefCons e d ->
+--     applyWhen (k > 1) PP.parens $
+--       PP.group $
+--         PP.align $
+--           PP.sep
+--             [ ppr dlevel flevel 3 e
+--             , fromString "#" PP.<+> pprDef dlevel flevel 2 d
+--             ]
+--   DefLetr h ->
+--     let fn = FLevel flevel
+--         d = pprDef dlevel (flevel + 1) 0 (h fn)
+--     in  applyWhen (k > 0) PP.parens $
+--           PP.group $
+--             PP.align $
+--               PP.angles $
+--                 PP.hsep
+--                   [ fromString "letr"
+--                   , pprFVar flevel
+--                   , fromString "."
+--                   , d
+--                   ]
 
 --  DefI (_, _) -> error "We cannot print implicit expressions as they may have cycles."
 
-instance (ToPrint ~ v) => PP.Pretty (Exp Explicit v a) where
+instance (s ~ Explicit, ToPrint ~ v) => PP.Pretty (Exp s v a) where
   pretty = ppr 0 0 0
 
-instance (ToPrint ~ v) => Show (Exp Explicit v a) where
+instance (s ~ Explicit, ToPrint ~ v) => Show (Exp s v a) where
   showsPrec k e = shows (ppr 0 0 k e)
 
-instance Show (FliPpr Explicit a) where
+instance (s ~ Explicit) => Show (FliPpr s a) where
   showsPrec k (FliPpr e) = showsPrec k e

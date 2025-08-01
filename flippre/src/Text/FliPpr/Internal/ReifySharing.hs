@@ -29,13 +29,15 @@ import qualified Control.Monad.State as State
 import qualified Control.Monad.Writer as Writer
 import Data.Bits (xor)
 import qualified Data.Graph.Inductive as FGL
+import qualified Data.Graph.Inductive.Dot as FGLDot
+
 import qualified Data.HashMap.Strict as H
 import Data.Hashable (Hashable (..))
 import Data.IORef
 import qualified Data.IntMap as IM
 import Data.Maybe (fromMaybe)
 import qualified Data.RangeSet.List as RS
-import Debug.Trace (traceM, traceShowM)
+import Debug.Trace (traceM, traceShowM, trace)
 import qualified Defs as D
 import GHC.Stack (CallStack)
 import System.IO.Unsafe (unsafePerformIO)
@@ -426,25 +428,22 @@ gatherDep occMap (AnnNRef n) = do
   pure (AnnNRef n)
 gatherDep occMap (AnnNExp msn e0) = Writer.pass $ do
   (e0', (MOccMap oMap, names, edges)) <- Writer.listen (go e0)
-  let msn' = case msn of
-        Just sn | isRelevant occMap (SomeExpName sn) -> Just sn
-        _ -> Nothing
-  let oMap' = case msn' of
-        Just sn -> H.insertWith (+) (SomeExpName sn) 1 oMap
-        _ -> oMap
+  let (msn', oMap', names') = case msn of
+        Just sn | isRelevant occMap (SomeExpName sn) -> 
+          (Just sn, H.insertWith (+) (SomeExpName sn) 1 oMap, SomeExpName sn : names)
+        _ -> (Nothing, oMap, names)
   let satNames =
         [ k
-        | k <- H.keys oMap
+        | k <- H.keys oMap'
         , let cnt1 = fromMaybe 0 (H.lookup k occMap)
-        , cnt1 > 1
         , let cnt2 = fromMaybe 0 (H.lookup k oMap')
         , cnt1 == cnt2
         ]
-  let names' = names Data.List.\\ satNames
+  let names'' = names' Data.List.\\ satNames
   let newEdges = case msn' of
-        Just (ExpName i) -> [(i, j) | SomeExpName (ExpName j) <- names']
+        Just (ExpName i) -> [(i, j) | SomeExpName (ExpName j) <- names'']
         _ -> []
-  pure (AnnNExp msn' e0', const (MOccMap oMap', names', newEdges ++ edges))
+  pure (AnnNExp msn' e0', const (MOccMap oMap', names'', newEdges ++ edges))
   where
     go :: NExpH AnnNExp a -> Writer (MOccMap, [SomeExpName], [(Int, Int)]) (NExpH AnnNExp a)
     go = \case
@@ -487,10 +486,17 @@ runAnnotate e = do
 
   let (e'', (_, _, edges)) = Writer.runWriter (gatherDep filteredOccMap e')
 
-  print edges
+  putStrLn "Dependencies"
+  print $ map Data.List.head $ Data.List.group $ Data.List.sort edges
 
   let gr = makeGraph maxIDPlusOne edges $ \n -> SomeExpName (ExpName n) `H.member` filteredOccMap
+
+  writeFile "_dep.dot" (FGLDot.showDot $ FGLDot.fglToDot $ FGL.emap (const NoLabel) gr)
+
   pure (e'', filteredOccMap, gr)
+
+data NoLabel = NoLabel 
+instance Show NoLabel where show _ = "" 
 
 -- >>> let r = Op2 Cat r (Op0 Space)
 -- >>> res <- runAnnotate r

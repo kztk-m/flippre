@@ -535,9 +535,9 @@ parsingModeWith spec fe =
       _g0 = parsingModeMono (parser' fe)
       g1 :: forall g'. (G.GrammarD Char g') => g' (Err ann a)
       g1 = G.withSpace (fromCommentSpec spec) (parsingModeMono (parser' fe))
-  in  -- trace
-      --     (show $ PP.vsep [G.pprAsFlat _g0, fromString "---------", G.pprAsFlat g1])
-      g1
+  in  trace
+        (show $ PP.vsep [G.pprAsFlat _g0, fromString "---------", G.pprAsFlat g1])
+        g1
 
 parsingModeSP ::
   forall s g a ann.

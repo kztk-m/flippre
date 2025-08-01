@@ -79,9 +79,23 @@ executable arithlet
     deepseq,
     prettyprinter,
 
+executable arithlet2
+  import: warnings, deps
+  main-is: Let2.hs
+  build-depends:
+    deepseq,
+    prettyprinter,
+
 executable arithlet-implicit
   import: warnings, deps
   main-is: LetImplicit.hs
+  build-depends:
+    deepseq,
+    prettyprinter,
+
+executable arithlet-implicit2
+  import: warnings, deps
+  main-is: LetImplicit2.hs
   build-depends:
     deepseq,
     prettyprinter,

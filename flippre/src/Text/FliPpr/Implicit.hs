@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DerivingVia #-}
@@ -64,21 +65,25 @@ define :: (Materializable a) => a -> a
 define f = unMaterialize s
   where
     s = materialize f
+{-# INLINEABLE define #-}
 
 instance (Materializable a, Materializable b) => Materializable (a, b) where
   type Store (a, b) = (Store a, Store b)
   materialize (a, b) = (materialize a, materialize b)
+  {-# INLINEABLE materialize #-}
   unMaterialize (s1, s2) = (unMaterialize s1, unMaterialize s2)
 
 instance (s ~ Implicit) => Materializable (Exp s v a) where
   type Store (Exp s v a) = Exp s v a
   materialize = id
+  {-# INLINE materialize #-}
   unMaterialize = id
-
+  {-# INLINE unMaterialize #-}
 instance (Repr Implicit v r) => Materializable (In v a -> r) where
   type Store (In v a -> r) = Exp Implicit v (a ~> ReprT r)
 
   materialize = fromFunction
+  {-# INLINEABLE materialize #-}
   unMaterialize = toFunction
 
 {-# ANN StoreLazy "HLINT: ignore Use newtype instead of data" #-}
@@ -88,11 +93,13 @@ instance (Materializable r) => Materializable (() -> r) where
   type Store (() -> r) = StoreLazy (Store r)
 
   materialize f = StoreLazy (materialize $ f ())
+  {-# INLINEABLE materialize #-}
   unMaterialize (StoreLazy s) = const $ unMaterialize s
 
 instance (Materializable r) => Materializable (Bool -> r) where
   type Store (Bool -> r) = (Store r, Store r)
   materialize f = (materialize $ f True, materialize $ f False)
+  {-# INLINEABLE materialize #-}
   unMaterialize (strue, sfalse) = \case
     True -> unMaterialize strue
     False -> unMaterialize sfalse
@@ -125,7 +132,7 @@ lookupTree ::
   -- ^ index (invariant: lower <= index <= upper)
   -> BinSearchTree a
   -> a
-lookupTree lower upper idx b
+lookupTree lower upper !idx b
   | lower == upper = case b of
       Leaf a -> a
       Bin _ _ -> error "IMPOSSIBLE"
@@ -145,6 +152,7 @@ instance (Materializable r, Enum a, Bounded a) => Materializable (Defs.FromBound
     where
       lower = fromEnum (minBound :: a)
       upper = fromEnum (maxBound :: a)
+  {-# INLINEABLE materialize #-}
 
   unMaterialize t =
     \idx -> unMaterialize $ lookupTree lower upper (fromEnum idx) t
@@ -169,6 +177,7 @@ instance
   type Store (Either a b -> r) = (Store (a -> r), Store (b -> r))
 
   materialize f = (materialize (f . Left), materialize (f . Right))
+  {-# INLINEABLE materialize #-}
 
   unMaterialize (sl, sr) = \case
     Left a -> unMaterialize sl a
@@ -181,4 +190,5 @@ instance
   type Store ((a, b) -> r) = Store (a -> b -> r)
 
   materialize f = materialize (curry f)
+  {-# INLINEABLE materialize #-}
   unMaterialize s = uncurry (unMaterialize s)

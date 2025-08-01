@@ -266,14 +266,14 @@ opPrinter ::
   -> (n -> d)
   -- ^ precedence printer for the second operand
   -> (n -> d)
-opPrinter (Fixity a opPrec) opD ppr1 ppr2 k =
+opPrinter (Fixity a opPrec) opD ppr1 ppr2 =
   let (dl, dr) = case a of
         AssocL -> (0, 1)
         AssocR -> (1, 0)
         AssocN -> (0, 0)
-  in  ifParens (k > fromIntegral opPrec) $ opD (ppr1 (fromIntegral opPrec + dl)) (ppr2 (fromIntegral opPrec + dr))
-  where
-    ifParens b = if b then parens else id
+      d = opD (ppr1 (fromIntegral opPrec + dl)) (ppr2 (fromIntegral opPrec + dr))
+      pd = parens d
+  in  \k -> if k > fromIntegral opPrec then pd else d
 
 $(mkUn ''Bool)
 $(mkUn ''[])
