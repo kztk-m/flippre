@@ -3,11 +3,11 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -22,7 +22,10 @@ module Text.FliPpr.Internal.Core (
   D,
   FliPpr (..),
   flippr,
-  FliPprM,
+  FliPprM (..),
+
+  -- * Phases
+  Phase (..),
   Phased (..),
   SPhase (..),
 
@@ -33,9 +36,7 @@ module Text.FliPpr.Internal.Core (
   PartialBij (..),
   Branch (..),
   Exp (..),
-  ExpsI (..),
   Def (..),
-  Phase (..),
   FVar,
   In,
 
@@ -43,20 +44,18 @@ module Text.FliPpr.Internal.Core (
   Repr (..),
 ) where
 
-import Data.Kind (Type)
-import qualified Data.RangeSet.List as RS
-
--- import Data.Typeable (Typeable)
-
 import Control.Arrow (first)
 import Control.Monad.Writer (Writer, runWriter, tell)
 import Data.Coerce (coerce)
 import Data.Function.Compat (applyWhen)
+import Data.Kind (Type)
+import qualified Data.RangeSet.List as RS
 import Data.String (IsString)
 import Data.String.Compat (IsString (..))
 import qualified Defs as D
 import GHC.Stack (CallStack)
 import qualified Prettyprinter as PP
+
 import qualified Text.FliPpr.Doc as DD
 
 -- | Nullary operators or constants.
@@ -178,13 +177,14 @@ newtype FliPpr s a = FliPpr (forall v. Exp s v a)
 --   >   rec ppr <- share $ arg $ \i -> ...
 --   >   return ppr
 flippr :: (forall v. FliPprM s v (Exp s v a)) -> FliPpr s a
-flippr x = FliPpr (localSp x)
+flippr x = FliPpr (localSp $ runFliPprM x)
   where
     localSp :: D.DefM (Exp s v) (Exp s v a) -> Exp s v a
     localSp (D.DefM r) =
       Local (coerce r DefRet)
 
-type FliPprM s v = D.DefM (Exp s v)
+newtype FliPprM s v a = FliPprM {runFliPprM :: D.DefM (Exp s v) a}
+  deriving newtype (Functor, Applicative, Monad)
 
 instance (D ~ t) => Semigroup (Exp s v t) where
   (<>) x y = Op2 Cat x (Op2 Cat (Op0 Spaces) y)
@@ -282,11 +282,12 @@ instance (Repr s v r) => Repr s v (In v a -> r) where
   toFunction f a = toFunction (f `App` a)
   fromFunction k = Lam (fromFunction . k)
 
-instance (Phased s) => D.Arg (Exp s v) (Exp s v a) where
-  letr f = D.letr $ fmap (first D.Tip) . f . D.unTip
+instance (Phased s) => D.Arg (FliPprM s v) (Exp s v a) where
+  letr :: forall r. (Exp s v a -> FliPprM s v (Exp s v a, r)) -> FliPprM s v r
+  letr = coerce (D.letr :: (D.Tip (Exp s v a) -> D.DefM (Exp s v) (D.Tip (Exp s v a), r)) -> D.DefM (Exp s v) r)
 
 -- One-level unfolding to avoid overlapping instances.
-instance (v ~ v', Phased s, Repr s v r) => D.Arg (Exp s v') (In v a -> r) where
+instance (v ~ v', Phased s, Repr s v r) => D.Arg (FliPprM s v') (In v a -> r) where
   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
 
 -- | To print FliPpr expressions themselves.

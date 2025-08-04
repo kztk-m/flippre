@@ -26,6 +26,7 @@ import qualified Text.FliPpr.QDo as F
 
 import Data.String (fromString)
 
+import Data.Proxy (Proxy (..))
 import Data.Word (Word8)
 import Debug.Trace (trace)
 import qualified Prettyprinter as PP (Doc)
@@ -59,8 +60,8 @@ $(mkUn ''Lit)
 -- come without parentheses.
 newtype IsRightMost = IsRightMost {isRightMost :: Bool}
 
--- PolyKinds is used here. Otherwise, the kind of `f` defaults to `Type`.
-deriving via (Bool -> a) instance (Arg f a) => Arg f (IsRightMost -> a)
+instance (Arg m a) => Arg m (IsRightMost -> a) where
+  letr = G.letrVia (Proxy :: Proxy (Bool -> a))
 
 otherwiseP :: (arg Exp -> exp t) -> Branch arg exp Exp t
 otherwiseP = Branch (PartialBij "otherwiseP" Just Just)

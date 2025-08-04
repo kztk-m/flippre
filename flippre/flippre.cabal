@@ -77,12 +77,14 @@ library
     Text.FliPpr.Internal.ParserGeneration
     Text.FliPpr.Internal.PrettyPrinting
     Text.FliPpr.Internal.ReifySharing
-    Text.FliPpr.Internal.THCompat
     Text.FliPpr.Mfix
     Text.FliPpr.Pat
     Text.FliPpr.Primitives
     Text.FliPpr.QDo
     Text.FliPpr.TH
+
+  other-modules:
+    Text.FliPpr.Internal.THCompat
 
   build-depends:
     base >=4.7 && <5,

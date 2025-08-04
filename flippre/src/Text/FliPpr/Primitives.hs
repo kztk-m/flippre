@@ -175,7 +175,7 @@ infixr 4 <?
 -- function as 'mfix', which is supposed to be used with
 -- @RecursiveDo@/@RebindableSyntax@. For GHC over version 9.0.1, using
 -- 'Text.FliPpr.QDo' with @QualifiedDo@ would be more handy.
-mfixF :: (Defs.Arg (Exp s v) a) => (a -> FliPprM s v a) -> FliPprM s v a
+mfixF :: (Defs.Arg (FliPprM s v) a) => (a -> FliPprM s v a) -> FliPprM s v a
 mfixF = Defs.mfixDefM
 
 -- | Useful combinator that can be used with 'letr'.
@@ -205,7 +205,7 @@ def a b = (a,) <$> b
 -- In contrast, the following version shares the productions involved in @e@.
 --
 -- > do v <- share e ... v ... v ...
-share :: (Defs.Arg (Exp s v) r) => r -> FliPprM s v r
+share :: (Defs.Arg (FliPprM s v) r) => r -> FliPprM s v r
 share e = Defs.letr $ \x -> return (e, x)
 
 -- | Localize declarations.
@@ -221,4 +221,4 @@ share e = Defs.letr $ \x -> return (e, x)
 --
 -- involves the productions involved in @e@ twice.
 local :: (Repr s v rep, Phased s) => FliPprM s v rep -> rep
-local = toFunction . Defs.local . fmap fromFunction
+local = toFunction . Defs.local . fmap fromFunction . runFliPprM

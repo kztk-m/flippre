@@ -40,5 +40,5 @@ import Text.FliPpr
 -- operations to extract graph structures. Indeed in an earlier version, we used
 -- 'STRef' to detect recursive structures. However, this design turned out to be
 -- sources of unclear non-termination bugs.
-mfix :: (Arg (Exp s v) a) => (a -> FliPprM s v a) -> FliPprM s v a
+mfix :: (Arg (FliPprM s v) a) => (a -> FliPprM s v a) -> FliPprM s v a
 mfix = mfixF
