@@ -20,39 +20,43 @@ module Text.FliPpr.Internal.ReifySharing (
 ) where
 
 import Control.Exception (assert)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (RWS)
 import qualified Control.Monad.RWS as RWS
 import Control.Monad.Reader (Reader, ReaderT)
 import qualified Control.Monad.Reader as Reader
 import qualified Control.Monad.State as State
-import qualified Control.Monad.Writer as Writer
+import Control.Monad.Writer.CPS (Writer)
+import qualified Control.Monad.Writer.CPS as Writer
 import Data.Bits (xor)
+import Data.Function.Compat (applyWhen)
 import qualified Data.Graph.Inductive as FGL
-import qualified Data.Graph.Inductive.Dot as FGLDot
-
 import qualified Data.HashMap.Strict as H
 import Data.Hashable (Hashable (..))
 import Data.IORef
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import Data.Maybe (fromMaybe)
 import qualified Data.RangeSet.List as RS
-import Debug.Trace (traceM, traceShowM, trace)
+import qualified Data.Set as S
+import Data.Some
+import Data.String (IsString (..))
+import Debug.Trace (traceIO, traceM)
 import qualified Defs as D
 import GHC.Stack (CallStack)
+import qualified Prettyprinter as PP
 import System.IO.Unsafe (unsafePerformIO)
 import System.Mem.StableName
 import Unsafe.Coerce (unsafeCoerce)
 
+-- import qualified Data.Graph.Inductive.Dot as FGLDot
+
+import Data.GADT.Compare
+import Data.GADT.Show (GShow (..), defaultGshowsPrec)
+import Data.Type.Equality ((:~:) (..))
 import Text.FliPpr.Internal.Core
 import Unembedding.Env
-
-import Control.Monad (unless, when)
-import Control.Monad.Writer (Writer)
-import Data.Function.Compat (applyWhen)
-import qualified Data.List
-import Data.String (IsString (..))
-import qualified Prettyprinter as PP
 
 reifySharing :: forall s a vv. (Phased s) => (forall v. Exp s v a) -> Exp Explicit vv a
 reifySharing e = case phase @s of
@@ -62,25 +66,38 @@ reifySharing e = case phase @s of
 fromImplicit :: forall vv a. (forall v. Exp Implicit v a) -> Exp Explicit vv a
 fromImplicit e = unsafePerformIO $ do
   res <- runAnnotate e
-  traceM "-- After pruning ---------------"
-  traceShowM (let (ee, _, _) = res in ee)
+  traceIO "-- After pruning ---------------"
+  traceIO $ show $ let (ee, _, _) = res in ee
+  traceIO "--------------------------------"
+  traceIO $ "OccMap = " <> let (_, om, _) = res in show om
+  traceIO $ "DepGraph = " <> let (_, _, gr) = res in show gr
   ne <- introduceLets res
-  traceM "-- After let-introduction ------"
-  traceShowM ne
+  traceIO "-- After let-introduction ------"
+  traceIO $ show ne
   let result :: forall v. Exp Explicit v a
       result = Reader.runReader (unname ne) (H.empty, H.empty)
-  traceM "-- After unnaming ---------------"
-  traceShowM result
+  traceIO "-- After unnaming ---------------"
+  traceIO $ show result
   pure result
 
 data StableExpName a where
   StableExpName ::
-    {getStableName :: StableName (Exp Implicit Name a)}
+    {getStableName :: !(StableName (Exp Implicit Name a))}
     -> StableExpName a
   deriving stock Eq
 
 instance Show (StableExpName a) where
   show (StableExpName x) = "@" ++ show (hashStableName x)
+
+instance GShow StableExpName where
+  gshowsPrec = defaultGshowsPrec
+
+instance GEq StableExpName where
+  geq (StableExpName x) (StableExpName y)
+    | x == unsafeCoerce y = Just (unsafeCoerce Refl)
+    | otherwise = Nothing
+
+-- Use the strong assumption that stable names do not rely on the type parameter
 
 -- Abstract label to specify named interpretation.
 data Name
@@ -96,49 +113,39 @@ instance Show (In Name a) where
 
 newtype ExpName (a :: FType) = ExpName Int
   deriving newtype (Eq, Ord, Hashable)
+
 instance Show (ExpName a) where
   show (ExpName i) = "@" ++ show i
 
-data SomeExpName where
-  SomeExpName :: ExpName a -> SomeExpName
+instance GEq ExpName where
+  geq (ExpName i) (ExpName j)
+    | i == j = Just (unsafeCoerce Refl)
+    | otherwise = Nothing
 
-instance Eq SomeExpName where
-  SomeExpName x == SomeExpName y = x == unsafeCoerce y
+instance GShow ExpName where
+  gshowsPrec = defaultGshowsPrec
 
-instance Hashable SomeExpName where
-  hashWithSalt salt (SomeExpName en) = hashWithSalt salt en
+instance Hashable (Some ExpName) where
+  hashWithSalt salt (Some (ExpName en)) = hashWithSalt salt en
 
-instance Show SomeExpName where
-  show (SomeExpName en) = show en
-
-data FName a where
-  FName :: !Int -> FName a
-  SName :: (ExpName a) -> FName a
+newtype FName a = SName (ExpName a)
   deriving stock Eq
 
 instance Show (FName a) where
-  show (FName i) = "%" ++ show i
   show (SName a) = show a
+
+instance GEq FName where
+  geq x y
+    | x == unsafeCoerce y = Just (unsafeCoerce Refl)
+    | otherwise = Nothing
 
 type instance FVar Name = FName
 
-data SomeStableExpName where
-  SomeStableExpName :: StableExpName a -> SomeStableExpName
-
-instance Show SomeStableExpName where
-  show (SomeStableExpName x) = "@" ++ show (hashStableName (getStableName x))
-
-instance Eq SomeStableExpName where
-  SomeStableExpName (StableExpName x) == SomeStableExpName (StableExpName y) =
-    -- Use the strong assumption that stable names do not rely on the type parameter
-    x == unsafeCoerce y
-
-instance Hashable SomeStableExpName where
-  hashWithSalt salt (SomeStableExpName x) =
-    salt `xor` hashStableName (getStableName x)
+instance Hashable (Some StableExpName) where
+  hashWithSalt salt (Some x) = salt `xor` hashStableName (getStableName x)
 
 data NBranch nexp a (t :: FType) where
-  NBranch :: PartialBij a b -> VName b -> nexp t -> NBranch nexp a t
+  NBranch :: !(PartialBij a b) -> !(VName b) -> !(nexp t) -> NBranch nexp a t
 
 instance (forall x. Show (nexp x)) => Show (NBranch nexp a t) where
   show (NBranch (PartialBij s _ _) n e) = show (s, n, e)
@@ -147,8 +154,8 @@ instance (forall x. Show (nexp x)) => Show (NBranch nexp a t) where
 data NExpH nexp a where
   NLam :: !(VName a) -> !(nexp b) -> NExpH nexp (a ~> b)
   NApp :: !(nexp (a ~> b)) -> !(VName a) -> NExpH nexp b
-  NCase :: CallStack -> !(VName a) -> [NBranch nexp a t] -> NExpH nexp t
-  NUnPair :: CallStack -> !(VName (a, b)) -> !(VName a) -> !(VName b) -> !(nexp t) -> NExpH nexp t
+  NCase :: !CallStack -> !(VName a) -> ![NBranch nexp a t] -> NExpH nexp t
+  NUnPair :: !CallStack -> !(VName (a, b)) -> !(VName a) -> !(VName b) -> !(nexp t) -> NExpH nexp t
   NUnUnit :: !(VName ()) -> !(nexp t) -> NExpH nexp t
   NCharAs :: !(VName Char) -> !(RS.RSet Char) -> NExpH nexp D
   NOp0 :: !NullaryOp -> NExpH nexp D
@@ -247,52 +254,49 @@ instance PP.Pretty (AnnNExp a) where
 
       prettyNExp = prettyNExpH prettyAnnNExp
 
-type OccMap = H.HashMap SomeExpName Int
+type OccMap = H.HashMap (Some ExpName) Int
 
 emptyOccMap :: OccMap
 emptyOccMap = H.empty
 
-lookupOccMap :: SomeExpName -> OccMap -> Maybe Int
+lookupOccMap :: Some ExpName -> OccMap -> Maybe Int
 lookupOccMap = H.lookup
 
-modifyOccMap :: SomeExpName -> (Int -> Int) -> OccMap -> OccMap
+modifyOccMap :: Some ExpName -> (Int -> Int) -> OccMap -> OccMap
 modifyOccMap = flip H.adjust
 
-insertOccMap :: SomeExpName -> Int -> OccMap -> OccMap
+insertOccMap :: Some ExpName -> Int -> OccMap -> OccMap
 insertOccMap = H.insert
 
 data AnnConf = AnnConf
-  { occMapRef :: IORef OccMap
-  , renameMapRef :: IORef (H.HashMap SomeStableExpName Int)
-  , nameSourceRef :: IORef Int
-  , vnameLevel :: Int
-  , fnameLevel :: Int
+  { occMapRef :: !(IORef OccMap)
+  , renameMapRef :: !(IORef (H.HashMap (Some StableExpName) Int))
+  , nameSourceRef :: !(IORef Int)
+  , vnameLevel :: !Int
+  , fnameLevel :: !Int
   }
 
 nameStableName :: StableExpName a -> AnnM (ExpName a)
 nameStableName sn = do
   ref <- Reader.asks renameMapRef
   m <- liftIO $ readIORef ref
-  case H.lookup (SomeStableExpName sn) m of
+  case H.lookup (Some sn) m of
     Just i -> pure $ ExpName i
     Nothing -> do
       nsref <- Reader.asks nameSourceRef
       cnt <- liftIO $ readIORef nsref
       liftIO $ writeIORef nsref $! cnt + 1
-      let !m' = H.insert (SomeStableExpName sn) cnt m
+      let !m' = H.insert (Some sn) cnt m
       liftIO $ writeIORef ref m'
       pure $ ExpName cnt
 
 incVNameLevel :: Int -> AnnConf -> AnnConf
 incVNameLevel k conf@AnnConf{vnameLevel = n} = conf{vnameLevel = n + k}
 
--- incFNameLevel :: Int -> AnnConf -> AnnConf
--- incFNameLevel k conf@AnnConf{fnameLevel = n} = conf{fnameLevel = n + k}
-
 type AnnM = ReaderT AnnConf IO
 
 -- TODO:
---  * [ ] Suppress sharing of small expressions
+--  * [x] Suppress sharing of small expressions
 --  * [ ] Share texts with the same contents
 --  * [ ] CSE
 
@@ -307,9 +311,7 @@ annotate !e0 = do
   occMap <- liftIO $ readIORef ref
   n <- liftIO $ makeStableName e0
   expName@(ExpName cID) <- nameStableName (StableExpName n)
-  let isSmall = isSmallExp e0
-  let key = SomeExpName expName
-  --  liftIO $ putStrLn $ Text.printf "Encountered: %s -> %s" (show key) (show expName)
+  let key = Some expName
   case lookupOccMap key occMap of
     Just _ -> do
       -- Case: we already have encountered the expression
@@ -317,18 +319,11 @@ annotate !e0 = do
       pure $ AnnNRef expName
     Nothing -> do
       -- Case: the first time we see exp
+      let isSmall = isSmallExp e0
       unless isSmall $ liftIO $ modifyIORef' ref $ insertOccMap key 1
       let wrap = AnnNExp (if isSmall then Nothing else Just expName)
       fmap wrap (go cID e0)
   where
-    -- insertEdge :: Int -> AnnM ()
-    -- insertEdge cID = case mpID of
-    --   Nothing -> pure ()
-    --   Just pID -> do
-    --     ref <- Reader.asks edgesRef
-    --     liftIO $ modifyIORef' ref ((pID, cID) :)
-    --     pure ()
-
     go cID = \case
       Op0 op ->
         pure (NOp0 op)
@@ -388,26 +383,16 @@ annotateBranch (Branch pij h) = do
 -- there is no dependency between 1 and 2: even when 2 is floated out due to
 -- other references in its body, there is no problem with scopes.
 
-makeGraph :: (FGL.DynGraph gr) => Int -> [(Int, Int)] -> (Int -> Bool) -> gr [SomeExpName] ()
+makeGraph :: (FGL.DynGraph gr) => Int -> [(Int, Int)] -> (Int -> Bool) -> gr [Some ExpName] ()
 makeGraph maxID edges isRelev =
   let g0 =
         FGL.mkGraph
           [(i, i) | i <- [0 .. maxID - 1], isRelev i]
           [(i, j, ()) | (i, j) <- edges]
       g1 = FGL.condensation g0
-  in  FGL.nmap (map (SomeExpName . ExpName)) g1
+  in  FGL.nmap (map (Some . ExpName)) g1
 
--- let g0 =
---       FGL.mkGraph
---         [(i, i) | i <- [0 .. maxID - 1]]
---         [(i, j, ()) | (i, j) <- edges]
---     -- contract all irrelevant nodes
---     g1 = FGL.nfilter isRelevant $ FGL.tc g0
---     -- make a contraction graph
---     g2 = FGL.grev $ FGL.condensation g1
--- in  FGL.nmap (map (SomeExpName . ExpName)) g2
-
-type DepGraph = FGL.Gr [SomeExpName] ()
+type DepGraph = FGL.Gr [Some ExpName] ()
 
 newtype MOccMap = MOccMap OccMap
 
@@ -417,35 +402,37 @@ instance Semigroup MOccMap where
 instance Monoid MOccMap where
   mempty = MOccMap H.empty
 
-isRelevant :: OccMap -> SomeExpName -> Bool
+isRelevant :: OccMap -> Some ExpName -> Bool
 isRelevant = flip H.member
 
-gatherDep :: OccMap -> AnnNExp a -> Writer (MOccMap, [SomeExpName], [(Int, Int)]) (AnnNExp a)
-gatherDep occMap (AnnNRef n) = do
-  let key = SomeExpName n
+gatherDep :: OccMap -> AnnNExp a -> Writer (MOccMap, IS.IntSet, S.Set (Int, Int)) (AnnNExp a)
+gatherDep occMap (AnnNRef n@(ExpName i)) = do
+  let key = Some n
   when (isRelevant occMap key) $
-    Writer.tell (MOccMap $ insertOccMap key 1 emptyOccMap, [key], [])
+    Writer.tell (MOccMap $ insertOccMap key 1 emptyOccMap, IS.singleton i, S.empty)
   pure (AnnNRef n)
 gatherDep occMap (AnnNExp msn e0) = Writer.pass $ do
   (e0', (MOccMap oMap, names, edges)) <- Writer.listen (go e0)
   let (msn', oMap', names') = case msn of
-        Just sn | isRelevant occMap (SomeExpName sn) -> 
-          (Just sn, H.insertWith (+) (SomeExpName sn) 1 oMap, SomeExpName sn : names)
+        Just sn@(ExpName i)
+          | isRelevant occMap (Some sn) ->
+              (Just sn, H.insertWith (+) (Some sn) 1 oMap, IS.insert i names)
         _ -> (Nothing, oMap, names)
   let satNames =
-        [ k
-        | k <- H.keys oMap'
+        [ i
+        | k@(Some (ExpName i)) <- H.keys oMap'
         , let cnt1 = fromMaybe 0 (H.lookup k occMap)
         , let cnt2 = fromMaybe 0 (H.lookup k oMap')
         , cnt1 == cnt2
         ]
-  let names'' = names' Data.List.\\ satNames
+  case msn' of Just (ExpName i) -> traceM $ "Looked: " ++ show i; _ -> pure ()
+  let names'' = names' IS.\\ IS.fromList satNames
   let newEdges = case msn' of
-        Just (ExpName i) -> [(i, j) | SomeExpName (ExpName j) <- names'']
+        Just (ExpName i) -> [(i, j) | j <- IS.toList names'']
         _ -> []
-  pure (AnnNExp msn' e0', const (MOccMap oMap', names'', newEdges ++ edges))
+  pure (AnnNExp msn' e0', const (MOccMap oMap', names'', S.fromAscList newEdges `S.union` edges))
   where
-    go :: NExpH AnnNExp a -> Writer (MOccMap, [SomeExpName], [(Int, Int)]) (NExpH AnnNExp a)
+    go :: NExpH AnnNExp a -> Writer (MOccMap, IS.IntSet, S.Set (Int, Int)) (NExpH AnnNExp a)
     go = \case
       NOp0 op -> pure (NOp0 op)
       NOp1 op e -> NOp1 op <$> gatherDep occMap e
@@ -486,17 +473,12 @@ runAnnotate e = do
 
   let (e'', (_, _, edges)) = Writer.runWriter (gatherDep filteredOccMap e')
 
-  putStrLn "Dependencies"
-  print $ map Data.List.head $ Data.List.group $ Data.List.sort edges
+  traceIO $ "Dependencies: " ++ show (S.toList edges)
 
-  let gr = makeGraph maxIDPlusOne edges $ \n -> SomeExpName (ExpName n) `H.member` filteredOccMap
-
-  writeFile "_dep.dot" (FGLDot.showDot $ FGLDot.fglToDot $ FGL.emap (const NoLabel) gr)
+  let gr = makeGraph maxIDPlusOne (S.toList edges) $ \n -> Some (ExpName n) `H.member` filteredOccMap
+  -- writeFile "_dep.dot" (FGLDot.showDot $ FGLDot.fglToDotString $ FGL.nemap show (const "") gr)
 
   pure (e'', filteredOccMap, gr)
-
-data NoLabel = NoLabel 
-instance Show NoLabel where show _ = "" 
 
 -- >>> let r = Op2 Cat r (Op0 Space)
 -- >>> res <- runAnnotate r
@@ -532,7 +514,7 @@ instance Show NoLabel where show _ = ""
 -- in @0
 -- let
 --   f_0 = text "A"
---   f_1 = hcat [f_0 <#> text "B", f_1]
+--   f_1 = hcat [f_0, f_0 <#> text "B", f_1]
 -- in f_1
 
 -- >>> let { t = Lam $ \x -> let pp = Op2 BChoice (UnUnit x (fromString "A")) (Op2 Cat (fromString "B") pp) in pp }
@@ -552,7 +534,7 @@ instance Show NoLabel where show _ = ""
 --                  @1 in
 -- @0
 
-_example4 :: Exp s v D
+_example4 :: Exp Implicit v D
 _example4 =
   let x = text "A" in let y = x <#> text "B" in (x <#> y) <#> y
   where
@@ -567,7 +549,7 @@ _example4 =
 -- let @3 = @2 <#> text "B" in
 -- (@2 <#> @3) <#> @3
 
-_example5 :: Exp s v D
+_example5 :: Exp Implicit v D
 _example5 =
   let x = text "A" <#> text "B" in let y = let z = x <#> text "C" in text "D" <#> z <#> z in x <#> y <#> y
   where
@@ -585,15 +567,13 @@ _example5 =
 -- let @5 = let @8 = @2 <#> text "C" in
 --            (text "D" <#> @8) <#> @8 in
 -- (@2 <#> @5) <#> @5
--- let
---   f_0 = text "A" <#> text "B"
--- in let
---      f_1 = let f_2 = f_0 <#> text "C" in text "D" <#> f_2 <#> f_2
---    in f_0 <#> f_1 <#> f_1
+-- let f_0 = text "A" <#> text "B" in
+-- let f_1 = let f_2 = f_0 <#> text "C" in (text "D" <#> f_2) <#> f_2 in
+-- (f_0 <#> f_1) <#> f_1
 
 data RecNExp a
-  = RecNExp (NExpH RecNExp a)
-  | NLetRec [NDefPair] (RecNExp a)
+  = RecNExp !(NExpH RecNExp a)
+  | NLetRec ![NDefPair] !(RecNExp a)
 
 instance Show (RecNExp a) where
   show = show . PP.pretty
@@ -624,7 +604,7 @@ prettyExpInRecNExp :: Int -> NExpH RecNExp a -> PP.Doc ann
 prettyExpInRecNExp = prettyNExpH prettyRecNExp
 
 data NDefPair where
-  NDefPair :: FName a -> RecNExp a -> NDefPair
+  NDefPair :: !(FName a) -> !(RecNExp a) -> NDefPair
 
 deriving stock instance Show NDefPair
 
@@ -636,18 +616,15 @@ splitDefs [] k = k ENil ENil
 splitDefs (NDefPair x e : defs) k =
   splitDefs defs $ \xs es -> k (x :. xs) (e :. es)
 
-type DefMap = H.HashMap SomeExpName SomeExp
-
-data SomeExp where
-  SomeExp :: RecNExp a -> SomeExp
+type DefMap = H.HashMap (Some ExpName) (Some RecNExp)
 
 lookupDefMap :: ExpName a -> DefMap -> Maybe (RecNExp a)
-lookupDefMap n m = case H.lookup (SomeExpName n) m of
-  Just (SomeExp v) -> Just (unsafeCoerce v)
+lookupDefMap n m = case H.lookup (Some n) m of
+  Just (Some v) -> Just (unsafeCoerce v)
   Nothing -> Nothing
 
 insertDefMap :: ExpName a -> RecNExp a -> DefMap -> DefMap
-insertDefMap n e = H.insert (SomeExpName n) (SomeExp e)
+insertDefMap n e = H.insert (Some n) (Some e)
 
 emptyDefMap :: DefMap
 emptyDefMap = H.empty
@@ -661,11 +638,11 @@ instance Monoid LMaps where
 
 data LMaps
   = LMaps
-  { loccMap :: OccMap
-  , ldefMap :: DefMap
+  { loccMap :: !OccMap
+  , ldefMap :: !DefMap
   }
 
-type Frontier = IM.IntMap [SomeExpName]
+type Frontier = IM.IntMap [Some ExpName]
 
 type LetIntroM = RWS () LMaps (DepGraph, Frontier)
 
@@ -686,9 +663,9 @@ introduceLets (e, occMap, depGr) = do
 
 makeDefNames ::
   DepGraph
-  -> (SomeExpName -> Bool)
+  -> (Some ExpName -> Bool)
   -> Frontier
-  -> (DepGraph, Frontier, [[SomeExpName]])
+  -> (DepGraph, Frontier, [[Some ExpName]])
 makeDefNames depGr cond fr
   | IM.null fr = (depGr, fr, [])
   | IM.null toProc = (depGr, fr, [])
@@ -711,14 +688,14 @@ introLets ::
   -> AnnNExp a
   -> LetIntroM (RecNExp a)
 introLets _occMap (AnnNRef sn) = do
-  let key = SomeExpName sn
+  let key = Some sn
   Writer.tell LMaps{loccMap = insertOccMap key 1 emptyOccMap, ldefMap = emptyDefMap}
   pure $ RecNExp $ NVar (SName sn)
 introLets occMap (AnnNExp msn e0) = Writer.pass $ do
   (ebody, LMaps{loccMap = count, ldefMap = dMap}) <- Writer.listen $ go e0
   -- Update `count'` first to include this occurrence of `sn`
   let count' = case msn of
-        Just sn -> H.insertWith (+) (SomeExpName sn) 1 count
+        Just sn -> H.insertWith (+) (Some sn) 1 count
         _ -> count
   -- `checkCnt k` tells if there is no occurrences of `k` upwards.
   let checkCnt k =
@@ -731,21 +708,21 @@ introLets occMap (AnnNExp msn e0) = Writer.pass $ do
   let (dg', fr', defNames_) = makeDefNames dg checkCnt fr
   let defNames = reverse defNames_
   let flatDefNames = concat defNames
-  let defs = flip map defNames $ map $ \(SomeExpName x) -> case lookupDefMap x dMap of
+  let defs = flip map defNames $ map $ \(Some x) -> case lookupDefMap x dMap of
         Just e -> NDefPair (SName x) e
-        _ | Just sn <- msn, SomeExpName x == SomeExpName sn -> NDefPair (SName sn) (RecNExp ebody)
+        _ | Just sn <- msn, Some x == Some sn -> NDefPair (SName sn) (RecNExp ebody)
         _ | otherwise -> error "introLets: cannot happen"
   let bodyExp = nletrecs defs ebody
   let dMap'
         | Just sn <- msn =
-            if SomeExpName sn `elem` flatDefNames
+            if Some sn `elem` flatDefNames
               then insertDefMap sn (nletrecs [] ebody) dMap
               else insertDefMap sn bodyExp dMap
         | otherwise = dMap
   let dMap'' = foldr H.delete dMap' flatDefNames
   let resExp
         | Just sn <- msn =
-            if SomeExpName sn `elem` flatDefNames
+            if Some sn `elem` flatDefNames
               then nletrecs defs $ NVar (SName sn)
               else nletrecs [] $ NVar (SName sn)
         | otherwise = bodyExp
@@ -779,42 +756,26 @@ introLets occMap (AnnNExp msn e0) = Writer.pass $ do
 -- goDef (NDefCons e (AnnNDef d)) = NDefCons <$> introLets occMap e <*> (RecNDef <$> goDef d)
 -- goDef (NDefLetr x (AnnNDef d)) = NDefLetr x . RecNDef <$> goDef d
 
-data SomeVar v where
-  SomeVar :: In v a -> SomeVar v
+instance Hashable (Some FName) where
+  hashWithSalt salt (Some (SName n)) = hashWithSalt salt n
 
-data SomeEExp v where
-  SomeEExp :: Exp Explicit v a -> SomeEExp v
-
-data SomeFName where
-  SomeFName :: FName a -> SomeFName
-
-instance Eq SomeFName where
-  SomeFName fn == SomeFName fn' = fn == unsafeCoerce fn'
-
-instance Hashable SomeFName where
-  hashWithSalt salt (SomeFName n) =
-    hashWithSalt @(Either Int SomeExpName) salt $
-      case n of
-        FName i -> Left i
-        SName sn -> Right (SomeExpName sn)
-
-type VMap v = H.HashMap Int (SomeVar v)
-type FMap v = H.HashMap SomeFName (SomeEExp v)
+type VMap v = H.HashMap Int (Some (In v))
+type FMap v = H.HashMap (Some FName) (Some (Exp Explicit v))
 
 insertVMap :: VName a -> In v a -> VMap v -> VMap v
-insertVMap (VName i) x = H.insert i (SomeVar x)
+insertVMap (VName i) x = H.insert i (Some x)
 
 lookupVMap :: VName a -> VMap v -> Maybe (In v a)
 lookupVMap (VName i) vMap = case H.lookup i vMap of
-  Just (SomeVar v) -> Just (unsafeCoerce v)
+  Just (Some v) -> Just (unsafeCoerce v)
   Nothing -> Nothing
 
 insertFMap :: FName a -> Exp Explicit v a -> FMap v -> FMap v
-insertFMap fn f = H.insert (SomeFName fn) (SomeEExp f)
+insertFMap fn f = H.insert (Some fn) (Some f)
 
 lookupFMap :: FName a -> FMap v -> Maybe (Exp Explicit v a)
-lookupFMap fn fMap = case H.lookup (SomeFName fn) fMap of
-  Just (SomeEExp e) -> Just (unsafeCoerce e)
+lookupFMap fn fMap = case H.lookup (Some fn) fMap of
+  Just (Some e) -> Just (unsafeCoerce e)
   Nothing -> Nothing
 
 type UnnameM v = Reader (VMap v, FMap v)
