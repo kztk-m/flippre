@@ -1,61 +1,68 @@
-cabal-version:      3.0
-name:               mutual-def-class
-version:            0.1.0.0
+cabal-version: 3.0
+name: mutual-def-class
+version: 0.2.0
 -- synopsis:
 -- description:
-license:            BSD-3-Clause
-license-file:       LICENSE
-author:             Kazutaka Matsuda
-maintainer:         kztk@tohoku.ac.jp
+license: BSD-3-Clause
+license-file: LICENSE
+author: Kazutaka Matsuda
+maintainer: kztk@tohoku.ac.jp
 -- copyright:
-category:           Language
-build-type:         Simple
+category: Language
+build-type: Simple
+
 -- extra-source-files:
-
-
 common warnings
-    default-language: Haskell2010
+  default-language: Haskell2010
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wredundant-constraints
+    -Wnoncanonical-monad-instances
+
+  if impl(ghc >=8.2)
+    ghc-options: -fhide-source-paths
+
+  if impl(ghc >=8.4)
     ghc-options:
-                 -Wall
-                 -Wcompat
-                 -Widentities
-                 -Wincomplete-uni-patterns
-                 -Wincomplete-record-updates
-                 -Wredundant-constraints
-                 -Wnoncanonical-monad-instances
-    if impl(ghc >= 8.2)
-      ghc-options:       -fhide-source-paths
-    if impl(ghc >= 8.4)
-      ghc-options:       -Wmissing-export-lists
-                         -Wpartial-fields
-    if impl(ghc >= 8.8)
-      ghc-options:       -Wmissing-deriving-strategies
-                         -fwrite-ide-info
-                         -hiedir=.hie
-    if impl(ghc >= 8.10)
-      ghc-options:       -Wunused-packages  
+      -Wmissing-export-lists
+      -Wpartial-fields
+
+  if impl(ghc >=8.8)
+    ghc-options:
+      -Wmissing-deriving-strategies
+      -fwrite-ide-info
+      -hiedir=.hie
+
+  if impl(ghc >=8.10)
+    ghc-options: -Wunused-packages
 
 library
-    import:           warnings
-    exposed-modules:  Defs 
-    other-modules: 
-      Internal.THUtil 
-    build-depends:    
-        base >= 4.7 && < 5, 
-        fin >= 0.1 && < 0.4, 
-        prettyprinter >= 1.7 && < 1.8, 
-        template-haskell >= 2.11 && < 2.23
-    hs-source-dirs:   src
-    default-language: Haskell2010
+  import: warnings
+  exposed-modules: Defs
+  other-modules:
+    Internal.THUtil
+
+  build-depends:
+    base >=4.7 && <5,
+    fin >=0.1 && <0.4,
+    prettyprinter >=1.7 && <1.8,
+    template-haskell >=2.11 && <2.23,
+
+  hs-source-dirs: src
+  default-language: Haskell2010
 
 test-suite mutual-def-class-test
-    import:           warnings
-    default-language: Haskell2010
-    -- other-modules:
-    -- other-extensions:
-    type:             exitcode-stdio-1.0
-    hs-source-dirs:   test
-    main-is:          Main.hs
-    build-depends:
-        base ^>=4.18.2.1,
-        mutual-def-class
+  import: warnings
+  default-language: Haskell2010
+  -- other-modules:
+  -- other-extensions:
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Main.hs
+  build-depends:
+    base,
+    mutual-def-class,

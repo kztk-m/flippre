@@ -4,6 +4,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
@@ -16,6 +17,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -106,6 +108,8 @@ module Defs (
   Tip (..),
   Arg (..),
   FromBounded (..),
+  letrVia,
+  letrFromBounded,
 
   -- * letrec
   letrec,
@@ -134,7 +138,7 @@ module Defs (
 where
 
 import Control.Applicative (Alternative (..))
-import Data.Coerce (coerce)
+import Data.Coerce (Coercible, coerce)
 import qualified Data.Fin as F
 import Data.Functor.Compose
 import Data.Functor.Const (Const (..))
@@ -342,15 +346,12 @@ def a = fmap (a,)
 --     arr (VCons a b, r) = (a, (b, r))
 
 -- | A class that provides a generalized version of 'letr'.
--- Intuitively, @Arg f t@ means @t@ can be recursively defined
--- in the EDSL @f@.
 --
--- Due to the restriction of Haskell type classes, no instance is provided
--- for @Arg f (f a)@. Instead, we provide an instance @Arg f (Identity (f a))@.
--- Use the instance via @DerivingVia@ to provide @Arg F (Identity (F a)@ for a
--- concrete EDSL expression @F@.
-class (Defs f) => Arg f t where
-  letr :: (t -> DefM f (t, r)) -> DefM f r
+-- One can think this as an argument resticted version of 'mfix'. See
+-- 'mfixDefM'. 'letr' provides a building block for various @a@ of @(a -> m a)
+-- -> m a@. See instance declarations for details.
+class (Monad m) => Arg m t where
+  letr :: (t -> m (t, r)) -> m r
 
 -- | A variant of 'mfix'. This function is supported to be used as:
 
@@ -361,57 +362,47 @@ class (Defs f) => Arg f t where
 --  >         b <- share $ ... a ... b ...
 --  >     ...
 --  >   where mfix = mfixDefM
-mfixDefM :: (Arg f a) => (a -> DefM f a) -> DefM f a
+mfixDefM :: (Arg m a) => (a -> m a) -> m a
 mfixDefM f = letr $ \a -> (,a) <$> f a
 
-instance (Defs f) => Arg f () where
+instance (Monad m) => Arg m () where
   letr f = snd <$> f ()
 
 newtype Tip a = Tip {unTip :: a}
 
-instance (Defs f) => Arg f (Tip (f a)) where
+instance (Defs f) => Arg (DefM f) (Tip (f a)) where
   letr :: forall r. (Tip (f a) -> DefM f (Tip (f a), r)) -> DefM f r
   letr f = letr1 (coerce f :: f a -> DefM f (f a, r))
 
-instance (Defs f) => Arg f (Identity (f a)) where
+instance (Defs f) => Arg (DefM f) (Identity (f a)) where
   letr :: forall r. (Identity (f a) -> DefM f (Identity (f a), r)) -> DefM f r
   letr f = letr1 (coerce f :: f a -> DefM f (f a, r))
 
-instance (Arg f a, Arg f b) => Arg f (a, b) where
+instance (Arg m a, Arg m b) => Arg m (a, b) where
   letr f = letr $ \b -> letr $ \a -> do
     ((a', b'), r) <- f (a, b)
     return (a', (b', r))
-instance (Arg f a, Arg f b, Arg f c) => Arg f (a, b, c) where
+instance (Arg m a, Arg m b, Arg m c) => Arg m (a, b, c) where
   letr f = letr $ \c -> letr $ \b -> letr $ \a -> do
     ((a', b', c'), r) <- f (a, b, c)
     return (a', (b', (c', r)))
 
-instance (Arg f a, Arg f b, Arg f c, Arg f d) => Arg f (a, b, c, d) where
+instance (Arg m a, Arg m b, Arg m c, Arg m d) => Arg m (a, b, c, d) where
   letr f = letr $ \ ~(c, d) -> letr $ \ ~(a, b) -> do
     ((a', b', c', d'), r) <- f (a, b, c, d)
     return ((a', b'), ((c', d'), r))
 
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5) => Arg f (a1, a2, a3, a4, a5) where
-  letr f = letr $ \ ~(a4, a5) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5), r) <- f (a1, a2, a3, a4, a5)
-    return ((b1, b2, b3), ((b4, b5), r))
-
-instance (Arg f a1, Arg f a2, Arg f a3, Arg f a4, Arg f a5, Arg f a6) => Arg f (a1, a2, a3, a4, a5, a6) where
-  letr f = letr $ \ ~(a4, a5, a6) -> letr $ \ ~(a1, a2, a3) -> do
-    ((b1, b2, b3, b4, b5, b6), r) <- f (a1, a2, a3, a4, a5, a6)
-    return ((b1, b2, b3), ((b4, b5, b6), r))
-
 -- Use template haskell to generate instances for n-tuples
-$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [7 .. 32]])
+$(concat <$> sequence [genTupleArgDecl i [t|Arg|] | i <- [5 .. 32]])
 
-instance (Defs f) => Arg f (HList g '[]) where
+instance Arg (DefM f) (HList g '[]) where
   letr f = do
     (_, r) <- f HNil
     pure r
 
 instance
-  (Defs f, Arg f a, Arg f (HList Identity as)) =>
-  Arg f (HList Identity (a : as))
+  (Arg m a, Arg m (HList Identity as)) =>
+  Arg m (HList Identity (a : as))
   where
   letr f = letr $ \a -> letr $ \as -> do
     (res, r) <- f (HCons (Identity a) as)
@@ -425,7 +416,7 @@ instance
 -- >   def (fdef k1) >>> ... >>> def (fdef kn) $ do
 -- >   let f k = fromJust $ lookup k [(k1,f1), ..., (kn,fn)]
 -- >   r
-letrs :: (Eq k, Arg f a) => [k] -> ((k -> a) -> DefM f (k -> a, r)) -> DefM f r
+letrs :: (Eq k, Arg m a) => [k] -> ((k -> a) -> m (k -> a, r)) -> m r
 letrs [] h = snd <$> h (const $ error "Defs.letrs: out of bounds")
 letrs (k : ks) h = letr $ \fk -> letrs ks $ \f -> do
   (f', r) <- h $ \x -> if x == k then fk else f x
@@ -438,30 +429,53 @@ newtype FromBounded b = FromBounded {getBounded :: b}
   deriving newtype (Eq, Ord, Enum, Bounded, Num, Real, Integral, Show)
 
 letrsB ::
-  (Eq b, Enum b, Bounded b, Arg f a) =>
-  ((b -> a) -> DefM f (b -> a, r))
-  -> DefM f r
+  (Eq b, Enum b, Bounded b, Arg m a) =>
+  ((b -> a) -> m (b -> a, r))
+  -> m r
 letrsB = letrs [minBound .. maxBound]
 
-instance (Eq b, Enum b, Bounded b, Arg f a) => Arg f (FromBounded b -> a) where
+instance (Eq b, Enum b, Bounded b, Arg m a) => Arg m (FromBounded b -> a) where
   letr = letrsB
+
+letrFromBounded ::
+  forall b m a r.
+  (Eq b, Enum b, Bounded b, Arg m a) =>
+  ((b -> a) -> m (b -> a, r))
+  -> m r
+letrFromBounded = letrVia (Proxy :: Proxy (FromBounded b -> a))
+
+-- | This function can be used to make an instance declration of @'Arg' m a@
+-- when @a'@ with the same representation is an instance of @'Arg' m@.
+--
+-- We cannot use @DerivingVia@ as GHC cannot infer the role of the parameter to
+-- @m@.
+letrVia :: forall a' proxy m a r. (Arg m a', Coercible a' a) => proxy a' -> (a -> m (a, r)) -> m r
+letrVia _ h = letr (fmap (coerce :: (a, r) -> (a', r)) . (coerce h :: a' -> m (a, r)))
 
 -- Instances of concrete bounded types: we don't make instances like Arg f (Int -> a),
 -- as they are unrealistic.
+instance (Arg m a) => Arg m (Bool -> a) where
+  letr = letrFromBounded
 
-deriving via (FromBounded Bool -> a) instance (Arg f a) => Arg f (Bool -> a)
-deriving via (FromBounded (F.Fin n) -> a) instance (Arg f a, F.SNatI m, F.S m ~ n) => Arg f (F.Fin n -> a)
-deriving via (FromBounded Word8 -> a) instance (Arg f a) => Arg f (Word8 -> a)
-deriving via (FromBounded Int8 -> a) instance (Arg f a) => Arg f (Int8 -> a)
-deriving via (FromBounded () -> a) instance (Arg f a) => Arg f (() -> a)
+instance (Arg m a) => Arg m (Word8 -> a) where
+  letr = letrFromBounded
 
-instance (Arg f (b -> a)) => Arg f (Identity b -> a) where
-  letr :: forall r. ((Identity b -> a) -> DefM f (Identity b -> a, r)) -> DefM f r
-  letr h = letr (coerce h :: (Identity b -> a) -> DefM f (Identity b -> a, r))
+instance (Arg m a) => Arg m (Int8 -> a) where
+  letr = letrFromBounded
 
-instance (Arg f (b -> a)) => Arg f (Const b x -> a) where
-  letr :: forall r. ((Const b x -> a) -> DefM f (Const b x -> a, r)) -> DefM f r
-  letr h = letr (coerce h :: (Const b x -> a) -> DefM f (Const b x -> a, r))
+instance (Arg m a) => Arg m (() -> a) where
+  letr = letrFromBounded
+
+instance (Arg m a, F.SNatI k, F.S k ~ n) => Arg m (F.Fin n -> a) where
+  letr = letrFromBounded
+
+instance (Arg m (b -> a)) => Arg m (Identity b -> a) where
+  letr :: forall r. ((Identity b -> a) -> m (Identity b -> a, r)) -> m r
+  letr = letrVia (Proxy :: Proxy (b -> a))
+
+instance (Arg m (b -> a)) => Arg m (Const b x -> a) where
+  letr :: forall r. ((Const b x -> a) -> m (Const b x -> a, r)) -> m r
+  letr = letrVia (Proxy :: Proxy (b -> a))
 
 {-# WARNING VarM "This class will be removed soon. Use 'EbU' library for pretty-printing" #-}
 

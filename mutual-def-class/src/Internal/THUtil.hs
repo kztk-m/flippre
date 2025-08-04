@@ -46,10 +46,11 @@ genTupleLetrBody n f =
 
 genTupleArgDecl :: Int -> TH.Q TH.Type -> TH.Q [TH.Dec]
 genTupleArgDecl n mh = do
-  f <- TH.newName "f"
+  -- f <- TH.newName "f"
+  m <- TH.newName "m"
   xs <- replicateM n (TH.newName "t")
   h <- mh
-  let h' = TH.AppT h (TH.VarT f)
+  let h' = TH.AppT h (TH.VarT m) -- TH.AppT (TH.AppT h (TH.VarT f)) (TH.VarT m)
   body <- [|\ff -> $(genTupleLetrBody n [|ff|])|]
   pure
     [ TH.InstanceD
