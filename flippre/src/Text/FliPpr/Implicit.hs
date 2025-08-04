@@ -37,9 +37,11 @@ materializeWithProxy _ = materialize
 unMaterializeWithProxy :: (Materializable a) => proxy a -> Store a -> a
 unMaterializeWithProxy _ = unMaterialize
 
--- | Inspired by https://hackage.haskell.org/package/memoize
+-- | A type class to ensure 'a' has a /first-order/ representation @'Store' a@.
+--
+-- Inspired by https://hackage.haskell.org/package/memoize
 class Materializable a where
-  -- | *First-order* (non-function) datatype to store each computation result
+  -- | /First-order/ (non-function) datatype to store each computation result
   type Store a :: Type -- should not contain function types
 
   materialize :: a -> Store a
