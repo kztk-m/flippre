@@ -59,20 +59,29 @@ import GHC.Stack (CallStack)
 import qualified Prettyprinter as PP
 import qualified Text.FliPpr.Doc as DD
 
-data NullaryOp = Abort CallStack | Space | Spaces | Line | LineBreak | Line' | NESpaces' | Text !String deriving stock Show
+-- | Nullary operators or constants.
+data NullaryOp = Abort !CallStack | Space | Spaces | Line | LineBreak | Line' | NESpaces' | Text !String deriving stock Show
+
+-- | Unary operators.
 data UnaryOp = Align | Group | Nest !Int deriving stock Show
+
+-- | Binary operators.
 data BinaryOp = Cat | BChoice deriving stock Show
 
 -- | The kind for FliPpr types.
-data FType = FTypeD | Type :~> FType
+data FType
+  = -- | FliPpr's base type
+    FTypeD
+  | -- | FliPpr's function type
+    (:~>) Type FType
 
--- | Unticked synonym for :~> used for readability.
+-- | Unticked synonym for :~> for readability.
 type a ~> b = a :~> b
 
 infixr 0 ~>
 infixr 0 :~>
 
--- | Unticked synonym for FTypeD
+-- | Unticked synonym for 'FTypeD'
 type D = 'FTypeD
 
 -- | Partial bijections between @a@ and @b@.
@@ -88,14 +97,19 @@ data PartialBij a b
 -- | A datatype represents branches.
 data Branch arg exp a (t :: FType)
   = -- | the part @arg b -> exp t@ must be a linear function
-    forall b. Branch (PartialBij a b) (arg b -> exp t)
+    forall b. Branch !(PartialBij a b) (arg b -> exp t)
 
-data Phase = Implicit | Explicit
+-- | Indicates whether Haskell-level recursive definitions are used. See 'Exp'.
+data Phase
+  = Implicit
+  | Explicit
 
+-- | A singleton type for 'Phase'.
 data SPhase s where
   SImplicit :: SPhase Implicit
   SExplicit :: SPhase Explicit
 
+-- | Typeclass to witness whether @s = Implicit@ or @s = Explicit@ at runtime.
 class Phased s where
   phase :: SPhase s
 
@@ -113,19 +127,46 @@ instance Phased Explicit where
 --   ConstraintType Implicit a = Typeable a
 --   ConstraintType Explicit a = ()
 
+-- | Types for defined names in FliPpr.
 type family FVar v :: FType -> Type
+
+-- | Input types for FliPpr
 data family In v :: Type -> Type
+
+-- | Core expression types in FliPpr.
+--
+-- The type parameter @s@ represents whether Haskell level recursive definition is allowed.
+--
+-- * @s = Implicit@ denotes that this expression may have used Haskell-level recursions (with 'Text.FliPpr.Implicit.define') in construction. That is, recursions are implicit.
+-- * @s = Explicit@ declares that the expression should not involve Haskell-level recursive definitions. That is, recursions are explicit.
+--
+-- Currently, this parameter is tentatively called "phase" as implicit expressions will be converted to explicit expressions before handling.
+--
+-- The type parameter @v@ is used to witness closedness. The parameter must be kept abstract in construction, and
+-- we only handle expressions of type @forall v. Exp s v a@, where the universal quantification ensures closedness.
+-- In other words, the type parameter @v@ has the same role as @s@ of @'Control.Monad.ST.ST' s@ for the 'Control.Monad.ST.ST' monad.
 data Exp (s :: Phase) v a where
+  -- | First-order abstraction. Notice that we can only abstract an input.
   Lam :: (In v a -> Exp s v b) -> Exp s v (a ~> b)
+  -- | First-order application. Notice that the argument must be an input.
   App :: Exp s v (a ~> b) -> In v a -> Exp s v b
+  -- | Case expression. Notice that we can perform the case analysis for inputs.
   Case :: CallStack -> In v a -> [Branch (In v) (Exp s v) a t] -> Exp s v t
+  -- | Destructs an input pair.
   UnPair :: CallStack -> In v (a, b) -> (In v a -> In v b -> Exp s v t) -> Exp s v t
+  -- | Consumes a unit-typed input.
   UnUnit :: In v () -> Exp s v a -> Exp s v a
+  -- | Output an input charactor if it belongs to the given set.
   CharAs :: In v Char -> RS.RSet Char -> Exp s v D
+  -- | Constants or nullary operator expressions. See 'NullaryOp' for operators.
   Op0 :: !NullaryOp -> Exp s v D
+  -- | Unary operator expressions. See 'UnaryOp' for operators.
   Op1 :: !UnaryOp -> Exp s v D -> Exp s v D
+  -- | Binary operator expressions. See 'BinaryOp' for operators.
   Op2 :: !BinaryOp -> Exp s v D -> Exp s v D -> Exp s v D
+  -- | Use of defined names.
   Var :: FVar v a -> Exp s v a
+  -- | Local definitions.
   Local :: Def s v '[] a -> Exp s v a
 
 -- | A newtype wrapper for the FliPpr expression type: @forall v. Exp s v a@.
@@ -164,17 +205,47 @@ instance (D ~ t) => DD.DocLike (Exp s v t) where
   nest = Op1 . Nest
   group = Op1 Group
 
--- TODO: Use it only for the explicit syntax. The implicit syntax should use
--- tying knot instead.
-
+-- | Types for recursive definitions in FliPpr.
+--
+-- Roughly speaking, @'Def' s v '[a1,...,an] a@ manages expressions to be named
+-- in @let rec@, such as:
+--
+-- @
+-- let
+--     +-------
+--     |  e1 -- Exp s v a1
+--     |  ...
+--     |  en -- Exp s v an
+-- ----+
+--  -- Hidden already constructed definitions.
+--  x1  = e'1
+--  ...
+--  xm  = e'm
+-- in e -- Exp s v a
+-- @
+--
+-- Roughly speaking, 'DefRet' makes the empty work list that only has the @...
+-- in e@ part. 'DefCons' prepends an expression to the "work list" and 'DefLetr'
+-- names the head expression in the list. (Notice that both operate on the
+-- head.)
+--
+-- For example, @let rec x1 = e1 ... xn = en in e@ is represented as:
+--
+-- > DefLetr $ \x1 -> ... DefLetr $ \xn -> DefCons en $ ... $ DefCons e1 $ DefRet e
+--
+-- Notice the inversion of ordering; recall that both 'DefCons' and 'DefLetr' operates
+-- on the head.
 data Def s v as a where
-  DefRet :: Exp s v r -> Def s v '[] r
-  DefCons :: Exp s v a -> Def s v as r -> Def s v (a : as) r
-  DefLetr :: (FVar v a -> Def Explicit v (a : as) r) -> Def Explicit v as r
+  -- | Singleton definition. One can think @DefRet e@ as @let {} in e@.
+  DefRet :: !(Exp s v r) -> Def s v '[] r
+  -- | Prepend an expression into the work list (expressions to be named).
+  DefCons :: Exp s v a -> !(Def s v as r) -> Def s v (a : as) r
+  -- | Name the head expression in the work list (expressions to be named). In
+  -- the knot-typing semantics, @DefLetr h@ represents a computation
+  --
+  -- > let DefCons x r = h x in r
+  DefLetr :: !(FVar v a -> Def Explicit v (a : as) r) -> Def Explicit v as r
 
-data ExpsI v as where
-  ExpNil :: ExpsI v '[]
-  ExpCons :: Exp Implicit v a -> ExpsI v as -> ExpsI v (a : as)
 instance (Phased s) => D.Defs (Exp s v) where
   newtype D (Exp s v) as r = DExp {unDCoreExp :: Def s v as r}
   liftD e = DExp $ DefRet e
@@ -190,13 +261,16 @@ instance (Phased s) => D.Defs (Exp s v) where
 -- The type class 'Repr' provides the two method 'toFunction' and 'fromFunction', which
 -- perform interconversion between FliPpr functions and Haskell functions.
 class Repr s v r | r -> s v where
+  -- | FliPpr datatype corresponding to Haskell function type 'r'.
+  --
+  -- > ReprT (In v a1 -> In v a2 -> ... -> In v an -> Exp s v D) = a1 ~> a2 ~> ... ~> an ~> D
   type ReprT r :: FType
 
   toFunction :: Exp s v (ReprT r) -> r
-  -- ^ @toFunction :: Exp s v (a1 ~> ... ~> an ~> D) -> v a1 -> ... -> v an -> Exp s v D@
+  -- ^ @toFunction :: Exp s v (a1 ~> ... ~> an ~> D) -> In v a1 -> ... -> In v an -> Exp s v D@
 
   fromFunction :: r -> Exp s v (ReprT r)
-  -- ^ @fromFunction :: (v a1 -> ... -> v an -> Exp s v D) -> Exp s v (a1 ~> ... ~> an ~> D)@
+  -- ^ @fromFunction :: (In v a1 -> ... -> In v an -> Exp s v D) -> Exp s v (a1 ~> ... ~> an ~> D)@
 
 instance (s' ~ s) => Repr s' v (Exp s v t) where
   type ReprT (Exp s v t) = t
@@ -215,6 +289,7 @@ instance (Phased s) => D.Arg (Exp s v) (Exp s v a) where
 instance (v ~ v', Phased s, Repr s v r) => D.Arg (Exp s v') (In v a -> r) where
   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
 
+-- | To print FliPpr expressions themselves.
 data ToPrint
 
 newtype instance In ToPrint a = DLevel Int
