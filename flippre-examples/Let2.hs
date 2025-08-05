@@ -1,15 +1,35 @@
+-- This file is a variant of Let.hs but shares some rules explicitly. More
+-- specifically, the generated grammar will have the following structure, and
+-- unlike Let.hs, AddP/AddNp or similar is shared among the Exp* productions.
+--
+-- > Exp3_ ::= AddP | SubP | MulP | DivP | LetP
+-- > Exp3  ::= Exp3_ | "(" Exp3 ")"
+-- > Exp2_ ::= AddP | SubP | MulNP | DivNP | LetP
+-- > Exp2  ::= Exp2_ | "(" Exp2 ")"
+-- > Exp1_ ::= AddNP | SubNP | MulNP | DivNP | LetP
+-- > Exp1 ::= Exp1_ | "(" Exp1 ")"
+-- > Exp0_ ::= AddNP | SubNP | MulNP | DivNP | LetNP
+-- > Exp0  ::= Exp0_ | "(" Exp0 ")"
+-- > AddP ::= "(" AddNP ")"
+-- > AddNP ::= Exp1 "+" Exp2
+-- > ...
+--
+-- In FliPpr, the code here roughly has the following structure.
+--
+-- > addNP e1 e2 = exp 1 e1 <> "+" <> exp 2 e2
+-- > addP e1 e2 = "(" <> addNP e1 e2 <> ")"
+-- > ...
+-- > exp k e = manyParens $ case e of
+-- >    (Add e1 e2) ->  if k > 1 then AddP e1 e2 else AddNP e1 e2
+-- >    ...
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
--- To suppress warnings caused by TH code.
-{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE QualifiedDo #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -Wno-missing-deriving-strategies #-}
 
 import Control.DeepSeq
@@ -65,10 +85,6 @@ mkPprVar =
     alphaNum = Automaton.unions [Automaton.range '0' '9', Automaton.range 'a' 'z', Automaton.range 'A' 'Z']
     ident = smallAlpha <> Automaton.star alphaNum `Automaton.difference` Automaton.unions (map fromString keywords)
 
-{-# ANN opP "HLint: ignore Avoid lambda using `infix`" #-}
-opP :: (DocLike d, Num n, Ord n) => Fixity -> (d -> d -> d) -> (n -> a -> d) -> (n -> b -> d) -> n -> a -> b -> d
-opP fixity f p1 p2 k x y = opPrinter fixity f (\k' -> p1 k' x) (\k' -> p2 k' y) k
-
 manyParens :: (Phased s) => F.Exp s v D -> F.Exp s v D
 manyParens d = local $ F.do
   rec x <- share $ d <? parens x
@@ -82,9 +98,17 @@ pExp = F.do
         group $
           d1 <> nest 2 (line' <> text s <+>. d2)
 
-  let opPr (Fixity a opPrec) opD ppr1 ppr2 = do
+  let opPr ::
+        forall s v k i1 i2.
+        (Num k, Ord k, Phased s) =>
+        Fixity
+        -> (F.Exp s v D -> F.Exp s v D -> F.Exp s v D)
+        -> (k -> In v i1 -> F.Exp s v D)
+        -> (k -> In v i2 -> F.Exp s v D)
+        -> FliPprM s v (k -> In v i1 -> In v i2 -> F.Exp s v D)
+      opPr (Fixity a opPrec) opD ppr1 ppr2 = do
         let (dl, dr) = case a of
-              AssocL -> (0, 1)
+              AssocL -> (0 :: k, 1 :: k)
               AssocR -> (1, 0)
               AssocN -> (0, 0)
         withoutP <- share $ \e1 e2 -> opD (ppr1 (fromIntegral opPrec + dl) e1) (ppr2 (fromIntegral opPrec + dr) e2)
@@ -165,7 +189,7 @@ countTime str comp = do
 
 main :: IO ()
 main = do
-  print (flippr @Explicit $ fromFunction <$> pExp)
+  print (flippr $ fromFunction <$> pExp)
   print (parseExp' "1 + 1")
   print $ G.pprAsFlat grammar
   rnf s1 `seq` countTime "Exp1" $ do

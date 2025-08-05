@@ -1,7 +1,9 @@
+-- A variant of Let.hs using the implicit syntax.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-missing-deriving-strategies #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use section" #-}
@@ -12,7 +14,6 @@ import System.CPUTime
 
 import Prettyprinter (Doc)
 
-import Data.Int (Int8)
 import Text.FliPpr hiding (Exp)
 import qualified Text.FliPpr as F
 import qualified Text.FliPpr.Automaton as A

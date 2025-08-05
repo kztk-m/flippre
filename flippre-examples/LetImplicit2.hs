@@ -1,7 +1,9 @@
+-- A variant of Let2.hs using the implicit syntax.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-missing-deriving-strategies #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use section" #-}
@@ -12,7 +14,6 @@ import System.CPUTime
 
 import Prettyprinter (Doc)
 
-import Data.Int (Int8)
 import Text.FliPpr hiding (Exp)
 import qualified Text.FliPpr as F
 import qualified Text.FliPpr.Automaton as A
@@ -56,10 +57,19 @@ manyParens d =
   let x = define $ d <? parens x
   in  x
 
+op :: String -> F.Exp s v D -> F.Exp s v D -> F.Exp s v D
 op s d1 d2 = group $ d1 <> nest 2 (line' <> text s <+>. d2)
 
-opPrinterI :: (Ord k, Num k, Materializable (i1 -> i2 -> d), DocLike d)
-   => Fixity -> (d -> d -> d) -> (k -> i1 -> d) -> (k -> i2 -> d) -> k -> i1 -> i2 -> d
+opPrinterI ::
+  (Ord k, Num k, Materializable (i1 -> i2 -> d), DocLike d) =>
+  Fixity
+  -> (d -> d -> d)
+  -> (k -> i1 -> d)
+  -> (k -> i2 -> d)
+  -> k
+  -> i1
+  -> i2
+  -> d
 opPrinterI (Fixity a opPrec) opD ppr1 ppr2 =
   let (dl, dr) = case a of
         AssocL -> (0, 1)
@@ -70,13 +80,13 @@ opPrinterI (Fixity a opPrec) opD ppr1 ppr2 =
   in  \k -> if k > fromIntegral opPrec then withP else withoutP
 
 pprAdd :: Fin Nat4 -> In v Exp -> In v Exp -> F.Exp Implicit v D
-pprAdd = define $ \k -> if k > 1 then withP else withoutP 
-  where 
+pprAdd = define $ \k -> if k > 1 then withP else withoutP
+  where
     withoutP = define $ \e1 e2 -> op "+" (pprExp 1 e1) (pprExp 2 e2)
-    withP    = define $ \e1 e2 -> parens (withoutP e1 e2) 
+    withP = define $ \e1 e2 -> parens (withoutP e1 e2)
 
 pprSub :: Fin Nat4 -> In v Exp -> In v Exp -> F.Exp Implicit v D
-pprSub = opPrinterI (Fixity AssocL 1) (op "-") pprExp pprExp 
+pprSub = opPrinterI (Fixity AssocL 1) (op "-") pprExp pprExp
 
 pprMul :: Fin Nat4 -> In v Exp -> In v Exp -> F.Exp Implicit v D
 pprMul = define $ opPrinterI (Fixity AssocL 2) (op "*") pprExp pprExp
