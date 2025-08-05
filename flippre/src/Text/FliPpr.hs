@@ -1,10 +1,13 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
@@ -44,6 +47,11 @@ module Text.FliPpr (
   case_,
   unpair,
   ununit,
+
+  -- *** Matching
+  InExp,
+  Destructable (..),
+  GenDestructable,
 
   -- ** recursive definition primitives
   share,
@@ -144,7 +152,10 @@ import Text.FliPpr.Pat
 import Text.FliPpr.Primitives
 import Text.FliPpr.TH
 
+import Data.Kind (Type)
+import Data.Void (Void)
 import qualified Defs
+import GHC.Generics (Generic (..), K1 (..), M1 (..), U1 (..), V1, (:*:) (..), (:+:) (..))
 import Text.FliPpr.Automaton as A
 import Text.Printf (printf)
 
@@ -161,50 +172,6 @@ x </>. y = x <#> line' <#> y
 infixr 4 <+>.
 
 infixr 4 </>.
-
--- defines :: (FliPprD arg exp, Repr arg exp t r, F.SNatI n) => F.SNat n -> (FinNE n -> r) -> FliPprM exp (FinNE n -> r)
--- defines _ f = do
---   let ks = [minBound .. maxBound]
---   rs <- mapM (define . f) ks
---   let table = M.fromList $ zip ks rs
---   return $ \k -> case M.lookup k table of
---     Just m  -> m
---     Nothing -> error "defines_: Cannot happen."
-
--- -- |
--- -- @defineR (k1,k2)@ is the same as @defines [k1..k2]@, but a bit more efficient. x
--- {-# SPECIALIZE defineR ::
---   (FliPprD arg exp, Repr arg exp t r) => (Int, Int) -> (Int -> r) -> DefM (E exp) (Int -> r)
---   #-}
--- defineR :: (Eq k, Ord k, Enum k, FliPprD arg exp, Repr arg exp t r) => (k, k) -> (k -> r) -> DefM (E exp) (k -> r)
--- defineR (k1, k2) f = do
---   let (m1, m2) = if k1 < k2 then (k1, k2) else (k2, k1)
---   let ks = [m1 .. m2]
---   rs <- mapM (define . f) ks
---   let table = M.fromAscList $ zip ks rs
---   return $ \k -> case M.lookup k table of
---     Just m -> m
---     Nothing -> error "defineR: out of bounds"
-
--- -- |
--- -- @defines [k1,...,kn] f@ is equivalent to:
--- --
--- -- @
--- --   do  fk1 <- define (f k1)
--- --       ...
--- --       fk2 <- define (f k2)
--- --       return $ \k -> lookup k [(k1,fk1),...,(k2,fk2)]
--- -- @
--- {-# SPECIALIZE defines ::
---   (FliPprD arg exp, Repr arg exp t r) => [Int] -> (Int -> r) -> DefM (E exp) (Int -> r)
---   #-}
--- defines :: (Eq k, Ord k, FliPprD arg exp, Repr arg exp t r) => [k] -> (k -> r) -> DefM (E exp) (k -> r)
--- defines ks f = do
---   rs <- mapM (define . f) ks
---   let table = M.fromList $ zip ks rs
---   return $ \k -> case M.lookup k table of
---     Just m -> m
---     Nothing -> error "defines: out of bounds"
 
 -- | @is c f@ is a branch for the case where the input is equal to @c@.
 --
@@ -279,6 +246,139 @@ $(mkUn ''Bool)
 $(mkUn ''[])
 $(mkUn ''Either)
 $(mkUn ''(,,))
+
+-- | A type to ensure that @a@ appears in a FliPpr expression.
+--
+-- > type InExp s v a = forall r. (a -> Exp s v r) -> Exp s v r
+type InExp s v a = forall r. (a -> Exp s v r) -> Exp s v r
+
+class GenDestructable f where
+  type GenDecomposed v f :: Type
+  matchGen :: In v (f p) -> InExp s v (GenDecomposed v f)
+
+instance GenDestructable V1 where
+  type GenDecomposed v V1 = Void
+  matchGen i _ = case_ i [] -- really ok?
+
+instance GenDestructable U1 where
+  type GenDecomposed v U1 = ()
+  matchGen i k = convertInput unit2unit i $ \i' -> ununit i' (k ())
+    where
+      unit2unit :: PartialBij (U1 p) ()
+      unit2unit = PartialBij "unit2unit" (const $ pure ()) (const $ pure U1)
+
+instance (GenDestructable f, GenDestructable g) => GenDestructable (f :*: g) where
+  type GenDecomposed v (f :*: g) = (GenDecomposed v f, GenDecomposed v g)
+  matchGen i k = convertInput pair2pair i $ \i' -> unpair i' $ \x y -> matchGen x $ \x' -> matchGen y $ \y' -> k (x', y')
+    where
+      pair2pair :: PartialBij ((f :*: g) p) (f p, g p)
+      pair2pair = PartialBij "pair2pair" (\(x :*: y) -> pure (x, y)) (\(x, y) -> pure (x :*: y))
+
+instance (GenDestructable f, GenDestructable g) => GenDestructable (f :+: g) where
+  type GenDecomposed v (f :+: g) = Either (GenDecomposed v f) (GenDecomposed v g)
+  matchGen i k = convertInput sum2sum i $ \i' ->
+    case_
+      i'
+      [ unLeft $ \x -> matchGen x (k . Left)
+      , unRight $ \y -> matchGen y (k . Right)
+      ]
+    where
+      sum2sum :: PartialBij ((f :+: g) p) (Either (f p) (g p))
+      sum2sum = PartialBij "sum2sum" (pure . ff) (pure . ffi)
+
+      ff (L1 x) = Left x
+      ff (R1 y) = Right y
+
+      ffi (Left x) = L1 x
+      ffi (Right y) = R1 y
+
+instance GenDestructable (K1 i c) where
+  type GenDecomposed v (K1 i c) = In v c -- stop deconstruction
+  matchGen = convertInput unK1I
+    where
+      unK1I :: PartialBij (K1 i c p) c
+      unK1I = PartialBij "unK1" (pure . unK1) (pure . K1)
+
+instance (GenDestructable f) => GenDestructable (M1 i t f) where
+  type GenDecomposed v (M1 i t f) = GenDecomposed v f
+  matchGen i k = convertInput unM1I i $ \i' -> matchGen i' k
+    where
+      unM1I :: PartialBij (M1 i t f p) (f p)
+      unM1I = PartialBij "unM1I" (pure . unM1) (pure . M1)
+
+class Destructable r where
+  type Decomposed v r :: Type
+  type Decomposed v r = GenDecomposed v (Rep r)
+
+  -- | 'match' enables us to Haskell's @case@ expression to perform case
+  -- analysis in FliPpr.
+  --
+  -- For example, one can write:
+  --
+  -- > match xs $ \case
+  -- >    Left () -> e
+  -- >    Right (y,ys) -> f y ys
+  --
+  -- instead of
+  --
+  -- > case_ xs
+  -- >    [ unNil e
+  -- >    , unCons $ \y ys -> f y ys
+  -- >    ]
+  --
+  -- The default implementation uses the sum-of-product representation of a datatype via 'Generic'.
+  --
+  -- > > data T a = L | O a | B a (T a) (T a) deriving Generic
+  -- > > instance Destructable (T a)
+  -- > > :k! Decomposed v (T a)
+  -- > Decomposed v (T a) :: *
+  -- > = Either () (Either (In v a) (In v a, (In v (T a), In v (T a))))
+  --
+  -- The very core idea is inspired by the paper, though the details are not the same.
+  -- Trevor L. McDonell, et al. Embedding Pattern Matching, Haskell Symposium 2022. pp 123-136.
+  match :: In v r -> InExp s v (Decomposed v r)
+  default match :: (Generic r, GenDestructable (Rep r), Decomposed v r ~ GenDecomposed v (Rep r)) => In v r -> InExp s v (Decomposed v r)
+  match i k = convertInput fromI i $ \i' -> matchGen i' k
+    where
+      fromI :: (Generic r) => PartialBij r (Rep r p)
+      fromI = PartialBij "from" (pure . GHC.Generics.from) (pure . GHC.Generics.to)
+instance Destructable [a] where
+  type Decomposed v [a] = Either () (In v a, In v [a])
+  match = matchList
+
+instance Destructable (a, b) where
+  type Decomposed v (a, b) = (In v a, In v b)
+  match = matchPair
+
+instance Destructable (Either a b) where
+  type Decomposed v (Either a b) = Either (In v a) (In v b)
+  match = matchEither
+
+instance Destructable Bool where
+  type Decomposed v Bool = Bool
+  match = matchBool
+
+matchList :: In v [a] -> InExp s v (Either () (In v a, In v [a]))
+matchList x k =
+  case_
+    x
+    [ unNil $ k (Left ())
+    , unCons $ curry (k . Right)
+    ]
+
+matchEither :: In v (Either a b) -> InExp s v (Either (In v a) (In v b))
+matchEither x0 k =
+  case_
+    x0
+    [ unLeft $ k . Left
+    , unRight $ k . Right
+    ]
+
+matchPair :: In v (a, b) -> InExp s v (In v a, In v b)
+matchPair xy = unpair xy . curry
+
+matchBool :: In v Bool -> InExp s v Bool
+matchBool b k = case_ b [unTrue $ k True, unFalse $ k False]
 
 -- | @textAs x r@ serves as @text x@ in pretty-printing, but
 -- in parsing it serves as @r@ of which parsing result is used to update @x$.

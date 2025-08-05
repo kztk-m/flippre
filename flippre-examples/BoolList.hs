@@ -1,7 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 -- To suppress warnings caused by TH code.
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -15,6 +17,8 @@ import qualified Text.FliPpr.Grammar as G
 
 import Text.FliPpr.Grammar.Driver.Earley as Earley
 import Prelude
+
+import Data.String
 
 -- for RebindableSyntax (used with RecursiveDo)
 import Control.Applicative ((<|>))
@@ -45,12 +49,17 @@ example1 = flippr $ do
             [ unNil $ text "[" <> text "]"
             , unCons $ \a x' -> brackets (ppr' a x')
             ]
-      ppr' <- share $ \a x ->
-        case_
-          x
-          [ $(un '[]) $ pprTF a
-          , $(branch [p|b : y|] [|pprTF a <> text "," <+>. ppr' b y|])
-          ]
+
+      -- We can Haskell's case with `matchList`
+      ppr' <- share $ \a x -> match x $ \case
+        Left _ -> pprTF a
+        Right (b, y) -> pprTF a <> "," <+>. ppr' b y -- we don't need `text` when OverloadedStrings is used.
+
+  -- case_
+  --   x
+  --   [ $(un '[]) $ pprTF a
+  --   , $(branch [p|b : y|] [|pprTF a <> text "," <+>. ppr' b y|])
+  --   ]
   return (fromFunction ppr)
 
 example2 :: (Phased s) => FliPpr s ([Bool] ~> D)
@@ -63,7 +72,7 @@ gsp = () <$ (G.text " " <|> G.text "\n")
 
 main :: IO ()
 main = do
-  let s = "[True,   False, True, (False ), ( (True))  ]"
+  let s = "[True,   False, True, (False ), ( (True))  ]" :: String
   let g :: (G.GrammarD Char g) => g (Err ann [Bool])
       g = parsingModeSP gsp (example1 @Explicit)
   print $ G.pprGrammar @Char g
