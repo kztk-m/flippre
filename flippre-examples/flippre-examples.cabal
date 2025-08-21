@@ -110,6 +110,11 @@ executable simple-fl
   main-is: SimpleFL.hs
   build-depends: prettyprinter
 
+executable simple-fl-implicit 
+  import: warnings, deps
+  main-is: SimpleFLImplicit.hs
+  build-depends: prettyprinter
+
 executable c
   import: warnings, deps
   hs-source-dirs: c
