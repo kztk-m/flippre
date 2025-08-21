@@ -30,7 +30,10 @@ import qualified Control.Monad.State as State
 import Control.Monad.Writer.CPS (Writer)
 import qualified Control.Monad.Writer.CPS as Writer
 import Data.Bits (xor)
+import Data.Coerce (coerce)
 import Data.Function.Compat (applyWhen)
+import Data.GADT.Compare
+import Data.GADT.Show (GShow (..), defaultGshowsPrec)
 import qualified Data.Graph.Inductive as FGL
 import qualified Data.HashMap.Strict as H
 import Data.Hashable (Hashable (..))
@@ -42,21 +45,20 @@ import qualified Data.RangeSet.List as RS
 import qualified Data.Set as S
 import Data.Some
 import Data.String (IsString (..))
+import Data.Type.Equality ((:~:) (..))
 import Debug.Trace (traceIO, traceM)
-import qualified Defs as D
-import GHC.Stack (CallStack)
 import qualified Prettyprinter as PP
 import System.IO.Unsafe (unsafePerformIO)
 import System.Mem.StableName
+import Unembedding.Env
 import Unsafe.Coerce (unsafeCoerce)
 
--- import qualified Data.Graph.Inductive.Dot as FGLDot
+import GHC.Stack (CallStack)
 
-import Data.GADT.Compare
-import Data.GADT.Show (GShow (..), defaultGshowsPrec)
-import Data.Type.Equality ((:~:) (..))
+import qualified Defs as D
 import Text.FliPpr.Internal.Core
-import Unembedding.Env
+
+-- import qualified Data.Graph.Inductive.Dot as FGLDot
 
 reifySharing :: forall s a vv. (Phased s) => (forall v. Exp s v a) -> Exp Explicit vv a
 reifySharing e = case phase @s of
@@ -94,7 +96,7 @@ instance GShow StableExpName where
 
 instance GEq StableExpName where
   geq (StableExpName x) (StableExpName y)
-    | x == unsafeCoerce y = Just (unsafeCoerce Refl)
+    | x == coerce y = Just (unsafeCoerce Refl)
     | otherwise = Nothing
 
 -- Use the strong assumption that stable names do not rely on the type parameter
@@ -104,7 +106,9 @@ data Name
 
 -- A phantom type for variable names
 newtype instance In Name a = VName Int
+
 type VName = In Name
+
 instance Show (In Name a) where
   show (VName i) = "#" ++ show i
 
@@ -136,7 +140,7 @@ instance Show (FName a) where
 
 instance GEq FName where
   geq x y
-    | x == unsafeCoerce y = Just (unsafeCoerce Refl)
+    | x == coerce y = Just (unsafeCoerce Refl)
     | otherwise = Nothing
 
 type instance FVar Name = FName
@@ -760,6 +764,7 @@ instance Hashable (Some FName) where
   hashWithSalt salt (Some (SName n)) = hashWithSalt salt n
 
 type VMap v = H.HashMap Int (Some (In v))
+
 type FMap v = H.HashMap (Some FName) (Some (Exp Explicit v))
 
 insertVMap :: VName a -> In v a -> VMap v -> VMap v
@@ -871,8 +876,9 @@ unnameWork e0 = case e0 of
             let vMap' = insertVMap y yy vMap
             in  Reader.runReader (unname e) (vMap', fMap)
     Case cs xx <$> mapM f brs
-    -- NLocal d -> Local <$> unnameDef d
   where
+    -- NLocal d -> Local <$> unnameDef d
+
     resolveVar :: forall v x. VName x -> UnnameM v (In v x)
     resolveVar x = do
       (vMap, _) <- Reader.ask
