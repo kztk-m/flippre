@@ -86,8 +86,8 @@ symbols = foldr (\a r -> (:) <$> symb a <*> r) (pure [])
 -- 'letr' and its derived combinators (such as 'mfixDefM'; recursive definitions
 -- is possible by locally defining @mfix = mfixDefM@ together with
 -- GHC extensions "RebindableSyntax" and "RecursiveDo").
-rule :: (Defs f) => f a -> DefM f (Tip (f a))
-rule = coerce . Defs.share1
+rule :: forall f a. (Defs f) => f a -> DefM f (Tip (f a))
+rule = coerce . (Defs.share1 :: f a -> DefM f (f a))
 
 -- | A synonym of 'runIdentity', which is named after "nonterminal" and supposed to be used with 'rule'.
 nt :: Tip (f a) -> f a

@@ -208,7 +208,7 @@ letrec' hs0 hr0 = local (snd <$> go id hs0 hr0)
       -> DefM f (HList f as, f r)
     go _ HNil hr = pure (HNil, hr HNil)
     go p (HCons h hs) hr = do
-      letr1 $ \x -> do
+      letr1Raw $ \x -> do
         (xs, r) <- go (p . HCons x) hs (hr . HCons x)
         pure (getCompose h (p $ HCons x xs), (HCons x xs, r))
 
@@ -218,7 +218,7 @@ letrec sh h = local $ letrecM sh (pure . h)
 letrecM :: (Defs f) => HList Proxy as -> (HList f as -> DefM f (HList f as, res)) -> DefM f res
 letrecM HNil h = snd <$> h HNil
 letrecM (HCons _ sh) h =
-  letr1 $ \x -> letrecM sh $ \xs -> do
+  letr1Raw $ \x -> letrecM sh $ \xs -> do
     (vvs, r) <- h (HCons x xs)
     case vvs of
       HCons v vs -> pure (vs, (v, r))
@@ -282,16 +282,23 @@ instance Monad (DefM exp) where
 -- >   def fdef >>>
 -- >   def gdef $
 -- >   ... f ... g ...
-letr1 :: (Defs f) => (f a -> DefM f (f a, r)) -> DefM f r
-letr1 h = DefM $ \k -> letrD $ \a -> unDefM (h a) $ \(b, r) -> consD b (k r)
+--
+-- An instance of @RecM (Tip t) m@ is @RecM (Tip (f a)) (DefM f)@.
+letr1 :: (RecM (Tip t) m) => (t -> m (t, r)) -> m r
+letr1 h = letr $ \(Tip a) -> do
+  (a', r) <- h a
+  pure (Tip a', r)
+
+letr1Raw :: (Defs f) => (f a -> DefM f (f a, r)) -> DefM f r
+letr1Raw h = DefM $ \k -> letrD $ \a -> unDefM (h a) $ \(b, r) -> consD b (k r)
 
 -- | A variant of 'many' defined without Haskell-level recursion.
 manyD :: (Defs f, Alternative f) => f a -> f [a]
-manyD d = local $ letr1 $ \a -> return (pure [] <|> (:) <$> d <*> a, a)
+manyD d = local $ letr1Raw $ \a -> return (pure [] <|> (:) <$> d <*> a, a)
 
 -- | A variant of 'some' defined without Haskell-level recursion.
 someD :: (Defs f, Alternative f) => f a -> f [a]
-someD d = local $ letr1 $ \m -> letr1 $ \s ->
+someD d = local $ letr1Raw $ \m -> letr1Raw $ \s ->
   def ((:) <$> d <*> m) $
     def (pure [] <|> s) $
       return s
@@ -302,9 +309,14 @@ share s =
   -- letrec x = e in x where x doesn't belong to fv(e)
   letr $ \x -> pure (s, x)
 
-share1 :: (Defs f) => f a -> DefM f (f a)
+-- share1 :: RecM (f a) m => f a -> m (f a)
+
+-- | share1 is a spacial case of 'share'. One can think that @r ~ f a@
+-- and @m@ must a monad obtained by applying certain monad transformers
+-- to @DefM f@.
+share1 :: (RecM (Tip r) m) => r -> m r
 share1 s =
-  letr1 $ \x -> pure (s, x)
+  letr $ \(Tip x) -> pure (Tip s, x)
 
 -- | Makes definions to be 'local'.
 --
@@ -397,10 +409,10 @@ newtype Tip a = Tip {unTip :: a}
 
 instance (Defs f) => RecArg f (Tip (f a)) where
   letrDefM :: forall r. (Tip (f a) -> DefM f (Tip (f a), r)) -> DefM f r
-  letrDefM = coerce (letr1 :: (f a -> DefM f (f a, r)) -> DefM f r)
+  letrDefM = coerce (letr1Raw :: (f a -> DefM f (f a, r)) -> DefM f r)
 instance (Defs f) => RecArg f (Identity (f a)) where
   letrDefM :: forall r. (Identity (f a) -> DefM f (Identity (f a), r)) -> DefM f r
-  letrDefM = coerce (letr1 :: (f a -> DefM f (f a, r)) -> DefM f r)
+  letrDefM = coerce (letr1Raw :: (f a -> DefM f (f a, r)) -> DefM f r)
 
 instance (RecArg f a, RecArg f b) => RecArg f (a, b) where
   letrDefM f = letrDefM $ \b -> letrDefM $ \a -> do
