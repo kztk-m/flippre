@@ -21,13 +21,11 @@ module Text.FliPpr.Grammar.ExChar (
 
 import Control.Applicative (Alternative (..), asum)
 import Control.Monad (forM, void)
+import Control.Monad.State (StateT (..), evalStateT)
 import Data.Bifunctor (bimap)
 import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
-
 import qualified Prettyprinter as PP
-
-import Control.Monad.State (StateT (..), evalStateT)
 
 -- import Debug.Trace (trace)
 import Defs
@@ -212,8 +210,8 @@ instance (Defs g) => Defs (ThawSpaceSem g) where
 
 thawSpace :: (Defs exp, Alternative exp) => exp () -> ThawSpaceSem exp a -> exp a
 thawSpace sp0 g = local $ do
-  sp <- share (Space <$ sp0)
-  sps <- share (Spaces <$ many sp)
+  sp <- share1 (Space <$ sp0)
+  sps <- share1 (Spaces <$ many sp)
   return (runThawSpace g sp sps)
 {-# INLINE thawSpace #-}
 

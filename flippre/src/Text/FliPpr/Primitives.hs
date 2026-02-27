@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Text.FliPpr.Primitives (
@@ -51,7 +50,8 @@ module Text.FliPpr.Primitives (
   def,
   Defs.letrs,
   Defs.Defs,
-  Defs.Arg (..),
+  Defs.RecM (..),
+  Defs.RecArg (..),
 
   -- ** Abort
   abort,
@@ -61,12 +61,11 @@ module Text.FliPpr.Primitives (
   flippr,
 ) where
 
-import GHC.Stack (HasCallStack, callStack)
-
 import qualified Data.RangeSet.List as RS
 
-import qualified Defs
+import GHC.Stack (HasCallStack, callStack)
 
+import qualified Defs
 -- for export
 
 import qualified Text.FliPpr.Doc
@@ -175,7 +174,7 @@ infixr 4 <?
 -- function as 'mfix', which is supposed to be used with
 -- @RecursiveDo@/@RebindableSyntax@. For GHC over version 9.0.1, using
 -- 'Text.FliPpr.QDo' with @QualifiedDo@ would be more handy.
-mfixF :: (Defs.Arg (FliPprM s v) a) => (a -> FliPprM s v a) -> FliPprM s v a
+mfixF :: (Defs.RecM a m, m ~ FliPprM s v) => (a -> m a) -> m a
 mfixF = Defs.mfixDefM
 
 -- | Useful combinator that can be used with 'letr'.
@@ -205,7 +204,7 @@ def a b = (a,) <$> b
 -- In contrast, the following version shares the productions involved in @e@.
 --
 -- > do v <- share e ... v ... v ...
-share :: (Defs.Arg (FliPprM s v) r) => r -> FliPprM s v r
+share :: (Defs.RecArg (Exp s v) r) => r -> FliPprM s v r
 share e = Defs.letr $ \x -> return (e, x)
 
 -- | Localize declarations.

@@ -1,13 +1,14 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -52,10 +53,11 @@ import Data.Kind (Type)
 import qualified Data.RangeSet.List as RS
 import Data.String (IsString)
 import Data.String.Compat (IsString (..))
-import qualified Defs as D
-import GHC.Stack (CallStack)
 import qualified Prettyprinter as PP
 
+import GHC.Stack (CallStack)
+
+import qualified Defs as D
 import qualified Text.FliPpr.Doc as DD
 
 -- | Nullary operators or constants.
@@ -282,13 +284,22 @@ instance (Repr s v r) => Repr s v (In v a -> r) where
   toFunction f a = toFunction (f `App` a)
   fromFunction k = Lam (fromFunction . k)
 
-instance (Phased s) => D.Arg (FliPprM s v) (Exp s v a) where
-  letr :: forall r. (Exp s v a -> FliPprM s v (Exp s v a, r)) -> FliPprM s v r
-  letr = coerce (D.letr :: (D.Tip (Exp s v a) -> D.DefM (Exp s v) (D.Tip (Exp s v a), r)) -> D.DefM (Exp s v) r)
+-- instance (Phased s) => D.Arg (FliPprM s v) (Exp s v a) where
+--   letr :: forall r. (Exp s v a -> FliPprM s v (Exp s v a, r)) -> FliPprM s v r
+--   letr = coerce (D.letr :: (D.Tip (Exp s v a) -> D.DefM (Exp s v) (D.Tip (Exp s v a), r)) -> D.DefM (Exp s v) r)
+
+-- instance (v ~ v', Phased s, Repr s v r) => D.Arg (FliPprM s v') (In v a -> r) where
+--   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
+
+instance (Phased s) => D.RecArg (Exp s v) (Exp s v a) where
+  letrDefM :: forall r. (Exp s v a -> D.DefM (Exp s v) (Exp s v a, r)) -> D.DefM (Exp s v) r
+  letrDefM = coerce (D.letr :: (D.Tip (Exp s v a) -> D.DefM (Exp s v) (D.Tip (Exp s v a), r)) -> D.DefM (Exp s v) r)
 
 -- One-level unfolding to avoid overlapping instances.
-instance (v ~ v', Phased s, Repr s v r) => D.Arg (FliPprM s v') (In v a -> r) where
-  letr f = D.letr $ fmap (first fromFunction) . f . toFunction
+instance (v ~ v', Phased s, Repr s v r) => D.RecArg (Exp s v) (In v a -> r) where
+  letrDefM f = D.letrDefM $ fmap (first fromFunction) . f . toFunction
+
+deriving newtype instance (D.RecArg (Exp s v) t) => D.RecM t (FliPprM s v)
 
 -- | To print FliPpr expressions themselves.
 data ToPrint
@@ -418,13 +429,14 @@ ppr dlevel flevel k e0 = case e0 of
                 , PP.hsep [fromString "in", PP.align dr]
                 ]
     in  applyWhen (k > 0) PP.parens $ PP.align $ PP.group dbody
+  where
     -- Local d ->
     --   applyWhen (k > 9) PP.parens $
     --     PP.group $
     --       PP.align $
     --         PP.nest 2 $
     --           PP.sep [fromString "local", pprDef dlevel flevel 10 d]
-  where
+
     pprRangeSet :: (Show a, Enum a, Bounded a, Eq a) => RS.RSet a -> PP.Doc ann
     pprRangeSet rs
       | RS.null rs = fromString "empty"

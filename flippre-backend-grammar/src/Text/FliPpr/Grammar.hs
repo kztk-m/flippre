@@ -59,10 +59,9 @@ module Text.FliPpr.Grammar (
 where
 
 import Data.Coerce (coerce)
+import Prettyprinter (Doc, Pretty (pretty))
 
 import Defs
-
-import Prettyprinter (Doc, Pretty (pretty))
 import Text.FliPpr.Grammar.ExChar
 import Text.FliPpr.Grammar.Flatten
 import Text.FliPpr.Grammar.Simplify
@@ -88,7 +87,7 @@ symbols = foldr (\a r -> (:) <$> symb a <*> r) (pure [])
 -- is possible by locally defining @mfix = mfixDefM@ together with
 -- GHC extensions "RebindableSyntax" and "RecursiveDo").
 rule :: (Defs f) => f a -> DefM f (Tip (f a))
-rule = coerce . Defs.share
+rule = coerce . Defs.share1
 
 -- | A synonym of 'runIdentity', which is named after "nonterminal" and supposed to be used with 'rule'.
 nt :: Tip (f a) -> f a

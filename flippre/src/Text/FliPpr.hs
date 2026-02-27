@@ -4,7 +4,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -77,7 +76,8 @@ module Text.FliPpr (
 
   -- ** Easy Definition
   Repr (..),
-  Arg (..),
+  RecM (..),
+  RecArg (..),
 
   -- ** Pattern-like expressions
   module Text.FliPpr.Pat,
@@ -135,14 +135,20 @@ module Text.FliPpr (
 where
 
 import qualified Data.Fin as F
+import Data.Kind (Type)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import qualified Data.RangeSet.List as RS
 import qualified Data.Set as S
 import qualified Data.Type.Nat as F
+import Data.Void (Void)
+import Text.Printf (printf)
 
+import GHC.Generics (Generic (..), K1 (..), M1 (..), U1 (..), V1, (:*:) (..), (:+:) (..))
 import GHC.Stack (HasCallStack, withFrozenCallStack)
 
+import qualified Defs
+import Text.FliPpr.Automaton as A
 import Text.FliPpr.Doc
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Err
@@ -151,13 +157,6 @@ import Text.FliPpr.Internal.PrettyPrinting
 import Text.FliPpr.Pat
 import Text.FliPpr.Primitives
 import Text.FliPpr.TH
-
-import Data.Kind (Type)
-import Data.Void (Void)
-import qualified Defs
-import GHC.Generics (Generic (..), K1 (..), M1 (..), U1 (..), V1, (:*:) (..), (:+:) (..))
-import Text.FliPpr.Automaton as A
-import Text.Printf (printf)
 
 -- | In pretty-printing, '<+>.' behaves as '<+>', but in parser construction,
 --   it behaves as '<>'.

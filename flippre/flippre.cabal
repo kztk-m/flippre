@@ -1,6 +1,6 @@
 cabal-version: 2.2
 name: flippre
-version: 0.2.1
+version: 0.3.0
 synopsis: FliPpr, embedded
 -- description:
 homepage: https://github.com/kztk-m/flippre
@@ -93,7 +93,7 @@ library
     embedding-by-unembedding ^>=0.8,
     fgl ^>=5.7 || ^>=5.8,
     fin >=0.1 && <0.4,
-    flippre-backend-grammar,
+    flippre-backend-grammar ^>=0.3,
     hashable ^>=1.4 || ^>=1.5,
     mtl >=2.3 && <3,
     mutual-def-class,

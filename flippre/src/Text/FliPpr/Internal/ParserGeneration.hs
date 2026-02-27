@@ -35,30 +35,30 @@ module Text.FliPpr.Internal.ParserGeneration (
 import Control.Applicative (Alternative, Applicative (..), (<|>))
 import qualified Control.Applicative as A (empty)
 import Control.Monad (join, void)
+import Data.Bifunctor (bimap)
 import Data.Foldable (asum)
+import Data.Functor ((<&>))
 import Data.Functor.Compose (Compose (..))
 import Data.Functor.Identity (Identity (..))
 import Data.Kind (Type)
+import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
 import Data.Typeable (Proxy (..))
+-- import Debug.Trace
+
+import Debug.Trace (trace)
+import qualified Prettyprinter as PP
+import qualified Unembedding as U
+import Unembedding.Env (Env (..))
 import Prelude hiding (Applicative (..))
 
-import Data.Bifunctor (bimap)
-import Data.Functor ((<&>))
-import qualified Data.RangeSet.List as RS
-import qualified Prettyprinter as PP
+import GHC.Stack (HasCallStack, callStack, prettyCallStack)
 
--- import Debug.Trace
 import qualified Defs
 import qualified Text.FliPpr.Grammar as G
 import Text.FliPpr.Grammar.Err (Err (..), err)
 import Text.FliPpr.Internal.Core
-
-import Debug.Trace (trace)
-import GHC.Stack (HasCallStack, callStack, prettyCallStack)
 import Text.FliPpr.Internal.ReifySharing (reifySharing)
-import qualified Unembedding as U
-import Unembedding.Env (Env (..))
 
 class ValEnvRepr r where
   type Index r :: [Type] -> Type -> Type
@@ -474,7 +474,7 @@ data CommentSpec
 -- | Make a grammar that represents a single space
 fromCommentSpec :: (G.GrammarD Char g) => CommentSpec -> g ()
 fromCommentSpec (CommentSpec lc bc) = G.local $ do
-  lineComment <- G.share $ case lc of
+  lineComment <- G.share1 $ case lc of
     Nothing -> A.empty
     Just s -> void (G.text s) <* many (G.symbI nb) <* G.symbI br
 
@@ -489,14 +489,14 @@ fromCommentSpec (CommentSpec lc bc) = G.local $ do
           nonCl <- non [cl]
           G.rule $ void (G.text op) <* nonCl <* G.text cl
 
-  singleSpace <- G.share $ void (G.symbI sp)
+  singleSpace <- G.share1 $ void (G.symbI sp)
   return (lineComment <|> G.nt blockComment <|> singleSpace)
   where
     many :: (G.GrammarD c g) => g a -> g [a]
     many = G.manyD
 
     non :: (G.GrammarD Char g) => [String] -> Defs.DefM g (g ()) -- (Defs.Rules g (Defs.Lift ()))
-    non strings = G.share $ void (many (go strings))
+    non strings = G.share1 $ void (many (go strings))
       where
         go :: (G.Grammar Char g) => [String] -> g Char
         go ss =

@@ -15,21 +15,17 @@
 {-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-import Text.FliPpr hiding (Exp)
-import qualified Text.FliPpr as F
-import qualified Text.FliPpr.Automaton as AM
-
-import qualified Text.FliPpr.Grammar as G
-import qualified Text.FliPpr.Grammar.Driver.Earley as E
-
-import qualified Text.FliPpr.QDo as F
-
 import Data.String (fromString)
-
-import Data.Proxy (Proxy (..))
 import Data.Word (Word8)
 import Debug.Trace (trace)
 import qualified Prettyprinter as PP (Doc)
+
+import Text.FliPpr hiding (Exp)
+import qualified Text.FliPpr as F
+import qualified Text.FliPpr.Automaton as AM
+import qualified Text.FliPpr.Grammar as G
+import qualified Text.FliPpr.Grammar.Driver.Earley as E
+import qualified Text.FliPpr.QDo as F
 
 newtype Name = Name String
   deriving stock (Eq, Show)
@@ -60,8 +56,7 @@ $(mkUn ''Lit)
 -- come without parentheses.
 newtype IsRightMost = IsRightMost {isRightMost :: Bool}
 
-instance (Arg m a) => Arg m (IsRightMost -> a) where
-  letr = G.letrVia (Proxy :: Proxy (Bool -> a))
+deriving via (Bool -> a) instance (RecArg f a) => RecArg f (IsRightMost -> a)
 
 otherwiseP :: (arg Exp -> exp t) -> Branch arg exp Exp t
 otherwiseP = Branch (PartialBij "otherwiseP" Just Just)

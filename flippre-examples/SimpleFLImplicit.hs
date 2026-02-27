@@ -20,23 +20,18 @@
 
 -- {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
+import Data.String (fromString)
+import Debug.Trace (trace)
+import qualified Prettyprinter as PP (Doc)
+
+import GHC.Generics (Generic)
+
 import Text.FliPpr hiding (Exp)
 import qualified Text.FliPpr as F
 import qualified Text.FliPpr.Automaton as AM
-
 import qualified Text.FliPpr.Grammar as G
 import qualified Text.FliPpr.Grammar.Driver.Earley as E
-
 import Text.FliPpr.Implicit
-import qualified Text.FliPpr.QDo as F
-
-import Data.String (fromString)
-
-import Data.Proxy (Proxy (..))
-import Data.Word (Word8)
-import Debug.Trace (trace)
-import GHC.Generics (Generic)
-import qualified Prettyprinter as PP (Doc)
 
 newtype Name = Name String
   deriving stock (Eq, Show, Generic)
@@ -116,9 +111,6 @@ deriving via
   Bool -> b
   instance
     (Materializable b) => Materializable (IsRightMost -> b)
-
--- instance (Arg m a) => Arg m (IsRightMost -> a) where
---   letr = G.letrVia (Proxy :: Proxy (Bool -> a))
 
 pprLet :: In v Name -> In v Exp -> In v Exp -> F.Exp Implicit v D
 pprLet = define $ \x e1 e2 ->

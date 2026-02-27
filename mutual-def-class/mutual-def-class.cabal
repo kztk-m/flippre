@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name: mutual-def-class
-version: 0.2.0
+version: 0.3.0
 -- synopsis:
 -- description:
 license: BSD-3-Clause
@@ -51,6 +51,7 @@ library
     fin >=0.1 && <0.4,
     prettyprinter >=1.7 && <1.8,
     template-haskell >=2.11 && <2.23,
+    transformers >=0.4 && <0.7,
 
   hs-source-dirs: src
   default-language: Haskell2010
