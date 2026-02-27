@@ -11,15 +11,16 @@ module Text.FliPpr.Grammar.UnFlatten (unFlatten) where
 
 import Control.Applicative (asum)
 import Control.Monad.State (StateT (..), evalStateT)
-import Defs as D
-import Text.FliPpr.Grammar.Types
-
-import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
-
 -- Just for test
 -- import Text.FliPpr.Grammar.Flatten
 
+import qualified Control.Monad.State as State
+import Data.Functor.Identity (Identity (..))
+
+import Defs as D
+import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
 import Text.FliPpr.Grammar.Internal.Util
+import Text.FliPpr.Grammar.Types
 
 type MemoS g env = M2.Map2 (IxN env) g
 
@@ -81,18 +82,34 @@ unFlatten (FlatGrammar (defs :: Env (RHS c env) env) rhs0) =
     procSymb :: Symb c env a -> StateT (MemoS g env) (DefM g) (g a)
     procSymb (Symb c) = return (symb c)
     procSymb (SymbI cs) = return (symbI cs)
-    procSymb (NT x) = StateT $ \memo ->
-      case M2.lookup x memo of
-        Just r -> return (r, memo)
+    procSymb (NT x) = do
+      res <- State.gets (M2.lookup x)
+      case res of
+        Just r -> pure r
         Nothing -> do
           let rhs = lookupEnvRec defsMap x
           if inlinable x rhs
             then do
-              (r, m) <- runStateT (procRHS rhs) memo
-              return (r, M2.insert x r m)
+              r <- procRHS rhs
+              State.modify' (M2.insert x r)
+              pure r
             else letr1 $ \a -> do
-              (r, m) <- runStateT (procRHS rhs) (M2.insert x a memo)
-              return (r, (a, m))
+              State.modify' (M2.insert x a)
+              r <- procRHS rhs
+              pure (r, a)
+
+-- StateT $ \memo ->
+-- case M2.lookup x memo of
+--   Just r -> return (r, memo)
+--   Nothing -> do
+--     let rhs = lookupEnvRec defsMap x
+--     if inlinable x rhs
+--       then do
+--         (r, m) <- runStateT (procRHS rhs) memo
+--         return (r, M2.insert x r m)
+--       else letr1 $ \a -> do
+--         (r, m) <- runStateT (procRHS rhs) (M2.insert x a memo)
+--         return (r, (a, m))
 
 _example :: FlatGrammar Char ()
 _example = FlatGrammar defs (MkRHS [fromSymb (NT $ fromIx IxZ)])

@@ -22,12 +22,14 @@ module Text.FliPpr.Grammar.ExChar (
 import Control.Applicative (Alternative (..), asum)
 import Control.Monad (forM, void)
 import Control.Monad.State (StateT (..), evalStateT)
+-- import Debug.Trace (trace)
+
+import qualified Control.Monad.State as State
 import Data.Bifunctor (bimap)
 import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
 import qualified Prettyprinter as PP
 
--- import Debug.Trace (trace)
 import Defs
 import Text.FliPpr.Grammar.Flatten (flatten)
 import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
@@ -310,14 +312,25 @@ optSpaces (FlatGrammar (defs :: Env (RHS inc env) env) rhs0) =
           return $ (\a k -> k a) <$> g1 <*> g2
 
     procVar :: Qsp -> Qsp -> IxN env a -> StateT (Memo env g) (DefM g) (g a)
-    procVar q1 q2 x = StateT $ \memo ->
-      case lookupMemo memo q1 q2 x of
-        Just r -> return (r, memo)
+    procVar q1 q2 x = do
+      res <- State.gets (\memo -> lookupMemo memo q1 q2 x)
+      case res of
+        Just r -> pure r
         Nothing -> do
-          let rhs = lookIxMap defsMap x
           letr1 $ \a -> do
-            (r, memo') <- runStateT (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a)
-            return (r, (a, memo'))
+            let rhs = lookIxMap defsMap x
+            State.modify' (\m -> updateMemo m q1 q2 x a)
+            r <- procRHS q1 q2 rhs
+            pure (r, a)
+
+-- StateT $ \memo ->
+-- case lookupMemo memo q1 q2 x of
+--   Just r -> return (r, memo)
+--   Nothing -> do
+--     let rhs = lookIxMap defsMap x
+--     letr1 $ \a -> do
+--       (r, memo') <- runStateT (procRHS q1 q2 rhs) (updateMemo memo q1 q2 x a)
+--       return (r, (a, memo'))
 
 collapseSpace :: (Defs g, Grammar ExChar g) => FlatGrammar ExChar a -> g a
 collapseSpace = optSpaces
