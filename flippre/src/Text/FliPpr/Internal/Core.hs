@@ -1,11 +1,13 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -284,22 +286,13 @@ instance (Repr s v r) => Repr s v (In v a -> r) where
   toFunction f a = toFunction (f `App` a)
   fromFunction k = Lam (fromFunction . k)
 
--- instance (Phased s) => D.Arg (FliPprM s v) (Exp s v a) where
---   letr :: forall r. (Exp s v a -> FliPprM s v (Exp s v a, r)) -> FliPprM s v r
---   letr = coerce (D.letr :: (D.Tip (Exp s v a) -> D.DefM (Exp s v) (D.Tip (Exp s v a), r)) -> D.DefM (Exp s v) r)
-
--- instance (v ~ v', Phased s, Repr s v r) => D.Arg (FliPprM s v') (In v a -> r) where
---   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
-
-instance (Phased s) => D.RecArg (Exp s v) (Exp s v a) where
-  letrDefM :: forall r. (Exp s v a -> D.DefM (Exp s v) (Exp s v a, r)) -> D.DefM (Exp s v) r
-  letrDefM = coerce (D.letr :: (D.Tip (Exp s v a) -> D.DefM (Exp s v) (D.Tip (Exp s v a), r)) -> D.DefM (Exp s v) r)
+deriving via D.Tip (Exp s v a) instance (Phased s) => D.RecArg (Exp s v) (Exp s v a)
 
 -- One-level unfolding to avoid overlapping instances.
 instance (v ~ v', Phased s, Repr s v r) => D.RecArg (Exp s v) (In v a -> r) where
-  letrDefM f = D.letrDefM $ fmap (first fromFunction) . f . toFunction
+  letr f = D.letr $ fmap (first fromFunction) . f . toFunction
 
-deriving newtype instance (D.RecArg (Exp s v) t) => D.RecM t (FliPprM s v)
+deriving newtype instance (Phased s) => D.RecM (Exp s v) (FliPprM s v)
 
 -- | To print FliPpr expressions themselves.
 data ToPrint

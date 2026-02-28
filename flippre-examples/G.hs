@@ -7,8 +7,12 @@
 
 import Control.Applicative (Alternative (..))
 import Data.Foldable (asum)
-import Text.FliPpr.Grammar as G
 import Prelude
+
+import Text.FliPpr.Grammar as G
+
+mfix :: (RecArg f a) => (a -> DefM f a) -> DefM f a
+mfix = G.mfixDefM
 
 _example1 :: (GrammarD ExChar g) => g ()
 _example1 = G.local $ do
@@ -20,8 +24,6 @@ _example1 = G.local $ do
             <* G.nt p
               <|> pure ()
   return $ G.nt p
-  where
-    mfix = G.mfixDefM
 
 _example2 :: (GrammarD ExChar g) => g [ExChar]
 _example2 = G.local $ do
@@ -29,8 +31,6 @@ _example2 = G.local $ do
       alphas <- G.rule $ (:) <$> G.nt alpha <*> G.nt alphaStar
       alphaStar <- G.rule $ pure [] <|> G.nt alphas
   return $ G.nt alphas
-  where
-    mfix = G.mfixDefM
 
 _example3 :: (GrammarD ExChar g) => g [ExChar]
 _example3 = G.local $ do
@@ -39,8 +39,6 @@ _example3 = G.local $ do
         alphaStar <- G.rule $ pure [] <|> G.nt alphas
         G.rule $ (:) <$> G.nt alpha <*> G.nt alphaStar
   return $ G.nt alphas
-  where
-    mfix = G.mfixDefM
 
 _example4 :: (GrammarD ExChar g) => g ()
 _example4 = G.local $ do
@@ -52,8 +50,6 @@ _example4 = G.local $ do
       forest <- G.rule $ pure () <|> G.nt forest1
       forest1 <- G.rule $ G.nt tree <|> G.nt tree *> spaces <* text "," <* spaces <* G.nt forest1
   return $ G.nt tree
-  where
-    mfix = G.mfixDefM
 
 main :: IO ()
 main = do

@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 
 -- | Module supposed to be used with @RebindableSyntax@.
@@ -41,5 +40,5 @@ import Text.FliPpr
 -- operations to extract graph structures. Indeed in an earlier version, we used
 -- 'STRef' to detect recursive structures. However, this design turned out to be
 -- sources of unclear non-termination bugs.
-mfix :: (RecM a m, m ~ FliPprM s v) => (a -> m a) -> m a
+mfix :: (Phased s, RecArg (Exp s v) a) => (a -> FliPprM s v a) -> FliPprM s v a
 mfix = mfixF

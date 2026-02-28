@@ -15,7 +15,6 @@ import Control.Monad.State (StateT (..), evalStateT)
 -- import Text.FliPpr.Grammar.Flatten
 
 import qualified Control.Monad.State as State
-import Data.Functor.Identity (Identity (..))
 
 import Defs as D
 import qualified Text.FliPpr.Grammar.Internal.Map2 as M2

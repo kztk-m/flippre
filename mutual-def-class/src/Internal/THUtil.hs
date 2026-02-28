@@ -38,7 +38,7 @@ combineTuple n = do
 genTupleLetrBody :: Int -> TH.Q TH.Exp -> TH.Q TH.Exp
 genTupleLetrBody n f =
   [|
-    letrDefM $ \x -> letrDefM $ \y -> do
+    letr $ \x -> letr $ \y -> do
       (xy', r) <- $f ($(combineTuple n) x y)
       let (x', y') = $(splitTuple n) xy'
       pure (y', (x', r))
@@ -47,7 +47,7 @@ genTupleLetrBody n f =
 genTupleArgDecl :: Int -> TH.Q TH.Type -> TH.Q [TH.Dec]
 genTupleArgDecl n mh = do
   -- f <- TH.newName "f"
-  m <- TH.newName "m"
+  m <- TH.newName "f"
   xs <- replicateM n (TH.newName "t")
   h <- mh
   let h' = TH.AppT h (TH.VarT m) -- TH.AppT (TH.AppT h (TH.VarT f)) (TH.VarT m)
@@ -57,7 +57,7 @@ genTupleArgDecl n mh = do
         Nothing
         [TH.AppT h' (TH.VarT x) | x <- xs]
         (TH.AppT h' $ mkTupleT [TH.VarT x | x <- xs])
-        [TH.ValD (TH.VarP $ TH.mkName "letrDefM") (TH.NormalB body) []]
+        [TH.ValD (TH.VarP $ TH.mkName "letr") (TH.NormalB body) []]
     ]
   where
     mkTupleT ts = foldl TH.AppT (TH.TupleT $ length ts) ts

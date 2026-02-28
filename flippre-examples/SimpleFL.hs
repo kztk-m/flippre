@@ -7,6 +7,7 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE QualifiedDo #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -56,6 +57,7 @@ $(mkUn ''Lit)
 -- come without parentheses.
 newtype IsRightMost = IsRightMost {isRightMost :: Bool}
 
+-- This DerivingVia requires QuantifiedConstraints
 deriving via (Bool -> a) instance (RecArg f a) => RecArg f (IsRightMost -> a)
 
 otherwiseP :: (arg Exp -> exp t) -> Branch arg exp Exp t

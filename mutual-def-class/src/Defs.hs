@@ -12,6 +12,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -107,6 +108,7 @@ module Defs (
   def,
   mfixDefM,
   Tip (..),
+  Parametric,
   RecM (..),
   RecArg (..),
   FromBounded (..),
@@ -121,19 +123,13 @@ module Defs (
   someD,
 
   -- * Low-level primitives
-  letr1,
+  letr1Raw,
   letrs,
 
   -- * Normalized form
   NDefs (..),
   HList (..),
   Norm (..),
-
-  -- * Pretty-printing
-  VarM (..),
-  PprExp (..),
-  pattern PprExpN,
-  pprExpN,
 )
 where
 
@@ -143,19 +139,17 @@ import qualified Control.Monad.Trans.State.Lazy as LState (StateT (..))
 import qualified Control.Monad.Trans.State.Strict as SState (StateT (..))
 import qualified Control.Monad.Trans.Writer.Lazy as LWriter
 import qualified Control.Monad.Trans.Writer.Strict as SWriter
-import Data.Coerce (coerce)
+import Data.Coerce (Coercible, coerce)
 import qualified Data.Fin as F
 import Data.Functor.Compose
 import Data.Functor.Const (Const (..))
 import Data.Functor.Identity (Identity (..))
 import Data.Int (Int8)
-import Data.Kind (Type)
+import Data.Kind (Constraint, Type)
 import Data.Proxy
-import Data.String (IsString (..))
 import qualified Data.Type.Nat as F
 import Data.Word (Word8)
 import Internal.THUtil
-import Prettyprinter as D
 
 -- | A class to control looping structure. The methods are not supposed to be used directly, but via derived forms.
 --
@@ -282,13 +276,6 @@ instance Monad (DefM exp) where
 -- >   def fdef >>>
 -- >   def gdef $
 -- >   ... f ... g ...
---
--- An instance of @RecM (Tip t) m@ is @RecM (Tip (f a)) (DefM f)@.
-letr1 :: (RecM (Tip t) m) => (t -> m (t, r)) -> m r
-letr1 h = letr $ \(Tip a) -> do
-  (a', r) <- h a
-  pure (Tip a', r)
-
 letr1Raw :: (Defs f) => (f a -> DefM f (f a, r)) -> DefM f r
 letr1Raw h = DefM $ \k -> letrD $ \a -> unDefM (h a) $ \(b, r) -> consD b (k r)
 
@@ -304,19 +291,16 @@ someD d = local $ letr1Raw $ \m -> letr1Raw $ \s ->
       return s
 
 -- | 'share's computation.
-share :: (RecM a m) => a -> m a
+share :: (RecM f m, RecArg f a, Parametric m) => a -> m a
 share s =
   -- letrec x = e in x where x doesn't belong to fv(e)
   letr $ \x -> pure (s, x)
 
 -- share1 :: RecM (f a) m => f a -> m (f a)
 
--- | share1 is a spacial case of 'share'. One can think that @r ~ f a@
--- and @m@ must a monad obtained by applying certain monad transformers
--- to @DefM f@.
-share1 :: (RecM (Tip r) m) => r -> m r
-share1 s =
-  letr $ \(Tip x) -> pure (Tip s, x)
+-- | share1 is a spacial case of 'share'.
+share1 :: (RecM f m) => f a -> m (f a)
+share1 s = letr1 $ \x -> pure (s, x)
 
 -- | Makes definions to be 'local'.
 --
@@ -333,62 +317,68 @@ def :: (Functor f) => a -> f b -> f (a, b)
 def a = fmap (a,)
 {-# INLINE def #-}
 
--- | A class that provides a generalized version 'letr' of 'letr1'
---
--- One can think this as an argument resticted version of 'mfix'. See
--- 'mfixDefM'. 'letr' provides a building block for various @a@ and @m@
--- of @(a -> m a) -> m a@. Instances of this typeclass are responsible for
--- the @m@ part. For the @a@ part, 'RecArg' is responsible via the instance
--- @(RecArg f t) => RecM t (DefM f)@.
-class (Monad m) => RecM t m where
-  letr :: (t -> m (t, r)) -> m r
+-- | A class that provides a monad generalized version 'letr1' of 'letr1Raw'
+class (Monad m, Defs f) => RecM f m | m -> f where
+  letr1 :: (f a -> m (f a, r)) -> m r
 
-instance (RecArg f t) => RecM t (DefM f) where
-  letr = letrDefM
+instance (Defs f) => RecM f (DefM f) where
+  letr1 = letr1Raw
 
+-- | Instance for the lazy 'LState.StateT'.
 instance (RecM t m) => RecM t (LState.StateT s m) where
-  letr f = LState.StateT $ \state -> do
-    letr $ \a -> do
+  letr1 f = LState.StateT $ \state -> do
+    letr1 $ \a -> do
       ((a', r), state') <- LState.runStateT (f a) state
       pure (a', (r, state'))
 
+-- | Instance for the strict 'SState.StateT'.
 instance (RecM t m) => RecM t (SState.StateT s m) where
-  letr f = SState.StateT $ \state -> do
-    letr $ \a -> do
+  letr1 f = SState.StateT $ \state -> do
+    letr1 $ \a -> do
       ((a', r), state') <- SState.runStateT (f a) state
       pure (a', (r, state'))
 
 instance (RecM t m) => RecM t (ReaderT s m) where
-  letr f = ReaderT $ \state -> letr $ \a -> runReaderT (f a) state
+  letr1 f = ReaderT $ \state -> letr1 $ \a -> runReaderT (f a) state
 
+-- | Instance for the lazy 'LWriter.WriterT'.
 instance (RecM t m, Monoid w) => RecM t (LWriter.WriterT w m) where
-  letr f = LWriter.WriterT $ do
-    letr $ \a -> do
+  letr1 f = LWriter.WriterT $ do
+    letr1 $ \a -> do
       ((a', r), w) <- LWriter.runWriterT (f a)
       pure (a', (r, w))
 
+-- | Instance for the strict 'SWriter.WriterT'.
 instance (RecM t m, Monoid w) => RecM t (SWriter.WriterT w m) where
-  letr f = SWriter.WriterT $ do
-    letr $ \a -> do
+  letr1 f = SWriter.WriterT $ do
+    letr1 $ \a -> do
       ((a', r), w) <- SWriter.runWriterT (f a)
       pure (a', (r, w))
 
--- | A class to define what kind of @a@ for which we can define
--- @letr :: (a -> m a) -> m a@. This typeclass focuses on the
--- case where @m ~ DefM f@ because other cases are handled by
--- 'RecM'. Very roughly speaking, @a@ must be a product-like
--- datatype of types of the form of @f ai@ for some @ai@.
+-- | A constraint to ensures that @f@'s parameter is representational; i.e.,
+-- @f@ is parametric for its argument.
 --
--- Due the restriction of Haskell's type inference, this module
--- does not provide an instance @RecArg f (f a)@, which should
--- serve as the base case of instance declarations. Instead, this
--- module provides an instance @RecArg f (Identity (f a))@. Thus,
--- in practice, an user needs to define an instance for the user's
--- own expression type @F@ by using @DerivingVia@, as:
+-- Taken from https://stackoverflow.com/a/56894434. It seems that the original
+-- idea is seen in https://mail.haskell.org/pipermail/ghc-devs/2014-May/004974.html
+type Parametric f = (forall a b. ((Coercible a b) => Coercible (f a) (f b)) :: Constraint)
+
+-- | A class to define what kind of @a@ for which we have 'letr1'. Very roughly
+-- speaking, @a@ must be a product-like datatype of types of the form of @f ai@
+-- for some @ai@.
+--
+-- Due the restriction of Haskell's type inference, this module does not provide
+-- an instance @RecArg f (f a)@, which should serve as the base case of instance
+-- declarations. Instead, this module provides instances @RecArg f (Tip (f a))@
+-- and @RecArg f (Identity (f a))@. Thus, in practice, an user needs to define
+-- an instance for the user's own expression type @F@ by using @DerivingVia@,
+-- as:
 --
 -- > deriving via Identity (F a) instance RecArg F (F a)
-class RecArg f t where
-  letrDefM :: (t -> DefM f (t, r)) -> DefM f r
+--
+-- __Note__: This use of @DerivingVia@ requires @QuantifiedConstraints@ due to
+-- the 'Parametric' constraint of 'letr'.
+class (Defs f) => RecArg f t where
+  letr :: (RecM f m, Parametric m) => (t -> m (t, r)) -> m r
 
 -- | A variant of 'mfix'. This function is supported to be used as:
 
@@ -399,40 +389,42 @@ class RecArg f t where
 --  >         b <- share $ ... a ... b ...
 --  >     ...
 --  >   where mfix = mfixDefM
-mfixDefM :: (RecM a m) => (a -> m a) -> m a
+mfixDefM :: (RecArg f a, RecM f m, Parametric m) => (a -> m a) -> m a
 mfixDefM f = letr $ \a -> (,a) <$> f a
 
-instance RecArg f () where
-  letrDefM f = snd <$> f ()
+instance (Defs f) => RecArg f () where
+  letr f = snd <$> f ()
 
+-- | A restricted version of 'Identity'. This type constructor is used for the
+-- base case (and hence "tip") of 'RecArg f' instances.
 newtype Tip a = Tip {unTip :: a}
 
 instance (Defs f) => RecArg f (Tip (f a)) where
-  letrDefM :: forall r. (Tip (f a) -> DefM f (Tip (f a), r)) -> DefM f r
-  letrDefM = coerce (letr1Raw :: (f a -> DefM f (f a, r)) -> DefM f r)
+  letr :: forall r m. (RecM f m, Parametric m) => (Tip (f a) -> m (Tip (f a), r)) -> m r
+  letr = coerce (letr1 @f @m @a @r)
 instance (Defs f) => RecArg f (Identity (f a)) where
-  letrDefM :: forall r. (Identity (f a) -> DefM f (Identity (f a), r)) -> DefM f r
-  letrDefM = coerce (letr1Raw :: (f a -> DefM f (f a, r)) -> DefM f r)
+  letr :: forall r m. (RecM f m, Parametric m) => (Identity (f a) -> m (Identity (f a), r)) -> m r
+  letr = coerce (letr1 @f @m @a @r)
 
 instance (RecArg f a, RecArg f b) => RecArg f (a, b) where
-  letrDefM f = letrDefM $ \b -> letrDefM $ \a -> do
+  letr f = letr $ \b -> letr $ \a -> do
     ((a', b'), r) <- f (a, b)
     return (a', (b', r))
 instance (RecArg m a, RecArg m b, RecArg m c) => RecArg m (a, b, c) where
-  letrDefM f = letrDefM $ \c -> letrDefM $ \b -> letrDefM $ \a -> do
+  letr f = letr $ \c -> letr $ \b -> letr $ \a -> do
     ((a', b', c'), r) <- f (a, b, c)
     return (a', (b', (c', r)))
 
 instance (RecArg m a, RecArg m b, RecArg m c, RecArg m d) => RecArg m (a, b, c, d) where
-  letrDefM f = letrDefM $ \ ~(c, d) -> letrDefM $ \ ~(a, b) -> do
+  letr f = letr $ \ ~(c, d) -> letr $ \ ~(a, b) -> do
     ((a', b', c', d'), r) <- f (a, b, c, d)
     return ((a', b'), ((c', d'), r))
 
 -- Use template haskell to generate instances for n-tuples
 $(concat <$> sequence [genTupleArgDecl i [t|RecArg|] | i <- [5 .. 32]])
 
-instance RecArg f (HList g '[]) where
-  letrDefM f = do
+instance (Defs f) => RecArg f (HList g '[]) where
+  letr f = do
     (_, r) <- f HNil
     pure r
 
@@ -440,7 +432,7 @@ instance
   (RecArg f a, RecArg f (HList Identity as)) =>
   RecArg f (HList Identity (a : as))
   where
-  letrDefM f = letrDefM $ \a -> letrDefM $ \as -> do
+  letr f = letr $ \a -> letr $ \as -> do
     (res, r) <- f (HCons (Identity a) as)
     case res of
       HCons (Identity v) vs ->
@@ -452,7 +444,7 @@ instance
 -- >   def (fdef k1) >>> ... >>> def (fdef kn) $ do
 -- >   let f k = fromJust $ lookup k [(k1,f1), ..., (kn,fn)]
 -- >   r
-letrs :: (Eq k, RecM a f) => [k] -> ((k -> a) -> f (k -> a, r)) -> f r
+letrs :: (Eq k, RecM f m, RecArg f a, Parametric m) => [k] -> ((k -> a) -> m (k -> a, r)) -> m r
 letrs [] h = snd <$> h (const $ error "Defs.letrs: out of bounds")
 letrs (k : ks) h = letr $ \fk -> letrs ks $ \f -> do
   (f', r) <- h $ \x -> if x == k then fk else f x
@@ -461,18 +453,20 @@ letrs (k : ks) h = letr $ \fk -> letrs ks $ \f -> do
 -- | A newtype wrapper for Bounded types. A typical use is an instance declaration such as:
 --
 -- > deriving via (FromBounded YourType -> a) instance (RecArg f a) => RecArg f (YourType -> a)
+--
+-- __Note__: This use requires @QuantifiedConstraints@.
 newtype FromBounded b = FromBounded {getBounded :: b}
   deriving newtype (Eq, Ord, Enum, Bounded, Num, Real, Integral, Show)
 
 letrsB ::
-  (Eq b, Enum b, Bounded b, RecM a m) =>
+  (Eq b, Enum b, Bounded b, RecM f m, RecArg f a, Parametric m) =>
   ((b -> a) -> m (b -> a, r))
   -> m r
 -- FIXME: we should consider using binary search
 letrsB = letrs [minBound .. maxBound]
 
 instance (Eq b, Enum b, Bounded b, RecArg f a) => RecArg f (FromBounded b -> a) where
-  letrDefM = letrsB
+  letr = letrsB
 
 -- Instances of RecArg (b -> a) for concrete bounded types b.
 
@@ -484,65 +478,3 @@ deriving via (FromBounded (F.Fin n) -> a) instance (RecArg f a, F.SNatI k, F.S k
 
 deriving via (b -> a) instance (RecArg f (b -> a)) => RecArg f (Identity b -> a)
 deriving via (b -> a) instance (RecArg f (b -> a)) => RecArg f (Const b x -> a)
-
-{-# WARNING VarM "This class will be removed soon. Use 'EbU' library for pretty-printing" #-}
-
--- | Monads for managing variable names
-class (Monad m) => VarM m where
-  -- | A new variable name, which may or may not differ in calls.
-  --   For de Bruijn levels, use the Reader monad and define
-  --
-  --   >  newVar = do {i <- ask ; return ("x" ++ show i ) }
-  --
-  --   Just for using different names, use the State monad and define
-  --
-  --   >  newVar = do { i <- get ; put (i + 1) ; return ("x" ++ show i) }
-  --
-  --   This representation does not cover de Bruijn indices; we do not support them.
-  newVar :: m String
-
-  -- | +1 to the nesting level. This is just identity if ones to assign different names for different variables.
-  nestScope :: m a -> m a
-
-type Precedence = Int
-
--- | A general pretty-printer for 'Defs' methods. Use different @m@ printing different HOAS, to avoid overlapping instance.
-{-# WARNING PprExp "To be removed" #-}
-
-newtype PprExp m ann _a = PprExp {pprExp :: Precedence -> m (D.Doc ann)}
-
-pattern PprExpN :: (Precedence -> m (D.Doc ann)) -> Norm (PprExp m ann) a
-pattern PprExpN a = Norm (PprExp a)
-
-pprExpN :: Norm (PprExp m ann) a -> Precedence -> m (D.Doc ann)
-pprExpN = pprExp . unNorm
-
-instance (VarM m) => NDefs (PprExp m ann) where
-  newtype ND (PprExp m ann) _as _a = PDefs {pdefs :: [String] -> Precedence -> m (D.Doc ann)}
-
-  defN exps r = PDefs $ \xs k -> do
-    bs <- D.vcat <$> go xs exps
-    dr <- pprExp r 0
-
-    pure $
-      parensIf (k > 0) $
-        D.align $
-          D.vcat
-            [ "let" D.<+> D.align bs
-            , "in" D.<+> dr
-            ]
-    where
-      parensIf b = if b then D.parens else id
-      go :: [String] -> HList (PprExp m ann) as -> m [D.Doc ann]
-      go _ HNil = pure []
-      go (x : xs) (HCons e es) = do
-        de <- pprExp e 0
-        res <- go xs es
-        pure $ (fromString x D.<+> "=" D.<+> D.align de) : res
-      go _ _ = error "Unreachable"
-
-  localN d = PprExp $ \k ->
-    pdefs d [] k
-  letrN h = PDefs $ \xs k -> do
-    x <- newVar
-    nestScope $ pdefs (h (PprExp $ \_ -> pure $ fromString x)) (x : xs) k

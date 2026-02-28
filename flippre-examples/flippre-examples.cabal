@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name: flippre-examples
-version: 0.2.0
+version: 0.3.0
 synopsis: Examples of flippre
 -- description:
 -- The license under which the package is released.
