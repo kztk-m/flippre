@@ -20,11 +20,12 @@
 import Exp
 import Helper
 import Prettyprinter (Doc)
-import Text.FliPpr
-import Text.FliPpr.Grammar.Driver.Earley as E
 import TypeSpecifier
 import Types
 import Prelude
+
+import Text.FliPpr
+import Text.FliPpr.Grammar.Driver.Earley as E
 
 type Program = [ExternalDeclaration]
 
@@ -94,10 +95,10 @@ $(mkUn ''Maybe)
 
 pprDeclaration ::
   (FliPprD a e) =>
-  (A a [DeclarationSpecifier] -> E e D) ->
-  (A a Declarator -> E e D) ->
-  (A a Exp -> E e D) ->
-  FliPprM e (A a Declaration -> E e D)
+  (A a [DeclarationSpecifier] -> E e D)
+  -> (A a Declarator -> E e D)
+  -> (A a Exp -> E e D)
+  -> FliPprM e (A a Declaration -> E e D)
 pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp = do
   rec pDeclaration <- share $ \x ->
         case_ x [unDeclaration $ \d i -> pDeclarationSpecifierList d <> pInitDeclList i <> text ";"]
@@ -123,11 +124,11 @@ pprDeclaration pDeclarationSpecifierList pDeclarator pAssignmentExp = do
 
 pprFunDef ::
   (FliPprD a e) =>
-  (A a CompoundStatement -> E e D) ->
-  (A a Declarator -> E e D) ->
-  (A a (NonEmpty DeclarationSpecifier) -> E e D) ->
-  (A a (NonEmpty Declaration) -> E e D) ->
-  FliPprM e (A a FunctionDefinition -> E e D)
+  (A a CompoundStatement -> E e D)
+  -> (A a Declarator -> E e D)
+  -> (A a (NonEmpty DeclarationSpecifier) -> E e D)
+  -> (A a (NonEmpty Declaration) -> E e D)
+  -> FliPprM e (A a FunctionDefinition -> E e D)
 pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDeclarationList = do
   -- seperated into 3 different functions to get spacing right
   pFunDef2 <- share $ \c ->
@@ -156,9 +157,9 @@ pprFunDef pCompoundStatement pDeclarator pDeclarationSpecifierListNonEmpty pDecl
 
 pprLabeledStatement ::
   (FliPprD a e) =>
-  (A a Exp -> E e D) ->
-  (A a Statement -> E e D) ->
-  FliPprM e (A a LabeledStatement -> E e D)
+  (A a Exp -> E e D)
+  -> (A a Statement -> E e D)
+  -> FliPprM e (A a LabeledStatement -> E e D)
 pprLabeledStatement pCondExp pStatement = share $ \x ->
   case_
     x
@@ -175,9 +176,9 @@ pprLabeledStatement pCondExp pStatement = share $ \x ->
 
 pprCompoundStatement ::
   (FliPprD a e) =>
-  (A a (NonEmpty Declaration) -> E e D) ->
-  (A a [Statement] -> E e D) ->
-  FliPprM e (Bool -> A a CompoundStatement -> E e D)
+  (A a (NonEmpty Declaration) -> E e D)
+  -> (A a [Statement] -> E e D)
+  -> FliPprM e (Bool -> A a CompoundStatement -> E e D)
 pprCompoundStatement pDeclarationList pStatementList = do
   return $ \withinSwitch x ->
     case_
@@ -186,16 +187,15 @@ pprCompoundStatement pDeclarationList pStatementList = do
           text "{"
             <> nest
               (if withinSwitch then 8 else 4)
-              ( case_ d [unNothing $ text "", unJust $ \l -> line' <> pDeclarationList l] <> pStatementList s
-              )
+              (case_ d [unNothing $ text "", unJust $ \l -> line' <> pDeclarationList l] <> pStatementList s)
               </>. text "}"
       ]
 
 pprSelectionStatement ::
   (FliPprD a e) =>
-  (A a Exp -> E e D) ->
-  (Bool -> Bool -> A a Statement -> E e D) ->
-  FliPprM e (A a SelectionStatement -> E e D)
+  (A a Exp -> E e D)
+  -> (Bool -> Bool -> A a Statement -> E e D)
+  -> FliPprM e (A a SelectionStatement -> E e D)
 pprSelectionStatement pExp pStatement = share $ \x ->
   case_
     x
@@ -218,9 +218,9 @@ pprSelectionStatement pExp pStatement = share $ \x ->
 
 pprIterationStatement ::
   (FliPprD a e) =>
-  (A a Statement -> E e D) ->
-  (A a Exp -> E e D) ->
-  FliPprM e (A a IterationStatement -> E e D)
+  (A a Statement -> E e D)
+  -> (A a Exp -> E e D)
+  -> FliPprM e (A a IterationStatement -> E e D)
 pprIterationStatement pStatement pExp = share $ \x ->
   case_
     x
@@ -250,8 +250,8 @@ pprIterationStatement pStatement pExp = share $ \x ->
 
 pprJumpStatement ::
   (FliPprD a e) =>
-  (A a Exp -> E e D) ->
-  FliPprM e (A a JumpStatement -> E e D)
+  (A a Exp -> E e D)
+  -> FliPprM e (A a JumpStatement -> E e D)
 pprJumpStatement pExp = share $ \x ->
   case_
     x
@@ -320,15 +320,43 @@ pprProgram = do
 test :: String
 test = "int main ( ) { callSomeFunction(); label: if (true) goto label; return 0; }"
 
+testExp :: String
+testExp = "0"
+
+pExp :: (FliPprD a e) => FliPprM e (A a Exp -> E e D)
+pExp = do
+  rec (pExp, pCondExp, pAssignmentExp) <- pprExp pTypeName
+      (pTypeName, pDecl, pDeclSpecList, pDeclSpecListNonEmpty) <- pprTypes pCondExp
+  return pExp
+
+printExp :: Exp -> Doc ann
+printExp = pprMode (flippr $ fromFunction <$> pExp)
+
 printProgram :: Program -> Doc ann
 printProgram = pprMode (flippr $ fromFunction <$> pprProgram)
 
 parseProgram :: [Char] -> Err ann [Program]
 parseProgram = E.parse $ parsingModeWith (CommentSpec (Just "//") (Just (BlockCommentSpec "/*" "*/" False))) (flippr $ fromFunction <$> pprProgram)
 
+parseExp :: String -> Err ann [Exp]
+parseExp = E.parse $ parsingMode (flippr $ fromFunction <$> pExp)
+
 testPrint :: IO ()
 testPrint = do
-  let (Ok parsed) = parseProgram test
-  putStrLn $ "Parsed: " ++ show parsed
-  mapM_ (print . printProgram) parsed
-  putStrLn $ "Done, parsed " ++ show (length parsed) ++ " programs"
+  case parseExp testExp of
+    Ok parsed -> do
+      putStrLn $ "Parsed: " ++ show parsed
+      mapM_ (print . printExp) parsed
+      putStrLn $ "Done, parsed " ++ show (length parsed) ++ " programs"
+    Fail s -> do
+      putStrLn "Parse error."
+      print s
+
+-- testPrint = do
+--   let (Ok parsed) = parseProgram test
+--   putStrLn $ "Parsed: " ++ show parsed
+--   mapM_ (print . printProgram) parsed
+--   putStrLn $ "Done, parsed " ++ show (length parsed) ++ " programs"
+
+main :: IO ()
+main = testPrint
