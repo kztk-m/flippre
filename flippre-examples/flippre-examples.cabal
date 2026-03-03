@@ -102,3 +102,5 @@ executable c-simple
   build-depends:
     criterion,
     prettyprinter,
+
+  ghc-options: -rtsopts
