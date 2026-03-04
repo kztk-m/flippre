@@ -286,13 +286,13 @@ instance (Repr s v r) => Repr s v (In v a -> r) where
   toFunction f a = toFunction (f `App` a)
   fromFunction k = Lam (fromFunction . k)
 
-deriving via D.Tip (Exp s v a) instance (Phased s) => D.RecArg (Exp s v) (Exp s v a)
+deriving via D.Tip (Exp s v a) instance (Phased s, s ~ s') => D.RecArg (Exp s v) (Exp s' v a)
 
 -- One-level unfolding to avoid overlapping instances.
-instance (v ~ v', Phased s, Repr s v r) => D.RecArg (Exp s v) (In v a -> r) where
+instance (v ~ v', Phased s, Repr s v r) => D.RecArg (Exp s v) (In v' a -> r) where
   letr f = D.letr $ fmap (first fromFunction) . f . toFunction
 
-deriving newtype instance (Phased s) => D.RecM (Exp s v) (FliPprM s v)
+deriving newtype instance (Phased s, s ~ s') => D.RecM (Exp s v) (FliPprM s' v)
 
 -- | To print FliPpr expressions themselves.
 data ToPrint
