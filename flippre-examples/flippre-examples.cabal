@@ -126,3 +126,10 @@ executable c
     Literals
     TypeSpecifier
     Types
+
+executable c-simple
+  import: warnings, deps
+  main-is: CSimple.hs
+  build-depends:
+    criterion,
+    prettyprinter,
