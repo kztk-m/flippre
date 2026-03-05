@@ -11,9 +11,10 @@ module Text.FliPpr.Grammar.Simplify (simplify) where
 
 import Control.Applicative (Alternative (..), Const (..))
 import Data.Maybe (mapMaybe)
-import Data.Monoid (Endo (..))
+import Data.Monoid (Endo (..), Sum (..))
 import Data.RangeSet.List (RSet)
 import qualified Data.RangeSet.List as RS
+
 import Defs
 import Text.FliPpr.Grammar.Flatten (flatten)
 import qualified Text.FliPpr.Grammar.Internal.Map2 as M2
@@ -54,7 +55,7 @@ removeNonProductive (FlatGrammar (defs :: Env (RHS c env0) env0) rhs) =
           if cntTrue mp' > cntTrue mp then check mp' else mp'
       where
         cntTrue :: M2.Map2 k (Const Bool) -> Int
-        cntTrue m = appEndo (getConst $ M2.traverseMap2 (\(Const b) -> Const $ Endo (\x -> if b then x + 1 else x)) m) 0
+        cntTrue m = getSum $ M2.foldMap2' (\(Const b) -> Sum (if b then 1 else 0)) m
 
     procRHS :: RHS c env0 a -> RHS c env0 a
     procRHS (MkRHS rs) = MkRHS $ mapMaybe procProd rs

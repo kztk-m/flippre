@@ -18,16 +18,17 @@ module Text.FliPpr.Grammar.Internal.Map2 (
   fromAscList,
   traverseMap2,
   mapMap2,
+  foldMap2',
 ) where
-
-import Prelude hiding (lookup)
 
 -- import Data.Container2
 
 import Data.Functor.Identity (Identity (..))
 import Data.Typeable ((:~:) (..))
-import Text.FliPpr.Grammar.Types (Ix (..), IxN (..))
 import Unsafe.Coerce (unsafeCoerce)
+import Prelude hiding (lookup)
+
+import Text.FliPpr.Grammar.Types (Ix (..), IxN (..))
 
 data Ordering2 a b where
   LT2 :: Ordering2 a b
@@ -172,6 +173,7 @@ instance (Ord2 k1, Eq2 k2) => Eq (Map2 k1 k2) where
               _ -> False
           _ -> False
 
+{-# SPECIALIZE traverseMap2 :: (forall a. f a -> Identity (g a)) -> Map2 k f -> Identity (Map2 k g) #-}
 traverseMap2 :: (Applicative m) => (forall a. f a -> m (g a)) -> Map2 k f -> m (Map2 k g)
 traverseMap2 _ Leaf = pure Leaf
 traverseMap2 f (Node c (Entry y v) l1 l2) =
@@ -179,6 +181,14 @@ traverseMap2 f (Node c (Entry y v) l1 l2) =
 
 mapMap2 :: (forall a. f a -> g a) -> Map2 k f -> Map2 k g
 mapMap2 f = runIdentity . traverseMap2 (Identity . f)
+
+foldMap2' :: (Monoid m) => (forall a. f a -> m) -> Map2 k f -> m
+foldMap2' f = go mempty
+  where
+    go m Leaf = m
+    go m (Node _ (Entry _ v) l1 l2) =
+      let m' = m <> f v
+      in  m' `seq` go (go m' l1) l2
 
 -- instance (Ord2 k1) => Container2 (Map2 k1) where
 --   traverse2 _ Leaf = pure Leaf
