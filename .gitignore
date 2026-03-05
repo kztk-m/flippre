@@ -1,9 +1,11 @@
 .stack-work 
 *.yaml.lock
-*.prof
-*.profiterole.txt
-*.profiterole.html
-*.hp
+/*.prof
+/*.profiterole.txt
+/*.profiterole.html
+/*.hp
+/*.eventlog
+/*.eventlog.html
 /*.svg 
 dist-newstyle
 hie.yaml
