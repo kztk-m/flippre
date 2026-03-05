@@ -34,19 +34,17 @@ module Text.FliPpr.Grammar.Types (
   UE.lookEnv,
 ) where
 
-import Data.RangeSet.List (RSet)
-import qualified Data.RangeSet.List as RS
-
 import Control.Applicative (Alternative (..))
-import Defs (Defs (..))
-
-import qualified Unembedding.Env as UE
-
 import Data.Coerce (coerce)
 import qualified Data.List.Split as Sp
+import Data.RangeSet.List (RSet)
+import qualified Data.RangeSet.List as RS
 import Data.String (IsString (..))
 import qualified Prettyprinter as PP
+import qualified Unembedding.Env as UE
 import Unsafe.Coerce (unsafeCoerce)
+
+import Defs (Defs (..))
 
 class FromSymb c e | e -> c where
   -- | A production of a given single char.
@@ -67,11 +65,7 @@ type GrammarD c e = (Defs e, Grammar c e)
 newtype IxN (env :: [k]) (a :: k) = IxN Word deriving stock Show
 
 fromIx :: UE.Ix env a -> IxN env a
-fromIx x0 = IxN (go x0 0)
-  where
-    go :: UE.Ix env' a' -> Word -> Word
-    go UE.IxZ r = r
-    go (UE.IxS x) r = go x $! r + 1
+fromIx x0 = IxN (UE.ixToWord x0)
 
 toIx :: IxN env a -> UE.Ix env a
 toIx (IxN n0) = go n0 UE.IxZ unsafeCoerce
