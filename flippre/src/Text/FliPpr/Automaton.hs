@@ -278,8 +278,9 @@ determinizeImpl (NFANE is fs tr) = go [is] S.empty M.empty
         insert cs qs ((cs', qs') : rest)
           | RS.null cs = (cs', qs') : rest
           | RS.null csCommon = (cs', qs') : insert cs qs rest
-          | otherwise = (cs1, qs) : (csCommon, S.union qs qs') : (cs2, qs') : insert cs1 qs rest
+          | otherwise = consNonNull csCommon (S.union qs qs') $ consNonNull cs2 qs' $ insert cs1 qs rest
           where
+            consNonNull r t = if RS.null r then id else ((r, t) :)
             csCommon = RS.intersection cs cs'
             cs1 = RS.difference cs cs'
             cs2 = RS.difference cs' cs
