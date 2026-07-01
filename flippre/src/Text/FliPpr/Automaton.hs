@@ -19,23 +19,20 @@ module Text.FliPpr.Automaton (
 )
 where
 
-import Data.RangeSet.List (RSet)
-import qualified Data.RangeSet.List as RS
-
+import Control.Arrow (second)
+import Control.Monad.Writer
+import Data.Bifunctor (bimap)
 import Data.Function (on)
 import qualified Data.Graph as Graph
+import qualified Data.List
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Monoid (Any (..))
+import Data.RangeSet.List (RSet)
+import qualified Data.RangeSet.List as RS
 import qualified Data.Set as S
-
 import Data.String (IsString (..))
-
-import Control.Arrow (second)
-import Control.Monad.Writer
-import Data.Bifunctor (bimap)
-
 import Prettyprinter as PP
 
 -- import           Debug.Trace
@@ -50,27 +47,42 @@ data NFANE c q
   -- ^ transitions
   }
 
-pprRSet :: (Eq c, Show c) => RSet c -> Doc ann
-pprRSet = PP.brackets . go . RS.toRangeList
+isLikelyComplementForm :: (Ord a, Bounded a) => RSet a -> Bool
+isLikelyComplementForm rs = RS.member minBound rs || RS.member minBound rs
+
+pprRSet :: (Ord c, Enum c, Bounded c, Show c) => RSet c -> Doc ann
+pprRSet rs
+  | RS.isFull rs = "ANY"
+  | isLikelyComplementForm rs = PP.brackets $ "^" <> go (RS.toRangeList $ RS.complement rs)
+  | otherwise = PP.brackets $ go (RS.toRangeList rs)
   where
     go [] = mempty
     go ((a, a') : r)
       | a == a' = fromString (show a) <> go r
       | otherwise = fromString (show a) <> "-" <> fromString (show a') <> go r
 
-pprTr :: (Show q, Eq c, Show c) => [(q, [(RSet c, q)])] -> Doc ann
+pprTr :: (Show q, Ord c, Enum c, Bounded c, Show c) => [(q, [(RSet c, q)])] -> Doc ann
 pprTr =
   PP.hcat
     . PP.punctuate (";" <> PP.line)
     . map
       ( \(q, dsts) ->
-          PP.hsep [fromString (show q), "->", PP.group $ PP.align $ PP.hcat $ PP.punctuate (PP.line <> "|" PP.<+> mempty) $ map (\(cs, q') -> PP.hsep [pprRSet cs, fromString (show q')]) dsts]
+          let (dstsN, dstsP) = Data.List.partition (isLikelyComplementForm . fst) dsts
+          in  PP.hsep
+                [ fromString (show q)
+                , "->"
+                , PP.group $
+                    PP.align $
+                      PP.hcat $
+                        PP.punctuate (PP.line <> "|" PP.<+> mempty) $
+                          map (\(cs, q') -> PP.hsep [pprRSet cs, fromString (show q')]) (dstsP ++ dstsN)
+                ]
       )
 
-pprTrMap :: (Show q, Eq c, Show c) => M.Map q [(RSet c, q)] -> Doc ann
+pprTrMap :: (Show q, Ord c, Enum c, Bounded c, Show c) => M.Map q [(RSet c, q)] -> Doc ann
 pprTrMap = pprTr . M.toList
 
-instance (Show q, Eq c, Show c) => Pretty (NFANE c q) where
+instance (Show q, Ord c, Enum c, Bounded c, Show c) => Pretty (NFANE c q) where
   pretty (NFANE is fs tr) =
     PP.vsep
       [ "Initial(s):" PP.<+> fromString (show is)
@@ -82,7 +94,7 @@ data NFA c q
   = -- | a pair of NFA without epsilon rules, and epsilon rules.
     NFA (NFANE c q) (M.Map q [q])
 
-instance (Show q, Eq c, Show c) => Pretty (NFA c q) where
+instance (Show q, Ord c, Enum c, Bounded c, Show c) => Pretty (NFA c q) where
   pretty (NFA (NFANE is fs tr) eps) =
     PP.vsep
       [ "Initial(s):" PP.<+> fromString (show is)
@@ -107,7 +119,7 @@ data DFAImpl c q
   -- ^ transitions
   }
 
-instance (Show q, Eq c, Show c) => Pretty (DFAImpl c q) where
+instance (Show q, Ord c, Enum c, Bounded c, Show c) => Pretty (DFAImpl c q) where
   pretty (DFAImpl i0 qs fs tr) =
     PP.vsep
       [ "State(s):" PP.<+> fromString (show qs)
