@@ -501,39 +501,41 @@ instance (Bounded c, Enum c, Ord c) => Regex c (DFA c) where
     let DFAImpl i qs fs tr = complete a
     in  DFAImpl i qs (S.difference qs fs) tr
 
--- >>> D.ppr $ (star (singleton 'a' <> singleton 'b') :: DFA Char)
+-- >>> PP.pretty $ (star (singleton 'a' <> singleton 'b') :: DFA Char)
+-- State(s): fromList [0,1]
 -- Initial:  0
 -- Final(s): fromList [0]
 -- Transition(s): 0 -> ['a'] 1; 1 -> ['b'] 0
 
--- >>> D.ppr $ (fromString "a" `union` fromString "b" :: DFA Char)
--- Initial:  2
--- Final(s): fromList [0]
--- Transition(s):
--- 0 -> ;
--- 2 -> ['\NUL'-'`''c'-'\1114111'] 4 | ['a'-'b'] 0;
--- 4 -> ['\NUL'-'\1114111'] 4
+-- >>> PP.pretty $ (fromString "a" `union` fromString "b" :: DFA Char)
+-- State(s): fromList [2,4,6]
+-- Initial:  4
+-- Final(s): fromList [2]
+-- Transition(s): 2 -> ANY 6; 4 -> ['a'-'b'] 2 | [^'a'-'b'] 6; 6 -> ANY 6
 
--- >>> D.ppr $ (star (fromRSet (RS.singletonRange ('a', 'z'))) :: DFA Char)
+-- >>> PP.pretty $ (star (fromRSet (RS.singletonRange ('a', 'z'))) :: DFA Char)
+-- State(s): fromList [0]
 -- Initial:  0
 -- Final(s): fromList [0]
 -- Transition(s): 0 -> ['a'-'z'] 0
--- >>> D.ppr (complement (fromString "let") :: DFA Char)
+-- >>> PP.pretty (complement (fromString "let") :: DFA Char)
+-- State(s): fromList [0,1,2,3,4]
 -- Initial:  3
 -- Final(s): fromList [0,2,3,4]
 -- Transition(s):
--- 0 -> ['\NUL'-'\1114111'] 0;
--- 1 -> ;
--- 2 -> ['\NUL'-'d''f'-'\1114111'] 0 | ['e'] 4;
--- 3 -> ['\NUL'-'k''m'-'\1114111'] 0 | ['l'] 2;
--- 4 -> ['\NUL'-'s''u'-'\1114111'] 0 | ['t'] 1
+-- 0 -> ANY 0;
+-- 1 -> ANY 0;
+-- 2 -> ['e'] 4 | [^'e'] 0;
+-- 3 -> ['l'] 2 | [^'l'] 0;
+-- 4 -> ['t'] 1 | [^'t'] 0
 
--- >>> D.ppr $ (star (fromRSet (RS.singletonRange ('a', 'z'))) `intersection` complement (fromString "let") :: DFA Char)
--- Initial:  3
--- Final(s): fromList [0,2,3,4]
+-- >>> PP.pretty $ (star (fromRSet (RS.singletonRange ('a', 'z'))) `intersection` complement (fromString "let") :: DFA Char)
+-- State(s): fromList [0,1,2,3,4]
+-- Initial:  2
+-- Final(s): fromList [0,1,2,3]
 -- Transition(s):
--- 0 -> ['a'-'z'] 0;
--- 1 -> ;
--- 2 -> ['a'-'d''f'-'z'] 0 | ['e'] 4;
--- 3 -> ['a'-'k''m'-'z'] 0 | ['l'] 2;
--- 4 -> ['a'-'s''u'-'z'] 0 | ['t'] 1
+-- 0 -> ['a'-'s''u'-'z'] 3 | ['t'] 4;
+-- 1 -> ['a'-'d''f'-'z'] 3 | ['e'] 0;
+-- 2 -> ['a'-'k''m'-'z'] 3 | ['l'] 1;
+-- 3 -> ['a'-'z'] 3;
+-- 4 -> ['a'-'z'] 3
